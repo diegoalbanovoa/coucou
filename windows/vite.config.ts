@@ -45,7 +45,12 @@ function sharedSounds(): Plugin {
 export default defineConfig({
   plugins: [sharedSounds()],
   clearScreen: false,
-  server: { port: 1420, strictPort: true, host: "127.0.0.1" },
+  server: {
+    port: 1420,
+    strictPort: true,
+    host: "127.0.0.1",
+    watch: { ignored: ["**/target/**", "**/src-tauri/**"] },
+  },
   envPrefix: ["VITE_", "TAURI_ENV_"],
   build: {
     target: "chrome110",

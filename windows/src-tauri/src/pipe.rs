@@ -66,13 +66,79 @@ pub fn pipe_name() -> String {
     format!(r"\\.\pipe\coucou-{key}")
 }
 
+/// Builds a DACL naming only this account and SYSTEM and returns its address
+/// as a bare `usize`. `CreateNamedPipe` with no security attributes hands out
+/// the default descriptor, which on Windows grants everyone on the machine
+/// read/write — any other local account could then read hook payloads or
+/// forge `allow`/`deny` replies. A *present* DACL with just these two ACEs
+/// denies every other trustee implicitly, closing that gap; it mirrors the
+/// `peer_cred` uid check the Linux socket path already does.
+///
+/// The descriptor is heap-allocated by Windows and deliberately leaked for
+/// the process lifetime — every pipe instance `start` goes on to create
+/// needs the pointer to still be valid. A bare `usize` (rather than the
+/// `SECURITY_ATTRIBUTES` struct, which holds a raw pointer) is what crosses
+/// the `.await` points below: `tauri::async_runtime::spawn` requires the
+/// future to be `Send`, and a raw pointer isn't.
+#[cfg(windows)]
+fn pipe_security_descriptor() -> Option<usize> {
+    use windows::Win32::Security::Authorization::{
+        ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1,
+    };
+    use windows::Win32::Security::PSECURITY_DESCRIPTOR;
+    use windows::core::PCWSTR;
+
+    let sid = crate::platform::current_user_sid()?;
+    let sddl = format!("D:(A;;GA;;;{sid})(A;;GA;;;SY)");
+    let wide: Vec<u16> = sddl.encode_utf16().chain(std::iter::once(0)).collect();
+    let mut psd = PSECURITY_DESCRIPTOR::default();
+    unsafe {
+        ConvertStringSecurityDescriptorToSecurityDescriptorW(
+            PCWSTR(wide.as_ptr()),
+            SDDL_REVISION_1,
+            &mut psd,
+            None,
+        )
+        .ok()?;
+    }
+    Some(psd.0 as usize)
+}
+
 #[cfg(windows)]
 pub fn start(app: AppHandle) {
     tauri::async_runtime::spawn(async move {
         let name = pipe_name();
+        let psd = pipe_security_descriptor();
+        if psd.is_none() {
+            log::line("could not build the pipe ACL — falling back to the OS default".to_string());
+        }
+        // Safety: `psd`, when present, is the address of a security
+        // descriptor built just above and never freed, so it stays valid for
+        // every `SECURITY_ATTRIBUTES` built from it below.
+        let create = |first: bool| -> std::io::Result<NamedPipeServer> {
+            let mut opts = ServerOptions::new();
+            opts.first_pipe_instance(first);
+            match psd {
+                Some(addr) => {
+                    let mut attrs = windows::Win32::Security::SECURITY_ATTRIBUTES {
+                        nLength: std::mem::size_of::<windows::Win32::Security::SECURITY_ATTRIBUTES>()
+                            as u32,
+                        lpSecurityDescriptor: addr as *mut _,
+                        bInheritHandle: windows::core::BOOL(0),
+                    };
+                    unsafe {
+                        opts.create_with_security_attributes_raw(
+                            &name,
+                            &mut attrs as *mut _ as *mut _,
+                        )
+                    }
+                }
+                None => opts.create(&name),
+            }
+        };
         // first_pipe_instance also means we refuse to join a pipe somebody else
         // already owns under our name, rather than serving on top of it.
-        let mut server = match ServerOptions::new().first_pipe_instance(true).create(&name) {
+        let mut server = match create(true) {
             Ok(s) => s,
             Err(err) => {
                 log::line(format!("cannot open the relay pipe: {err}"));
@@ -85,7 +151,7 @@ pub fn start(app: AppHandle) {
                 continue;
             }
             // Hand the connected instance to a task and listen on a fresh one.
-            let next = match ServerOptions::new().create(&name) {
+            let next = match create(false) {
                 Ok(s) => s,
                 Err(err) => {
                     log::line(format!("cannot reopen the relay pipe: {err}"));
