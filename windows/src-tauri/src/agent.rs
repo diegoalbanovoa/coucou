@@ -483,6 +483,7 @@ pub struct Stream {
     /// Everything emitted as text, in case no `result` line ever arrives.
     text: String,
     result: Option<String>,
+    failed: bool,
 }
 
 impl Stream {
@@ -526,6 +527,12 @@ impl Stream {
             Some("result") => {
                 self.result =
                     value["result"].as_str().map(str::to_string).filter(|s| !s.trim().is_empty());
+                // A turn that ran out of turns, or died inside, says so here
+                // and still leaves the CLI exiting zero. Without this the
+                // island showed "error_max_turns" as if it were the answer.
+                let errored = value["is_error"].as_bool().unwrap_or(false);
+                let subtype = value["subtype"].as_str().unwrap_or("success");
+                self.failed = errored || subtype != "success";
                 Vec::new()
             }
             _ => Vec::new(),
@@ -535,6 +542,12 @@ impl Stream {
     fn keep(&mut self, text: &str) -> Turn {
         self.text.push_str(text);
         Turn::Text { text: text.to_string() }
+    }
+
+    /// Whether the `result` line said the turn failed. The CLI exits zero
+    /// either way, so this is the only thing that tells them apart.
+    pub fn failed(&self) -> bool {
+        self.failed
     }
 
     /// The reply. The `result` line is authoritative; what was streamed is the
@@ -751,7 +764,16 @@ async fn stream_turn(
         return Err(first_chars(detail, 400));
     }
 
-    Ok(first_chars(&stream.finish(), MAX_OUTPUT))
+    // The CLI exited zero, which only means it ran. Whether the turn worked is
+    // what the result line says.
+    let failed = stream.failed();
+    let reply = first_chars(&stream.finish(), MAX_OUTPUT);
+    if failed {
+        // The session is not reset: it is the turn that failed, not the
+        // conversation, and the next message should carry on from here.
+        return Err(first_chars(&reply, 400));
+    }
+    Ok(reply)
 }
 
 /// A turn from a CLI with no streaming output format: one wait, one answer.
@@ -1008,6 +1030,29 @@ mod tests {
         let (_, reply) = turns_of(&lines);
 
         assert_eq!(reply, "Half a sentence.");
+    }
+
+    #[test]
+    fn a_turn_the_cli_says_failed_is_not_a_reply() {
+        // The shape a real `claude -p --output-format stream-json` prints: the
+        // process exits zero either way, so this line is the only difference.
+        let (_, reply) = turns_of(&[
+            r#"{"type":"result","subtype":"error_max_turns","is_error":true,"result":"ran out of turns"}"#,
+        ]);
+        assert_eq!(reply, "ran out of turns");
+
+        let mut stream = Stream::default();
+        stream.line(r#"{"type":"result","subtype":"error_max_turns","is_error":true,"result":"x"}"#);
+        assert!(stream.failed());
+
+        let mut good = Stream::default();
+        good.line(r#"{"type":"result","subtype":"success","is_error":false,"result":"x"}"#);
+        assert!(!good.failed());
+
+        // A result line from a version that says neither is taken at its word.
+        let mut quiet = Stream::default();
+        quiet.line(r#"{"type":"result","result":"x"}"#);
+        assert!(!quiet.failed());
     }
 
     #[test]
