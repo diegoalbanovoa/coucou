@@ -68,11 +68,31 @@ in time, Coucou stays quiet and Claude Code asks in the terminal as usual.
 
 It works from any terminal — Windows Terminal, PowerShell, VS Code, Git Bash.
 
-## Chat and keys
+## Chat
 
-**Settings… → Claude** takes your Anthropic API key. Keys live in the **Windows
-Credential Manager**, never on disk and never in the interface — the island can
-only ask whether a key exists. Same for every integration key.
+The island's chat runs an agent CLI already installed on this machine. No API
+key: the CLI brings your own subscription, your tools, your skills and your
+CLAUDE.md, and because the session it spawns runs your hooks, its permission
+requests come back to the island like any terminal session's.
+
+**Settings… → Agents** lists what was found. Coucou looks on PATH and in the
+folders npm, nvm, Volta, Bun, pnpm and the vendors' own installers use, because
+a CLI installed from a shell is often on that shell's PATH and nowhere Coucou
+can see. The start screen lists the same agents; click one to use it.
+
+Only **Claude Code** streams its reply as it is written, can be resumed, and
+can have its tool calls approved from the island — it is the one whose hooks
+Coucou installs. The others answer one message at a time, which the agent
+picker says rather than hides. `codex`, `cursor-agent`, `qwen` and `opencode`
+are driven the way their own documentation says; of the seven, only `claude`,
+`gemini` and `copilot` have been run from Coucou on a real machine.
+
+**Settings… → Knowledge base** is the Obsidian vault the agent may read and
+write. It is read from Obsidian's own list of vaults, so it usually needs no
+setting at all; pick a folder when Obsidian has none.
+
+Integration keys live in the **Windows Credential Manager**, never on disk and
+never in the interface — the island can only ask whether a key exists.
 
 No telemetry. The only network requests Coucou makes are to the services you
 configure yourself.
