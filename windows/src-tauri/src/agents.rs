@@ -197,7 +197,7 @@ mod tests {
             ..AgentConfig::default()
         };
 
-        assert_eq!(config.dirs(), [real.clone()]);
+        assert_eq!(config.dirs(), [real.clone()][..]);
         let _ = std::fs::remove_dir_all(&real);
     }
 

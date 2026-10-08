@@ -110,7 +110,7 @@ pub fn start(app: AppHandle) {
         let name = pipe_name();
         let psd = pipe_security_descriptor();
         if psd.is_none() {
-            log::line("could not build the pipe ACL — falling back to the OS default".to_string());
+            log::line("could not build the pipe ACL — falling back to the OS default");
         }
         // Safety: `psd`, when present, is the address of a security
         // descriptor built just above and never freed, so it stays valid for

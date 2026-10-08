@@ -147,7 +147,7 @@ mod tests {
             at: 17.5,
             steps: vec!["Read agent.rs".into()],
         };
-        let json = serde_json::to_string(&[with.clone()]).unwrap();
+        let json = serde_json::to_string(std::slice::from_ref(&with)).unwrap();
         assert_eq!(serde_json::from_str::<Vec<Message>>(&json).unwrap(), [with]);
 
         let older = r#"[{"role":"user","content":"hi","at":1}]"#;
