@@ -124,7 +124,16 @@ cargo test             # the Rust backend and the hook
 npm run test           # the island's state machine and hook handling
 ```
 
-`tests/e2e/` is a separate, opt-in suite: it puts the real shell folder
+Two suites stay out of `cargo test`, because what they need is a real world.
+
+`cargo test --lib live_agent -- --ignored` runs actual turns through the agent
+CLI: that the flags are accepted, that the output comes back in the shape the
+parser reads, that a second message resumes the conversation, and that a turn
+can be stopped. It needs Claude Code installed and signed in, and it spends
+quota, so it is `#[ignore]`d and run deliberately. A stream-json contract read
+off the documentation is a contract nobody has checked.
+
+`tests/e2e/` is the other one, also opt-in: it puts the real shell folder
 picker on screen and answers it with pywinauto, which is the only way to cover
 code that shows a modal dialog. It takes over the mouse for a few seconds, so
 it is not part of `cargo test` — the Rust tests it drives are all `#[ignore]`d.

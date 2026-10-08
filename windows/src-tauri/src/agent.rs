@@ -806,6 +806,156 @@ async fn one_shot(
     Ok(first_chars(stdout.trim(), MAX_OUTPUT))
 }
 
+// ── One real turn, end to end ────────────────────────────────────────────────
+
+/// Tests that run the agent CLI for real.
+///
+/// Every one is `#[ignore]`d, for the same reason as `picker_e2e`: they need
+/// something `cargo test` cannot provide — here a CLI that is installed and
+/// signed in — and they spend the user's own quota. What they cover is the
+/// half of a turn no fixture can: that the flags are accepted, that the lines
+/// come back in the shape `Stream` reads, and that the reply arrives.
+///
+/// A stream-json contract read off the documentation is a contract nobody has
+/// checked. Running these is how the `is_error` case was found.
+///
+/// Run them by hand, deliberately:
+///   cargo test --lib live_agent -- --ignored --nocapture
+#[cfg(test)]
+mod live_agent {
+    use super::*;
+
+    /// The prompt is chosen so the model has no reason to reach for a tool.
+    /// One that did would fire the hooks, and with Coucou running the approval
+    /// card would wait for a human while this test sat out its ten minutes.
+    const NO_TOOLS: &str = "Reply with exactly: ok";
+
+    fn project_in(name: &str) -> Project {
+        let root = std::env::temp_dir().join(format!("coucou-live-{name}"));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join(".git")).unwrap();
+        let project = Project::default();
+        project.attach(root.to_str().unwrap()).unwrap();
+        project
+    }
+
+    fn nothing() -> Knowledge {
+        Knowledge { vault: None, briefing: None }
+    }
+
+    #[tokio::test]
+    #[ignore = "runs the real Claude Code CLI and spends quota"]
+    async fn a_turn_streams_its_text_and_ends_with_the_reply() {
+        let project = project_in("turn");
+        let session = Session::default();
+        let seen = Mutex::new(Vec::new());
+
+        let reply = send(
+            &project,
+            &session,
+            &Cancel::default(),
+            "claude",
+            NO_TOOLS.into(),
+            &nothing(),
+            &|turn| seen.lock().unwrap().push(turn),
+        )
+        .await
+        .expect("the turn should have run");
+
+        assert_eq!(reply.trim(), "ok", "the reply comes off the result line");
+        let turns = seen.lock().unwrap();
+        assert!(
+            turns.iter().any(|t| matches!(t, Turn::Text { .. })),
+            "nothing was streamed, so --include-partial-messages or the parser is wrong: {turns:?}"
+        );
+        // The streamed pieces must add up to the reply, or the island would
+        // show one thing while writing and another once it finished.
+        let streamed: String = turns
+            .iter()
+            .filter_map(|t| match t {
+                Turn::Text { text } => Some(text.as_str()),
+                Turn::Step { .. } => None,
+            })
+            .collect();
+        assert_eq!(streamed.trim(), reply.trim());
+        assert!(session.current().is_some(), "a session id is kept to resume with");
+    }
+
+    #[tokio::test]
+    #[ignore = "runs the real Claude Code CLI and spends quota"]
+    async fn a_second_message_carries_on_the_same_conversation() {
+        let project = project_in("resume");
+        let session = Session::default();
+        let quiet = |_: Turn| {};
+
+        let first = send(
+            &project,
+            &session,
+            &Cancel::default(),
+            "claude",
+            "Remember the word pineapple. Reply with exactly: ok".into(),
+            &nothing(),
+            &quiet,
+        )
+        .await
+        .expect("the first turn should have run");
+        assert_eq!(first.trim(), "ok");
+
+        let id = session.current().expect("the first turn minted a session id");
+
+        let second = send(
+            &project,
+            &session,
+            &Cancel::default(),
+            "claude",
+            "What word did I ask you to remember? Reply with only that word.".into(),
+            &nothing(),
+            &quiet,
+        )
+        .await
+        .expect("the second turn should have run");
+
+        assert!(
+            second.to_lowercase().contains("pineapple"),
+            "the conversation was not resumed: {second:?}"
+        );
+        assert_eq!(session.current().as_deref(), Some(id.as_str()), "and it is the same one");
+    }
+
+    #[tokio::test]
+    #[ignore = "runs the real Claude Code CLI and spends quota"]
+    async fn a_turn_can_be_stopped_while_it_runs() {
+        let project = project_in("cancel");
+        let cancel = Cancel::default();
+
+        // Stopped from outside, the way the island's Stop button does it, once
+        // the turn has had long enough to be under way.
+        let stopper = async {
+            tokio::time::sleep(Duration::from_millis(1500)).await;
+            cancel.stop()
+        };
+        // Bound rather than passed inline: the future borrows them, and it
+        // outlives the statement that builds it.
+        let session = Session::default();
+        let knowledge = nothing();
+        let turn = send(
+            &project,
+            &session,
+            &cancel,
+            "claude",
+            "Count slowly from 1 to 500, one number per line.".into(),
+            &knowledge,
+            &|_| {},
+        );
+
+        let (stopped, result) = tokio::join!(stopper, turn);
+
+        assert!(stopped, "there was a turn in flight to stop");
+        let err = result.expect_err("a stopped turn is not a reply");
+        assert!(err.contains("stopped"), "got {err:?}");
+    }
+}
+
 /// Truncates on a character boundary — `String::truncate` panics mid-codepoint,
 /// and CLI output is full of box-drawing characters and emoji.
 fn first_chars(s: &str, max: usize) -> String {
