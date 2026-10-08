@@ -7,7 +7,7 @@
 // Coucou spawns runs the same hooks any terminal session does. See agent.rs.
 
 import { Bridge, onEvent } from "../core/bridge";
-import type { CliInfo, SlashCommand } from "../core/bridge";
+import type { CliInfo, KeptMessage, SlashCommand } from "../core/bridge";
 import { State } from "../core/state";
 import type { Island } from "./island";
 
@@ -49,7 +49,44 @@ export async function loadAgentEnvironment() {
     State.agentCli = availableClis[0].id;
     void Bridge.agentSetCli(State.agentCli);
   }
+  await restoreConversation();
   await refreshSlashCommands();
+  State.notify();
+}
+
+/**
+ * Puts back the conversation the last run ended on.
+ *
+ * Rust has already resumed its CLI session, so without this the island would
+ * come back continuing a conversation it was showing none of.
+ */
+async function restoreConversation() {
+  if (State.chatHistory.length > 0) return;
+  const kept = (await Bridge.chatLoad()) ?? [];
+  State.chatHistory = kept.map((message, index) => ({ id: index + 1, ...message }));
+}
+
+/** Keeps the conversation for the next run. Called when a turn settles. */
+export function keepConversation() {
+  const kept: KeptMessage[] = State.chatHistory.map((message) => ({
+    role: message.role,
+    content: message.content,
+    at: message.at,
+    steps: message.steps ?? [],
+  }));
+  void Bridge.chatKeep(kept);
+}
+
+/**
+ * Starts a new conversation: the island's log, the CLI session and what is
+ * kept on disk all go together. Anything that drops one has to drop all three,
+ * or the island shows one conversation while the CLI resumes another.
+ */
+export function startFreshConversation() {
+  State.chatHistory = [];
+  State.chatDraft = "";
+  State.chatSteps = [];
+  void Bridge.chatForget();
   State.notify();
 }
 

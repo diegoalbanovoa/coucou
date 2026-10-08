@@ -84,7 +84,6 @@ export const Bridge = {
   /** One chat turn. The API key and any file bytes never leave Rust. */
   chatSend: (query: string, context: ChatContext | null) =>
     callOrThrow<{ text: string }>("chat_send", { query, context }),
-  chatReset: () => call<void>("chat_reset"),
 
   // ── Agent chat: the CLIs installed on this machine ────────────────────────
   /** Which agent CLIs are installed. Empty means API-only chat. */
@@ -105,8 +104,20 @@ export const Bridge = {
     callOrThrow<string>("agent_send", { cli, prompt }),
   /** Stops the turn in flight. False when the reply had already landed. */
   agentCancel: () => call<boolean>("agent_cancel"),
+  /** The Obsidian vault the agent may read and write, and where it came from. */
+  vaultState: () => call<VaultInfo>("vault_state"),
+  /** Chooses the vault by hand. Null when the user cancelled the picker. */
+  pickVault: () => call<string | null>("pick_vault"),
+  /** Goes back to whatever vault Obsidian itself has open. */
+  forgetVault: () => call<void>("forget_vault"),
   /** Fresh conversation, same project. */
   agentReset: () => call<void>("agent_reset"),
+  /** The conversation the last run ended on. */
+  chatLoad: () => call<KeptMessage[]>("chat_load"),
+  /** Keeps the conversation for the next run. */
+  chatKeep: (messages: KeptMessage[]) => call<void>("chat_keep", { messages }),
+  /** Drops the conversation, the CLI session and the transcript together. */
+  chatForget: () => call<void>("chat_forget"),
   /** Copies a dropped file into the inbox. */
   ingestFile: (path: string) => callOrThrow<DroppedFile>("ingest_file", { path }),
   /** Only ever tells you whether a key exists — never its value. */
@@ -133,6 +144,24 @@ export interface IntegrationUpdate {
 export type ChatContext =
   | { kind: "file"; name: string; path: string }
   | { kind: "window"; appName: string; title: string; url?: string };
+
+/** One message as it is kept on disk between runs. */
+export interface KeptMessage {
+  role: "user" | "assistant" | "error";
+  content: string;
+  at: number;
+  steps: string[];
+}
+
+/** The knowledge base the agent can reach. */
+export interface VaultInfo {
+  /** Empty when there is none. */
+  path: string;
+  /** "chosen" by hand, read from "obsidian", or "none". */
+  source: "chosen" | "obsidian" | "none";
+  /** How many vaults Obsidian knows about. */
+  known: number;
+}
 
 /** An agent CLI found on this machine. */
 export interface CliInfo {

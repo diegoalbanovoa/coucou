@@ -8,6 +8,7 @@ import { Bridge, onEvent, type AgentTurn } from "../core/bridge";
 import { Sound } from "../core/sound";
 import { State, type ChatMessage } from "../core/state";
 import {
+  keepConversation,
   matchingCommands,
   nextProvider,
   providerLabel,
@@ -15,7 +16,13 @@ import {
 } from "../island/agent";
 import type { ViewHost } from "./views";
 
-let nextId = 1;
+/**
+ * The next message id. Counted off what is already in the log rather than from
+ * a module counter: the log may have been restored from disk, and 1 is taken.
+ */
+function freshId(): number {
+  return State.chatHistory.reduce((top, message) => Math.max(top, message.id), 0) + 1;
+}
 
 /** How much reply fits before it is folded down. Measured in characters
  * because the island's width is fixed and its height is what we are saving. */
@@ -301,7 +308,7 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
     sending = true;
     Sound.play("send");
 
-    State.chatHistory.push({ id: nextId++, role: "user", content: query, at: Date.now() });
+    State.chatHistory.push({ id: freshId(), role: "user", content: query, at: Date.now() });
     State.chatDraft = "";
     State.chatSteps = [];
     stick = true;
@@ -328,7 +335,7 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
             new Error("No agent CLI found. Install Claude Code, or another agent CLI, and Coucou will pick it up."),
           );
       State.chatHistory.push({
-        id: nextId++,
+        id: freshId(),
         role: "assistant",
         content: text,
         at: Date.now(),
@@ -340,7 +347,7 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
       // to the note view took the whole conversation off screen for what is
       // often one line about a flag.
       State.chatHistory.push({
-        id: nextId++,
+        id: freshId(),
         role: "error",
         content: String(err).replace(/^Error:\s*/, ""),
         at: Date.now(),
@@ -352,6 +359,8 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
       State.chatDraft = "";
       State.chatSteps = [];
       sending = false;
+      // However the turn ended, this is the conversation the next run resumes.
+      keepConversation();
       State.notify();
       onHeightChange();
       input.focus();

@@ -31,6 +31,9 @@ pub struct Settings {
     /// The CLI conversation the chat is in the middle of, so a restart
     /// continues it instead of starting a new one.
     pub agent_session: Option<String>,
+    /// The Obsidian vault the agent may read and write, when Obsidian's own
+    /// list is not where it was found. See vault.rs.
+    pub vault_path: Option<String>,
 }
 
 fn default_model() -> String {
@@ -60,6 +63,7 @@ impl Default for Settings {
             project_root: None,
             agent_cli: None,
             agent_session: None,
+            vault_path: None,
         }
     }
 }
@@ -323,7 +327,8 @@ mod tests {
   "model": "some-model",
   "projectRoot": "C:/code/thing",
   "agentCli": "gemini",
-  "agentSession": "7f3c9a10-0000-4000-8000-000000000000"
+  "agentSession": "7f3c9a10-0000-4000-8000-000000000000",
+  "vaultPath": "C:/notes/vault"
 }"#;
 
     fn custom() -> Value {
@@ -652,6 +657,7 @@ mod tests {
                 "projectRoot",
                 "agentCli",
                 "agentSession",
+                "vaultPath",
             ]
         );
         let _ = std::fs::remove_dir_all(&dir);

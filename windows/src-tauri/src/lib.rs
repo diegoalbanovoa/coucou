@@ -11,7 +11,9 @@ mod pipe;
 mod platform;
 mod secrets;
 mod settings;
+mod transcript;
 mod tray;
+mod vault;
 
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -105,6 +107,13 @@ fn remember(app: &AppHandle, change: impl FnOnce(&mut Settings)) {
         log::line(format!("could not save settings: {err}"));
     }
     let _ = app.emit("settings-changed", settings);
+}
+
+/// A copy of the settings, taken and released rather than held: everything
+/// that reads them does so from a command, and a lock across an await would
+/// stop the island drawing.
+fn shared_settings(app: &AppHandle) -> Settings {
+    app.state::<Shared>().settings.lock().unwrap().clone()
 }
 
 /// Makes the autostart registration agree with the stored preference.
@@ -440,11 +449,16 @@ async fn agent_send(app: AppHandle, cli: String, prompt: String) -> Result<Strin
     let on = move |turn: agent::Turn| {
         let _ = emitter.emit("agent-turn", turn);
     };
+    let knowledge = {
+        let chosen = shared_settings(&app).vault_path;
+        let found = vault::resolve(chosen.as_deref());
+        agent::Knowledge { briefing: vault::briefing(found.as_deref()), vault: found }
+    };
     let result = {
         let project = app.state::<agent::Project>();
         let session = app.state::<agent::Session>();
         let cancel = app.state::<agent::Cancel>();
-        agent::send(&project, &session, &cancel, &cli, prompt, &on).await
+        agent::send(&project, &session, &cancel, &cli, prompt, &knowledge, &on).await
     };
     // The id is minted inside the first turn, and a resume that failed clears
     // it. Either way, what the next boot should continue has just changed.
@@ -453,6 +467,64 @@ async fn agent_send(app: AppHandle, cli: String, prompt: String) -> Result<Strin
         remember(&app, |s| s.agent_session = after);
     }
     result
+}
+
+// ── The conversation, kept across restarts ───────────────────────────────────
+
+/// The last stretch of the chat, so the island comes back showing the
+/// conversation whose CLI session it is about to resume.
+#[tauri::command]
+fn chat_load() -> Vec<transcript::Message> {
+    transcript::load()
+}
+
+#[tauri::command]
+fn chat_keep(messages: Vec<transcript::Message>) {
+    transcript::save(&messages);
+}
+
+/// A new conversation: the CLI session, the API chat and the transcript all go
+/// together, or the island would show one conversation while the CLI resumed
+/// another.
+#[tauri::command]
+fn chat_forget(app: AppHandle, chat: State<Chat>) {
+    chat.reset();
+    app.state::<agent::Session>().reset();
+    transcript::clear();
+    remember(&app, |s| s.agent_session = None);
+}
+
+// ── The knowledge base ────────────────────────────────────────────────────────
+
+/// The Obsidian vault the agent may read and write, and where it came from.
+#[tauri::command]
+fn vault_state(app: AppHandle) -> vault::VaultInfo {
+    vault::info(shared_settings(&app).vault_path.as_deref())
+}
+
+/// Chooses the vault by hand, for when Obsidian's own list has none — it is
+/// not installed, or the notes live somewhere it has never been pointed at.
+#[tauri::command]
+async fn pick_vault(app: AppHandle) -> Option<String> {
+    let win = app.get_webview_window("settings").or_else(|| island::window(&app))?;
+    if PICKING.swap(true, Ordering::SeqCst) {
+        return None;
+    }
+    let _guard = PickingGuard;
+    let picked = tauri::async_runtime::spawn_blocking(move || platform::pick_folder(&win))
+        .await
+        .ok()
+        .flatten()?;
+    let stored = picked.clone();
+    remember(&app, |s| s.vault_path = Some(stored));
+    log::line(format!("vault chosen: {picked}"));
+    Some(picked)
+}
+
+/// Goes back to whatever Obsidian itself has open.
+#[tauri::command]
+fn forget_vault(app: AppHandle) {
+    remember(&app, |s| s.vault_path = None);
 }
 
 /// Stops the turn in flight. False when there was nothing to stop — the reply
@@ -467,11 +539,6 @@ fn agent_cancel(app: AppHandle) -> bool {
 fn agent_reset(app: AppHandle) {
     app.state::<agent::Session>().reset();
     remember(&app, |s| s.agent_session = None);
-}
-
-#[tauri::command]
-fn chat_reset(chat: State<Chat>) {
-    chat.reset();
 }
 
 /// Copies a dropped file into the inbox and reports its name back.
@@ -619,7 +686,6 @@ pub fn run() {
             approval_decline,
             log_line,
             chat_send,
-            chat_reset,
             agent_clis,
             agent_state,
             agent_set_cli,
@@ -629,6 +695,12 @@ pub fn run() {
             pick_project,
             agent_send,
             agent_cancel,
+            chat_load,
+            chat_keep,
+            chat_forget,
+            vault_state,
+            pick_vault,
+            forget_vault,
             agent_reset,
             ingest_file,
             secret_present,

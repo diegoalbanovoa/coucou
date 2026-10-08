@@ -337,6 +337,61 @@ function integrationsSection(present: Record<string, boolean>): HTMLElement {
   return h("section", {}, h("h2", {}, h("span", { text: "Advanced" })), fold);
 }
 
+// ── Knowledge base section ───────────────────────────────────────────────────
+
+/**
+ * The Obsidian vault the agent may read and write.
+ *
+ * Obsidian keeps its own list of vaults, so the usual case needs no setting at
+ * all. This is here for when that list has none — Obsidian not installed, or
+ * notes kept somewhere it has never been pointed at — and for overriding it.
+ */
+function vaultSection(): HTMLElement {
+  const note = h("div", { class: "hint" });
+  const where = h("code", { class: "path" });
+  const dot = statusDot(false);
+  const choose = h("button", { text: "Choose the folder…" });
+  const forget = h("button", { text: "Use Obsidian's" });
+
+  async function draw() {
+    const info = (await Bridge.vaultState()) ?? { path: "", source: "none" as const, known: 0 };
+    const found = info.source !== "none";
+
+    dot.style.background = found ? "#22c55e" : "#f4505e";
+    where.textContent = info.path;
+    where.title = info.path;
+    choose.textContent = found ? "Choose another…" : "Choose the folder…";
+    forget.style.display = info.source === "chosen" && info.known > 0 ? "" : "none";
+
+    note.textContent =
+      info.source === "obsidian"
+        ? `Read from Obsidian's own list of vaults${info.known > 1 ? ` (${info.known} of them)` : ""}. The agent can read and write inside it.`
+        : info.source === "chosen"
+          ? "Chosen here, which overrides Obsidian's own list."
+          : "None found. Obsidian is not installed, or its vault list is empty — point Coucou at the folder and the agent can use it as a knowledge base.";
+  }
+
+  choose.addEventListener("click", async () => {
+    const picked = await Bridge.pickVault();
+    if (picked) await draw();
+  });
+  forget.addEventListener("click", async () => {
+    await Bridge.forgetVault();
+    await draw();
+  });
+
+  void draw();
+
+  return h(
+    "section",
+    {},
+    h("h2", {}, dot, h("span", { text: "Knowledge base" })),
+    note,
+    h("div", { class: "row" }, h("label", { text: "Vault" }), where),
+    h("div", { class: "row" }, choose, forget),
+  );
+}
+
 // ── General section ───────────────────────────────────────────────────────────
 
 function generalSection(): HTMLElement {
@@ -420,6 +475,7 @@ async function main() {
     h("h1", {}, h("span", { text: "Coucou" }), h("span", { class: "version", text: version })),
     claudeSection(status),
     agentsSection(),
+    vaultSection(),
     generalSection(),
     integrationsSection(present),
     h("div", {

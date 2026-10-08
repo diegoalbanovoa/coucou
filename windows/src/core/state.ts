@@ -103,6 +103,8 @@ export interface Settings {
   agentCli: string | null;
   /** The CLI conversation being continued, if there is one. */
   agentSession: string | null;
+  /** The Obsidian vault chosen by hand, or null to use the one Obsidian has. */
+  vaultPath: string | null;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -122,6 +124,7 @@ export const DEFAULT_SETTINGS: Settings = {
   projectRoot: null,
   agentCli: null,
   agentSession: null,
+  vaultPath: null,
 };
 
 type Listener = () => void;

@@ -4,7 +4,12 @@
 import { beforeEach, test } from "node:test";
 import assert from "node:assert/strict";
 import { calls, replies, sent } from "./tauri.mjs";
-import { loadAgentEnvironment, nextProvider } from "../src/island/agent.ts";
+import {
+  keepConversation,
+  loadAgentEnvironment,
+  nextProvider,
+  startFreshConversation,
+} from "../src/island/agent.ts";
 import { State } from "../src/core/state.ts";
 
 const CLAUDE =
@@ -23,6 +28,9 @@ beforeEach(() => {
   replies.clear();
   State.agentCli = null;
   State.attachedProject = null;
+  State.chatHistory = [];
+  State.chatDraft = "";
+  State.chatSteps = [];
 });
 
 test("the chat comes up in the project and CLI the last run was in", async () => {
@@ -102,4 +110,63 @@ test("the project Rust restored is what `/` is asked about", async () => {
     order.indexOf("agent_state") < order.indexOf("agent_commands"),
     `agent_state must come first, got ${order.join(", ")}`,
   );
+});
+
+test("the conversation the last run ended on comes back with its steps", async () => {
+  machine({ cli: "claude" });
+  replies.set("chat_load", [
+    { role: "user", content: "what broke?", at: 10, steps: [] },
+    { role: "assistant", content: "the pipe", at: 20, steps: ["Read pipe.rs"] },
+  ]);
+
+  await loadAgentEnvironment();
+
+  assert.deepEqual(
+    State.chatHistory.map((m) => [m.id, m.role, m.content, m.steps]),
+    [
+      [1, "user", "what broke?", []],
+      [2, "assistant", "the pipe", ["Read pipe.rs"]],
+    ],
+  );
+});
+
+test("a conversation already on screen is not replaced by the kept one", async () => {
+  machine({ cli: "claude" });
+  replies.set("chat_load", [{ role: "user", content: "from disk", at: 1, steps: [] }]);
+  State.chatHistory = [{ id: 7, role: "user", content: "already here", at: 2 }];
+
+  await loadAgentEnvironment();
+
+  assert.deepEqual(State.chatHistory.map((m) => m.content), ["already here"]);
+});
+
+test("what is kept is the message shape Rust stores, steps always an array", () => {
+  State.chatHistory = [
+    { id: 1, role: "user", content: "hi", at: 5 },
+    { id: 2, role: "assistant", content: "hello", at: 6, steps: ["Bash ls"] },
+  ];
+
+  keepConversation();
+
+  assert.deepEqual(sent("chat_keep"), [
+    {
+      messages: [
+        { role: "user", content: "hi", at: 5, steps: [] },
+        { role: "assistant", content: "hello", at: 6, steps: ["Bash ls"] },
+      ],
+    },
+  ]);
+});
+
+test("starting fresh drops the log, the draft and what is on disk together", () => {
+  State.chatHistory = [{ id: 1, role: "user", content: "hi", at: 5 }];
+  State.chatDraft = "half a rep";
+  State.chatSteps = ["Read a.rs"];
+
+  startFreshConversation();
+
+  assert.deepEqual(State.chatHistory, []);
+  assert.equal(State.chatDraft, "");
+  assert.deepEqual(State.chatSteps, []);
+  assert.equal(sent("chat_forget").length, 1);
 });

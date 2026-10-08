@@ -430,16 +430,6 @@ fn uuid_v4() -> String {
     format!("{}-{}-{}-{}-{}", h(&b[0..4]), h(&b[4..6]), h(&b[6..8]), h(&b[8..10]), h(&b[10..16]))
 }
 
-/// Extra folders the agent may touch beyond the attached project.
-///
-/// The Obsidian vault is here so "save this to my vault" works without
-/// attaching the vault as the project: Claude Code refuses writes outside its
-/// working directory unless the directory is named up front.
-fn extra_dirs() -> Vec<PathBuf> {
-    let vault = platform::home_dir().join("OneDrive").join("Documentos").join("Obsidian Vault");
-    if vault.is_dir() { vec![vault] } else { Vec::new() }
-}
-
 /// What the island is told while a turn runs. The reply itself comes back from
 /// `send`; these are what make the wait legible — before this the chat showed
 /// three dots for up to ten minutes and then the whole answer at once.
@@ -577,12 +567,21 @@ fn step_label(block: &Value) -> String {
 }
 
 /// One chat turn, run through the chosen CLI in the attached project.
+/// What the agent is allowed to reach beyond the project, and what it is told
+/// about it. The vault is resolved from settings by the caller: agent.rs has no
+/// business knowing where notes live.
+pub struct Knowledge {
+    pub vault: Option<PathBuf>,
+    pub briefing: Option<String>,
+}
+
 pub async fn send(
     project: &Project,
     session: &Session,
     cancel: &Cancel,
     cli_id: &str,
     prompt: String,
+    knowledge: &Knowledge,
     on: &(dyn Fn(Turn) + Send + Sync),
 ) -> Result<String, String> {
     let Some(spec) = cli(cli_id) else {
@@ -608,12 +607,18 @@ pub async fn send(
     #[cfg(windows)]
     cmd.creation_flags(0x0800_0000);
 
-    // However this CLI takes a one-shot prompt, from the table.
-    cmd.args(spec.prompt_args);
-    cmd.arg(&prompt);
-
     // Resuming is per-CLI; only Claude Code gives us a session id to hold on to.
     let resumed = session.current();
+
+    // However this CLI takes a one-shot prompt, from the table. A CLI with no
+    // system-prompt flag is told about the vault in front of its first message
+    // instead — once per conversation, not once per turn.
+    cmd.args(spec.prompt_args);
+    match (&knowledge.briefing, spec.streams, resumed.is_some()) {
+        (Some(briefing), false, false) => cmd.arg(format!("{briefing}\n\n{prompt}")),
+        _ => cmd.arg(&prompt),
+    };
+
     if spec.streams {
         // stream-json so the island can show the reply as it is written and
         // name each tool as it is reached for. The CLI requires --verbose for
@@ -633,8 +638,13 @@ pub async fn send(
                 session.set(id);
             }
         }
-        for dir in extra_dirs() {
-            cmd.arg("--add-dir").arg(dir);
+        // Claude Code refuses writes outside its working directory unless the
+        // directory is named up front, so "save this to my vault" needs this.
+        if let Some(vault) = &knowledge.vault {
+            cmd.arg("--add-dir").arg(vault);
+        }
+        if let Some(briefing) = &knowledge.briefing {
+            cmd.arg("--append-system-prompt").arg(briefing);
         }
     }
 
@@ -896,7 +906,9 @@ mod tests {
     /// `send` for the cases that never get as far as running anything, so the
     /// turns it would report have nowhere to go.
     async fn quiet_send(project: &Project, cli: &str) -> Result<String, String> {
-        send(project, &Session::default(), &Cancel::default(), cli, "hi".into(), &|_| {}).await
+        let nothing = Knowledge { vault: None, briefing: None };
+        send(project, &Session::default(), &Cancel::default(), cli, "hi".into(), &nothing, &|_| {})
+            .await
     }
 
     #[tokio::test]

@@ -40,6 +40,15 @@ fn xdg(var: &str, fallback: &str) -> PathBuf {
 }
 
 /// ~/.config/coucou — preferences.
+/// Obsidian's own settings, which hold its list of vaults.
+pub fn obsidian_config() -> PathBuf {
+    std::env::var_os("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| super::home_dir().join(".config"))
+        .join("obsidian")
+        .join("obsidian.json")
+}
+
 pub fn config_dir() -> PathBuf {
     xdg("XDG_CONFIG_HOME", ".config").join("coucou")
 }

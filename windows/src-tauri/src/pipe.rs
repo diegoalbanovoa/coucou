@@ -151,11 +151,18 @@ pub fn start(app: AppHandle) {
                 continue;
             }
             // Hand the connected instance to a task and listen on a fresh one.
-            let next = match create(false) {
-                Ok(s) => s,
-                Err(err) => {
-                    log::line(format!("cannot reopen the relay pipe: {err}"));
-                    return;
+            //
+            // Retried rather than given up on. Returning here left the app
+            // running and permanently deaf: every later hook would wait its
+            // few hundred milliseconds for an island that was never going to
+            // answer, and nothing on screen would say why.
+            let next = loop {
+                match create(false) {
+                    Ok(s) => break s,
+                    Err(err) => {
+                        log::line(format!("cannot reopen the relay pipe: {err} — retrying"));
+                        tokio::time::sleep(Duration::from_secs(1)).await;
+                    }
                 }
             };
             let connected = std::mem::replace(&mut server, next);

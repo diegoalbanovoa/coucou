@@ -50,6 +50,15 @@ pub fn config_dir() -> PathBuf {
 }
 
 /// %LOCALAPPDATA%\Coucou — where coucou-hook.exe, the inbox and the log live.
+/// Obsidian's own settings, which hold its list of vaults.
+pub fn obsidian_config() -> PathBuf {
+    std::env::var_os("APPDATA")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| super::home_dir().join("AppData").join("Roaming"))
+        .join("obsidian")
+        .join("obsidian.json")
+}
+
 pub fn local_dir() -> PathBuf {
     let base = std::env::var_os("LOCALAPPDATA")
         .map(PathBuf::from)
