@@ -209,6 +209,15 @@ function agentsSection(): HTMLElement {
           h("span", { class: "hint", style: "flex:0 0 auto", text: cli.version || "version unknown" }),
           h("code", { class: "path", text: cli.path }),
         ),
+        // The file is the place to add a flag, lengthen a turn, or let the
+        // agent reach one more folder. Written on launch; read on every turn.
+        h(
+          "div",
+          { class: "row" },
+          h("label", { text: "" }),
+          h("span", { class: "hint", style: "flex:0 0 auto", text: "config" }),
+          h("code", { class: "path", text: cli.configPath }),
+        ),
       );
     }
   }

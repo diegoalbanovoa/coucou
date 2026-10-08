@@ -166,6 +166,8 @@ export interface CliInfo {
   version: string;
   /** Whether its reply streams and its conversation can be resumed. */
   streams: boolean;
+  /** Its config file — extra flags, turn timeout, extra folders. */
+  configPath: string;
 }
 
 /**

@@ -1,6 +1,7 @@
 // Coucou for Windows — app wiring and the commands the island calls.
 
 mod agent;
+mod agents;
 mod files;
 mod hooks;
 mod integrations;
@@ -329,6 +330,9 @@ fn approval_decline(app: AppHandle, request_id: String) {
 /// above the chat box, next to the API models.
 #[tauri::command]
 fn agent_clis(app: AppHandle) -> Vec<agent::CliInfo> {
+    // Now is when Coucou knows where each CLI is, so now is when each one's
+    // config file is written or brought up to date.
+    agent::map_configs();
     // The versions are filled in behind this and sent on when they land: a
     // CLI installed as an npm shim can take seconds to answer `--version`, and
     // the start screen lists the agents before any of them has spoken.

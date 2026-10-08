@@ -26,10 +26,9 @@ use serde_json::Value;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
 use tokio::process::Command;
 
+use crate::agents;
 use crate::platform;
 
-/// A whole agent turn can take a while — a real task runs many tools.
-const TURN_TIMEOUT: Duration = Duration::from_secs(600);
 /// How often a quiet turn is checked for a cancel or the deadline. Short
 /// enough that Stop feels immediate, long enough to cost nothing.
 const POLL: Duration = Duration::from_millis(150);
@@ -121,6 +120,8 @@ pub struct CliInfo {
     /// What it answers to `--version`, or empty when it did not answer.
     pub version: String,
     pub streams: bool,
+    /// Its config file, so the settings window can point at it.
+    pub config_path: String,
 }
 
 /// What each executable answered to `--version`, so it is asked once.
@@ -129,6 +130,17 @@ static VERSIONS: Mutex<Option<std::collections::HashMap<PathBuf, String>>> = Mut
 /// Where each CLI in the table was found, if it was.
 fn found() -> Vec<(&'static Cli, PathBuf)> {
     CLIS.iter().filter_map(|c| platform::find_exe(c.stem).map(|exe| (c, exe))).collect()
+}
+
+/// Writes the config file for every CLI on this machine, and brings the
+/// detected half of each up to date. See agents.rs for what is in them.
+///
+/// Called when the island asks what is installed, which is the moment Coucou
+/// knows where each one is.
+pub fn map_configs() {
+    for (spec, exe) in found() {
+        agents::ensure(spec.id, spec.label, &exe, spec.prompt_args, spec.streams);
+    }
 }
 
 /// Which agent CLIs are on this machine, with whatever versions are known.
@@ -151,6 +163,7 @@ pub fn installed() -> Vec<CliInfo> {
                 .cloned()
                 .unwrap_or_default(),
             streams: spec.streams,
+            config_path: display_path(&agents::path_for(spec.id)),
         })
         .collect()
 }
@@ -607,6 +620,10 @@ pub async fn send(
         return Err("Attach a project folder first — the agent runs inside it.".into());
     };
 
+    // What the CLI's own config file says, read per turn: an edit takes effect
+    // from the next message rather than the next launch.
+    let config = agents::load(spec.id);
+
     let mut cmd = Command::new(exe);
     cmd.current_dir(&root);
     // Without this the CLI waits three seconds for piped input that is never
@@ -659,14 +676,21 @@ pub async fn send(
         if let Some(briefing) = &knowledge.briefing {
             cmd.arg("--append-system-prompt").arg(briefing);
         }
+        for dir in config.dirs() {
+            cmd.arg("--add-dir").arg(dir);
+        }
     }
+
+    // Last, so they can override anything above — which is the point of them.
+    cmd.args(&config.extra_args);
 
     note(format!("agent {} in {}", spec.id, display_path(&root)));
 
+    let timeout = config.turn_timeout();
     if spec.streams {
-        stream_turn(cmd, cancel, session, resumed.is_some(), spec.label, on).await
+        stream_turn(cmd, cancel, session, resumed.is_some(), spec.label, timeout, on).await
     } else {
-        one_shot(cmd, session, resumed.is_some(), spec.label).await
+        one_shot(cmd, session, resumed.is_some(), spec.label, timeout).await
     }
 }
 
@@ -676,12 +700,14 @@ pub async fn send(
 /// being awaited here directly: a channel receive can be abandoned without
 /// losing what was half-read, which is what lets a quiet turn be checked for a
 /// cancel every `POLL` without the app's tokio needing the `macros` feature.
+#[allow(clippy::too_many_arguments)]
 async fn stream_turn(
     mut cmd: Command,
     cancel: &Cancel,
     session: &Session,
     resumed: bool,
     label: &str,
+    timeout: Duration,
     on: &(dyn Fn(Turn) + Send + Sync),
 ) -> Result<String, String> {
     cmd.stdout(Stdio::piped());
@@ -709,7 +735,7 @@ async fn stream_turn(
     });
 
     let stop = cancel.arm();
-    let deadline = tokio::time::Instant::now() + TURN_TIMEOUT;
+    let deadline = tokio::time::Instant::now() + timeout;
     let mut stream = Stream::default();
     let mut stopped = false;
     let mut timed_out = false;
@@ -746,7 +772,7 @@ async fn stream_turn(
         } else {
             format!(
                 "{label} was still working after {} minutes and was stopped.",
-                TURN_TIMEOUT.as_secs() / 60
+                timeout.as_secs() / 60
             )
         });
     }
@@ -782,14 +808,15 @@ async fn one_shot(
     session: &Session,
     resumed: bool,
     label: &str,
+    timeout: Duration,
 ) -> Result<String, String> {
-    let output = match tokio::time::timeout(TURN_TIMEOUT, cmd.output()).await {
+    let output = match tokio::time::timeout(timeout, cmd.output()).await {
         Ok(Ok(out)) => out,
         Ok(Err(e)) => return Err(format!("Could not start {label}: {e}")),
         Err(_) => {
             return Err(format!(
                 "{label} was still working after {} minutes and was stopped.",
-                TURN_TIMEOUT.as_secs() / 60
+                timeout.as_secs() / 60
             ))
         }
     };
