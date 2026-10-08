@@ -19,3 +19,8 @@ DerivedData/
 # Local only (never published)
 .claude/
 _prive/
+
+# Folder-picker E2E (windows/tests/e2e): screenshots and Python caches
+windows/tests/e2e/artifacts/
+__pycache__/
+.pytest_cache/

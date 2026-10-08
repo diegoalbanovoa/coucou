@@ -85,6 +85,22 @@ export const Bridge = {
   chatSend: (query: string, context: ChatContext | null) =>
     callOrThrow<{ text: string }>("chat_send", { query, context }),
   chatReset: () => call<void>("chat_reset"),
+
+  // ── Agent chat: the CLIs installed on this machine ────────────────────────
+  /** Which agent CLIs are installed. Empty means API-only chat. */
+  agentClis: () => call<CliInfo[]>("agent_clis"),
+  /** What `/` can reach: the user's commands, the project's, and their skills. */
+  agentCommands: () => call<SlashCommand[]>("agent_commands"),
+  /** Opens the folder picker. Null when the user cancelled. */
+  pickProject: () => call<string | null>("pick_project"),
+  /** Attaches the folder the agent runs in. */
+  attachProject: (path: string) => callOrThrow<string>("attach_project", { path }),
+  detachProject: () => call<void>("detach_project"),
+  /** One agent turn. Tool calls arrive separately, as ordinary hook events. */
+  agentSend: (cli: string, prompt: string) =>
+    callOrThrow<string>("agent_send", { cli, prompt }),
+  /** Fresh conversation, same project. */
+  agentReset: () => call<void>("agent_reset"),
   /** Copies a dropped file into the inbox. */
   ingestFile: (path: string) => callOrThrow<DroppedFile>("ingest_file", { path }),
   /** Only ever tells you whether a key exists — never its value. */
@@ -111,6 +127,20 @@ export interface IntegrationUpdate {
 export type ChatContext =
   | { kind: "file"; name: string; path: string }
   | { kind: "window"; appName: string; title: string; url?: string };
+
+/** An agent CLI found on this machine. */
+export interface CliInfo {
+  id: string;
+  label: string;
+  path: string;
+}
+
+/** One `/thing` the chat can send straight through to the CLI. */
+export interface SlashCommand {
+  name: string;
+  description: string;
+  source: "user" | "project" | "skill";
+}
 
 export interface DroppedFile {
   name: string;

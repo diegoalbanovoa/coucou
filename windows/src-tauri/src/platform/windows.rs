@@ -10,7 +10,14 @@ use ::windows::core::{BOOL, PWSTR};
 use ::windows::Win32::Foundation::{CloseHandle, HANDLE, HLOCAL, HWND, LPARAM, LocalFree, POINT};
 use ::windows::Win32::Security::Authorization::ConvertSidToStringSidW;
 use ::windows::Win32::Security::{GetTokenInformation, TokenUser, TOKEN_QUERY, TOKEN_USER};
+use ::windows::Win32::System::Com::{
+    CoCreateInstance, CoInitializeEx, CoTaskMemFree, CoUninitialize, CLSCTX_INPROC_SERVER,
+    COINIT_APARTMENTTHREADED,
+};
 use ::windows::Win32::System::Ole::RevokeDragDrop;
+use ::windows::Win32::UI::Shell::{
+    FileOpenDialog, IFileOpenDialog, FOS_FORCEFILESYSTEM, FOS_PICKFOLDERS, SIGDN_FILESYSPATH,
+};
 use ::windows::Win32::System::SystemInformation::GetLocalTime;
 use ::windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
 use ::windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_LBUTTON};
@@ -21,6 +28,7 @@ use ::windows::Win32::UI::WindowsAndMessaging::{
 
 use super::LocalTime;
 use crate::island::WINDOW_LABEL;
+use crate::log;
 
 /// File name of the Claude Code relay.
 pub const HOOK_EXE: &str = "coucou-hook.exe";
@@ -233,3 +241,215 @@ pub fn set_activating(win: &WebviewWindow, activating: bool) {
 
 /// Click-through here is the poll's WS_EX_TRANSPARENT toggle, not a region.
 pub fn set_input_region(_win: &WebviewWindow, _rect: Option<(f64, f64, f64, f64)>) {}
+
+// ── Folder picker ─────────────────────────────────────────────────────────────
+
+/// The shell's folder picker, for attaching a project to the chat.
+///
+/// Owned by the island. That is the whole difference between this working and
+/// not: the island is `WS_EX_TOPMOST`, so an ownerless dialog comes up
+/// *underneath* it and behind whatever else is on screen — a picker nobody can
+/// see, and a click that lands on another window. An owned dialog joins the
+/// island's z-order band and is shown above it, and the island is disabled
+/// while it is up, which is what modal is supposed to mean.
+pub fn pick_folder(win: &WebviewWindow) -> Option<String> {
+    pick_folder_owned(hwnd_of(win).map(|h| h.0 as isize))
+}
+
+/// The picker as the OS sees it, addressed by raw owner handle.
+///
+/// Split out from `pick_folder` for two reasons: `HWND` is not `Send`, so the
+/// handle has to cross into the dialog thread as an integer, and the tests
+/// need to open the picker without a `WebviewWindow` to get a handle from.
+fn pick_folder_owned(owner: Option<isize>) -> Option<String> {
+    // Its own thread, with its own COM apartment. The dialog runs a modal
+    // message loop on whichever thread shows it; on a shared one that is
+    // Mochi's thread or a runtime worker, and the apartment mode of a pooled
+    // thread is not ours to assume.
+    std::thread::spawn(move || unsafe {
+        // Ignore an already-initialised apartment; only an outright failure
+        // means there is nowhere to show a dialog.
+        let init = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+        let picked = show_folder_dialog(owner.map(|h| HWND(h as *mut _)));
+        if init.is_ok() {
+            CoUninitialize();
+        }
+        picked
+    })
+    .join()
+    .ok()
+    .flatten()
+}
+
+/// What the shell returns when the user closed the dialog without choosing:
+/// `HRESULT_FROM_WIN32(ERROR_CANCELLED)`. Worth naming, because it is the one
+/// error here that is not a problem.
+const CANCELLED: ::windows::core::HRESULT = ::windows::core::HRESULT(0x8007_04C7u32 as i32);
+
+unsafe fn show_folder_dialog(owner: Option<HWND>) -> Option<String> {
+    match open_folder_dialog(owner) {
+        Ok(path) => path,
+        // Changing your mind is not a failure and says nothing worth logging.
+        Err(err) if err.code() == CANCELLED => None,
+        // Anything else is a real failure — no interactive desktop, COM
+        // refusing to start, a broken shell. Silently returning `None` here
+        // made those look exactly like a cancel, which is how an unopenable
+        // picker could go unnoticed.
+        Err(err) => {
+            log::line(format!("folder picker failed: {err}"));
+            None
+        }
+    }
+}
+
+unsafe fn open_folder_dialog(owner: Option<HWND>) -> ::windows::core::Result<Option<String>> {
+    let dialog: IFileOpenDialog = CoCreateInstance(&FileOpenDialog, None, CLSCTX_INPROC_SERVER)?;
+    let options = dialog.GetOptions()?;
+    dialog.SetOptions(options | FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM)?;
+    dialog.Show(owner)?;
+    let item = dialog.GetResult()?;
+    let wide = item.GetDisplayName(SIGDN_FILESYSPATH)?;
+    let path = wide.to_string().ok();
+    CoTaskMemFree(Some(wide.0 as *const _));
+    Ok(path)
+}
+
+// ── Folder picker, end to end ─────────────────────────────────────────────────
+
+/// Tests that put a real dialog on screen.
+///
+/// Every one of these is `#[ignore]`d, so `cargo test` stays headless. They
+/// exist to be driven from outside the process by `windows/tests/e2e`, which
+/// finds the dialog through UI Automation and answers it — the only way to
+/// cover `pick_folder`, since nothing inside a test harness can click a modal
+/// window's buttons.
+///
+/// Run them the way that suite does, never by hand:
+///   cd windows/tests/e2e && pytest -v
+#[cfg(test)]
+mod picker_e2e {
+    use super::*;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+
+    use ::windows::core::w;
+    use ::windows::Win32::UI::WindowsAndMessaging::{
+        CreateWindowExW, DestroyWindow, DispatchMessageW, PeekMessageW, TranslateMessage,
+        MSG, PM_REMOVE, WINDOW_EX_STYLE, WS_EX_TOPMOST, WS_POPUP, WS_VISIBLE,
+    };
+
+    /// A stand-in for the island: topmost, non-activating, out of Alt-Tab.
+    ///
+    /// The bug this guards against only exists against a window like this, so
+    /// a test that opened an ownerless dialog on an empty desktop would pass
+    /// while the real thing stayed invisible. "STATIC" is a class the system
+    /// already registers, which is why there is no window proc here.
+    ///
+    /// It gets a thread of its own with a message pump, and that is not
+    /// decoration. A modal dialog owned by a window on another thread sends
+    /// messages to the owner's thread while it is being created; a thread that
+    /// never pumps never answers them, and the dialog is never created at all
+    /// — it hangs with nothing on screen. That is exactly what happens here if
+    /// the pump below is removed. In Coucou the owner is the island, whose
+    /// thread is the Tauri main loop and always pumps, which is also why
+    /// `pick_project` hands the dialog to the blocking pool rather than
+    /// holding a runtime worker that the main loop might be waiting on.
+    struct FakeIsland {
+        hwnd: isize,
+        stop: Arc<AtomicBool>,
+        pump: Option<std::thread::JoinHandle<()>>,
+    }
+
+    impl FakeIsland {
+        fn new() -> Self {
+            let (tx, rx) = std::sync::mpsc::channel();
+            let stop = Arc::new(AtomicBool::new(false));
+            let flag = stop.clone();
+            let pump = std::thread::spawn(move || unsafe {
+                let hwnd = CreateWindowExW(
+                    WINDOW_EX_STYLE(WS_EX_TOPMOST.0 | WS_EX_NOACTIVATE.0 | WS_EX_TOOLWINDOW.0),
+                    w!("STATIC"),
+                    w!("Coucou picker test"),
+                    WS_POPUP | WS_VISIBLE,
+                    300,
+                    0,
+                    720,
+                    320,
+                    None,
+                    None,
+                    None,
+                    None,
+                )
+                .expect("the system STATIC class always creates");
+                tx.send(hwnd.0 as isize).expect("the test is waiting for this");
+
+                let mut msg = MSG::default();
+                while !flag.load(Ordering::Relaxed) {
+                    while PeekMessageW(&mut msg, None, 0, 0, PM_REMOVE).as_bool() {
+                        let _ = TranslateMessage(&msg);
+                        DispatchMessageW(&msg);
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(5));
+                }
+                let _ = DestroyWindow(hwnd);
+            });
+
+            let hwnd = rx.recv().expect("the window thread always reports its handle");
+            Self { hwnd, stop, pump: Some(pump) }
+        }
+
+        fn owner(&self) -> Option<isize> {
+            Some(self.hwnd)
+        }
+    }
+
+    impl Drop for FakeIsland {
+        fn drop(&mut self) {
+            self.stop.store(true, Ordering::Relaxed);
+            if let Some(pump) = self.pump.take() {
+                let _ = pump.join();
+            }
+        }
+    }
+
+    /// The happy path. The driver types a folder and confirms it; what the
+    /// dialog handed back is printed for the driver to assert on, because the
+    /// path it chose is not knowable from in here.
+    #[test]
+    #[ignore = "shows a modal dialog; driven by windows/tests/e2e"]
+    fn pick_folder_returns_a_path() {
+        let island = FakeIsland::new();
+        let picked = pick_folder_owned(island.owner());
+        let path = picked.expect("the driver confirmed a folder, so there must be a path");
+        assert!(
+            std::path::Path::new(&path).is_dir(),
+            "the picker returned something that is not a folder: {path}"
+        );
+        // SIGDN_FILESYSPATH, not a shell display name: no "This PC > …".
+        assert!(!path.contains('>'), "not a filesystem path: {path}");
+        println!("picked: {path}");
+    }
+
+    /// Escape is a no-op. `Show` reports cancellation as an error, and the
+    /// point of this test is that it does not get logged or surfaced as one.
+    #[test]
+    #[ignore = "shows a modal dialog; driven by windows/tests/e2e"]
+    fn pick_folder_cancels_cleanly() {
+        let island = FakeIsland::new();
+        assert!(pick_folder_owned(island.owner()).is_none());
+        println!("cancelled");
+    }
+
+    /// Twice in a row, on the same process. Each call sets up and tears down
+    /// its own COM apartment; a `CoUninitialize` that did not pair with its
+    /// `CoInitializeEx` would show up on the second call and nowhere else.
+    #[test]
+    #[ignore = "shows two modal dialogs; driven by windows/tests/e2e"]
+    fn pick_folder_twice() {
+        let island = FakeIsland::new();
+        for _ in 0..2 {
+            let path = pick_folder_owned(island.owner()).expect("the driver confirmed a folder");
+            println!("picked: {path}");
+        }
+    }
+}

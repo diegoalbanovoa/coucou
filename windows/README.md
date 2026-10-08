@@ -117,6 +117,19 @@ The app icon and the tray icon are drawn in code, like Mochi itself:
 npm run icons          # regenerates src-tauri/icons from scripts/gen-icons.mjs
 ```
 
+### Tests
+
+```powershell
+cargo test             # the Rust backend and the hook
+npm run test           # the island's state machine and hook handling
+```
+
+`windows/tests/e2e/` is a separate, opt-in suite: it puts the real shell folder
+picker on screen and answers it with pywinauto, which is the only way to cover
+code that shows a modal dialog. It takes over the mouse for a few seconds, so
+it is not part of `cargo test` — the Rust tests it drives are all `#[ignore]`d.
+See `windows/tests/e2e/README.md`.
+
 ### Layout
 
 ```
@@ -129,6 +142,7 @@ windows/
   src-tauri/           Rust backend: window, named pipe, Claude API, pollers
   hook/                coucou-hook.exe, the Claude Code relay
   scripts/             icon generator
+  tests/               island tests, and the folder-picker E2E in tests/e2e/
 ```
 
 ### Log

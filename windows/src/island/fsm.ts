@@ -85,6 +85,24 @@ export class IslandStateMachine {
     this.schedulePetitHide();
   }
 
+  /**
+   * Hold the island open while something off-island waits on the user.
+   *
+   * Cancelling the timers matters as much as the flag: the mouse may already
+   * have left on its way to a native dialog, so a collapse countdown can
+   * be running by the time the pin goes on, and `pinned` is only consulted
+   * when a countdown is *started*.
+   */
+  pin() {
+    this.pinned = true;
+    this.cancelTimers();
+  }
+
+  /** Let the island auto-close again. */
+  unpin() {
+    this.pinned = false;
+  }
+
   /** Alert or explicit request: open straight to expanded. */
   forceHome() {
     this.cancelTimers();

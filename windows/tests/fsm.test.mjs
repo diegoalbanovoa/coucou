@@ -162,3 +162,28 @@ test("a transition to the current state is not reported", () => {
   fsm.forceHome();
   assert.deepEqual(transitions, ["hidden>home"]);
 });
+
+test("pinning stops a collapse countdown that is already running", () => {
+  // The folder picker's case: the mouse leaves on its way to the dialog, so
+  // the countdown has started by the time the pin goes on.
+  fsm.forceHome();
+  fsm.mouseLeft();
+  seconds(10);
+  fsm.pin();
+  seconds(600);
+  assert.equal(fsm.state, "home");
+});
+
+test("unpinning does not collapse the island on its own", () => {
+  // The user comes back from the dialog to an island showing what they
+  // attached; it closes on the next time they leave it, not before.
+  fsm.forceHome();
+  fsm.pin();
+  fsm.mouseLeft();
+  fsm.unpin();
+  seconds(600);
+  assert.equal(fsm.state, "home");
+  fsm.mouseLeft();
+  seconds(15);
+  assert.equal(fsm.state, "petit");
+});

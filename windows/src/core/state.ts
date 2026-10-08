@@ -137,6 +137,10 @@ class AppState {
   searchResult: SearchResult | null = null;
   chatHistory: ChatMessage[] = [];
   pendingApproval: ApprovalInfo | null = null;
+  /** Folder the agent runs in, or null when nothing is attached. */
+  attachedProject: string | null = null;
+  /** Which CLI the chat runs, or null for the API chat. */
+  agentCli: string | null = null;
 
   integrations: Record<string, IntegrationInfo> = {};
 

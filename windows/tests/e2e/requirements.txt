@@ -1,0 +1,4 @@
+pywinauto>=0.6.9
+pytest>=8
+pytest-timeout>=2
+Pillow>=10

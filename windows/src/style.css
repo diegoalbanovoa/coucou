@@ -764,6 +764,90 @@ input[type="range"]::-webkit-slider-thumb {
   display: none;
 }
 
+/* Which agent runs the message, and where it runs. Quiet until hovered: an
+   ordinary question should not look surrounded by controls. */
+.chat-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 2px;
+}
+
+.chat-meta-btn {
+  padding: 2px 7px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  font: 400 11px var(--font);
+  color: var(--ink-3);
+  cursor: pointer;
+  white-space: nowrap;
+  max-width: 190px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.chat-meta-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--ink-1);
+}
+
+/* An attached folder is live state, not a suggestion, so it stays legible
+   without hovering. */
+.chat-meta-btn.on {
+  color: var(--ink-2);
+  background: rgba(255, 255, 255, 0.07);
+}
+
+/* `/` autocomplete. Collapsed to nothing when there is nothing to show, so it
+   never steals height from the log. */
+.slash-palette {
+  display: none;
+  flex-direction: column;
+  gap: 1px;
+  max-height: 124px;
+  overflow-y: auto;
+  padding: 3px;
+  border-radius: 9px;
+  background: rgba(0, 0, 0, 0.28);
+}
+
+.slash-palette.open {
+  display: flex;
+}
+
+.slash-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.slash-row.on {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.slash-name {
+  font: 500 11.5px var(--mono, var(--font));
+  color: var(--ink-1);
+  white-space: nowrap;
+}
+
+/* The description is the thing that makes a list of 60 skills usable, but it
+   must never push the name out of view. */
+.slash-desc {
+  flex: 1;
+  min-width: 0;
+  font: 400 11px var(--font);
+  color: var(--ink-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .chip {
   display: inline-flex;
   align-items: center;

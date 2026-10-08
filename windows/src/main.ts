@@ -5,6 +5,7 @@ import { Bridge, IS_TAURI, onEvent } from "./core/bridge";
 import { Sound } from "./core/sound";
 import { State, type Settings } from "./core/state";
 import { Island } from "./island/island";
+import { loadAgentEnvironment, registerAgentHandlers } from "./island/agent";
 import { registerHookHandlers } from "./island/hooks";
 import { registerIntegrationHandlers, refreshConfigured } from "./island/integrations";
 
@@ -63,6 +64,12 @@ async function main() {
 
   registerHookHandlers(island);
   registerIntegrationHandlers(island);
+
+  registerAgentHandlers(island);
+
+  // Which CLIs exist and what `/` can reach. Not awaited: the island should
+  // come up at once, and the chat header fills in a moment later.
+  void loadAgentEnvironment();
 
   island.launch();
 

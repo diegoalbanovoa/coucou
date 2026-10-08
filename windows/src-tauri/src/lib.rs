@@ -1,5 +1,6 @@
 // Coucou for Windows — app wiring and the commands the island calls.
 
+mod agent;
 mod claude;
 mod files;
 mod hooks;
@@ -13,7 +14,7 @@ mod settings;
 mod tray;
 
 use std::process::Command;
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use serde::Serialize;
@@ -247,6 +248,90 @@ async fn chat_send(
     claude::send(&chat, &model, query, context).await
 }
 
+// ── Agent chat: the installed CLIs, in an attached project ────────────────────
+
+/// Which agent CLIs are on this machine. The island shows these in the picker
+/// above the chat box, next to the API models.
+#[tauri::command]
+fn agent_clis() -> Vec<agent::CliInfo> {
+    agent::installed()
+}
+
+/// What `/` can reach right now — the user's own commands, the project's, and
+/// their skills.
+#[tauri::command]
+fn agent_commands(app: AppHandle) -> Vec<agent::SlashCommand> {
+    agent::slash_commands(&app.state::<agent::Project>())
+}
+
+/// Attaches the folder the agent runs in. Nothing runs until one is chosen.
+#[tauri::command]
+fn attach_project(app: AppHandle, path: String) -> Result<String, String> {
+    let name = app.state::<agent::Project>().attach(&path)?;
+    // A new project is a new conversation: resuming the old session would run
+    // it in the wrong folder.
+    app.state::<agent::Session>().reset();
+    log::line(format!("agent project attached: {name}"));
+    Ok(name)
+}
+
+#[tauri::command]
+fn detach_project(app: AppHandle) {
+    app.state::<agent::Project>().detach();
+    app.state::<agent::Session>().reset();
+    log::line("agent project detached");
+}
+
+/// Set while a folder picker is on screen. Without it a second click on the
+/// chip put up a second dialog — the first one does not disable the chip,
+/// because the chip lives in the webview and the dialog is a native window.
+static PICKING: AtomicBool = AtomicBool::new(false);
+
+/// Clears `PICKING` however the command ends, a dropped future included: a
+/// flag left set would mean no picker for the rest of the run.
+struct PickingGuard;
+
+impl Drop for PickingGuard {
+    fn drop(&mut self) {
+        PICKING.store(false, Ordering::SeqCst);
+    }
+}
+
+/// The folder picker, opened from Rust so the webview never handles a path it
+/// did not get from the user.
+#[tauri::command]
+async fn pick_project(app: AppHandle) -> Option<String> {
+    let win = island::window(&app)?;
+    if PICKING.swap(true, Ordering::SeqCst) {
+        return None;
+    }
+    let _guard = PickingGuard;
+    // The dialog is modal and stays up for as long as the user wants it to.
+    // Awaiting it on a runtime worker would park that worker for minutes, and
+    // the hook pipe server and the agent turn share the same runtime — so it
+    // goes to the blocking pool instead.
+    tauri::async_runtime::spawn_blocking(move || platform::pick_folder(&win))
+        .await
+        .ok()
+        .flatten()
+}
+
+/// One agent turn through the chosen CLI. Its tool calls come back to the
+/// island as ordinary hook events, and its permission card is the one Claude
+/// Code sessions already use.
+#[tauri::command]
+async fn agent_send(app: AppHandle, cli: String, prompt: String) -> Result<String, String> {
+    let project = app.state::<agent::Project>();
+    let session = app.state::<agent::Session>();
+    agent::send(&project, &session, &cli, prompt).await
+}
+
+/// Starts a fresh conversation with the CLI, leaving the project attached.
+#[tauri::command]
+fn agent_reset(app: AppHandle) {
+    app.state::<agent::Session>().reset();
+}
+
 #[tauri::command]
 fn chat_reset(chat: State<Chat>) {
     chat.reset();
@@ -376,6 +461,8 @@ pub fn run() {
         })
         .manage(Pending::default())
         .manage(Chat::default())
+        .manage(agent::Project::default())
+        .manage(agent::Session::default())
         .invoke_handler(tauri::generate_handler![
             boot,
             save_settings,
@@ -395,6 +482,13 @@ pub fn run() {
             log_line,
             chat_send,
             chat_reset,
+            agent_clis,
+            agent_commands,
+            attach_project,
+            detach_project,
+            pick_project,
+            agent_send,
+            agent_reset,
             ingest_file,
             secret_present,
             secret_set,

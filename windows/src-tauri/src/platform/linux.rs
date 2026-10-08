@@ -284,6 +284,32 @@ pub fn set_input_region(win: &WebviewWindow, rect: Region) {
     apply_input_region(&gw, rect);
 }
 
+/// The desktop's own folder picker, for attaching a project to the chat.
+/// Whichever of these is installed answers; none of them means no picker, and
+/// the caller simply gets nothing back.
+///
+/// The island is passed for parity with Windows, where the dialog has to be
+/// owned by it to be visible at all. zenity and kdialog are separate processes
+/// and take no owner, so here it is unused.
+pub fn pick_folder(_win: &WebviewWindow) -> Option<String> {
+    let attempts: [(&str, &[&str]); 2] = [
+        ("zenity", &["--file-selection", "--directory", "--title=Attach a project folder"]),
+        ("kdialog", &["--getexistingdirectory", "."]),
+    ];
+    for (program, args) in attempts {
+        let Some(exe) = find_on_path(program) else { continue };
+        let Ok(out) = Command::new(exe).args(args).output() else { continue };
+        if !out.status.success() {
+            continue; // cancelled, or the tool refused — try the next one
+        }
+        let path = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        if !path.is_empty() {
+            return Some(path);
+        }
+    }
+    None
+}
+
 fn apply_input_region(gw: &impl IsA<gtk::Widget>, rect: Region) {
     match rect {
         None => gw.input_shape_combine_region(None),

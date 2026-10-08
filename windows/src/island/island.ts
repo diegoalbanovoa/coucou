@@ -334,9 +334,21 @@ export class Island {
     this.fsm.reveal();
   }
 
+  /**
+   * Hold the island open while something off-island waits on the user.
+   *
+   * The folder picker is the case this exists for: it is a native window, so
+   * using it means moving the cursor off the island, and the island's answer
+   * to a cursor that leaves is to close after `autoCloseInterval` — which is
+   * shorter than most folder hunts.
+   */
+  pin() {
+    this.fsm.pin();
+  }
+
   /** An alert stopped waiting for an answer: let the island auto-close again. */
   dropPin() {
-    this.fsm.pinned = false;
+    this.fsm.unpin();
   }
 
   // ── File drop ───────────────────────────────────────────────────────────────
