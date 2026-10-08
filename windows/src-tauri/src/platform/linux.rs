@@ -137,13 +137,36 @@ pub fn reveal_folder(path: &str) {
 /// Our own `which`: the first executable file named `stem` on $PATH.
 pub fn find_on_path(stem: &str) -> Option<PathBuf> {
     let dirs = std::env::var_os("PATH")?;
-    std::env::split_paths(&dirs)
-        .map(|dir| dir.join(stem))
-        .find(|p| {
-            std::fs::metadata(p)
-                .map(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
-                .unwrap_or(false)
-        })
+    std::env::split_paths(&dirs).find_map(|dir| find_in(&dir, stem))
+}
+
+/// `stem` as an executable inside `dir`.
+pub fn find_in(dir: &Path, stem: &str) -> Option<PathBuf> {
+    let candidate = dir.join(stem);
+    let runnable = std::fs::metadata(&candidate)
+        .map(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+        .unwrap_or(false);
+    runnable.then_some(candidate)
+}
+
+/// Where the tools that install agent CLIs put them, beyond PATH. Same reason
+/// as the Windows list: Coucou is started by the session, not by a shell.
+pub fn extra_bin_dirs() -> Vec<PathBuf> {
+    let home = super::home_dir();
+    let mut kept: Vec<PathBuf> = Vec::new();
+    for dir in [
+        home.join(".local").join("bin"),
+        home.join(".bun").join("bin"),
+        home.join(".cargo").join("bin"),
+        home.join(".npm-global").join("bin"),
+        PathBuf::from("/usr/local/bin"),
+        PathBuf::from("/snap/bin"),
+    ] {
+        if dir.is_dir() && !kept.contains(&dir) {
+            kept.push(dir);
+        }
+    }
+    kept
 }
 
 // ── Cursor ────────────────────────────────────────────────────────────────────

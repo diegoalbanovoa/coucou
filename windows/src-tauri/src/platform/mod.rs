@@ -25,6 +25,12 @@ pub struct LocalTime {
     pub second: u32,
 }
 
+/// An executable, looked for on PATH first and then in the folders the tools
+/// that install agent CLIs use. See each platform's `extra_bin_dirs`.
+pub fn find_exe(stem: &str) -> Option<PathBuf> {
+    find_on_path(stem).or_else(|| extra_bin_dirs().iter().find_map(|dir| find_in(dir, stem)))
+}
+
 /// The user's home directory, where `.claude/settings.json` lives.
 pub fn home_dir() -> PathBuf {
     std::env::var_os(HOME_VAR)

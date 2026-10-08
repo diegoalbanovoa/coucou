@@ -138,7 +138,12 @@ export type ChatContext =
 export interface CliInfo {
   id: string;
   label: string;
+  /** Where it was found — which copy is being run is worth knowing. */
   path: string;
+  /** What it answered to `--version`, or "" when it did not answer. */
+  version: string;
+  /** Whether its reply streams and its conversation can be resumed. */
+  streams: boolean;
 }
 
 /**

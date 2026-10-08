@@ -35,50 +35,173 @@ const TURN_TIMEOUT: Duration = Duration::from_secs(600);
 const POLL: Duration = Duration::from_millis(150);
 /// Output handed back to the island, so one runaway reply cannot flood it.
 const MAX_OUTPUT: usize = 100_000;
+/// How long a CLI gets to answer `--version`. Generous because this does not
+/// hold anything up: an npm shim starting cold took over three seconds on the
+/// machine this was written on, and answered in two once warm.
+const VERSION_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// One agent CLI we know how to drive headlessly.
 pub struct Cli {
     /// Stable id, also the value stored in settings.
     pub id: &'static str,
     pub label: &'static str,
-    /// Executable stem to look for on PATH.
+    /// Executable stem to look for.
     stem: &'static str,
+    /// The arguments that run one prompt and print the answer; the prompt is
+    /// appended after them. Data rather than a match arm, because this is the
+    /// one thing that differs between these CLIs and it is easy to get wrong.
+    prompt_args: &'static [&'static str],
+    /// Whether Coucou can read this one's output as it comes and resume its
+    /// conversation. Only Claude Code, for now — it is the only one with both
+    /// a streaming JSON format and a session id we can choose.
+    pub streams: bool,
 }
 
-/// Every CLI Coucou can run. Claude Code is first: it is the one whose hooks
-/// Coucou already installs, so it is the only one whose tool calls can be
-/// approved from the island today.
+/// Every CLI Coucou can run.
+///
+/// Claude Code is first: it is the one whose hooks Coucou installs, so it is
+/// the only one whose tool calls can be approved from the island.
+///
+/// Ollama is deliberately not here. It is a model runner, not an agent CLI: it
+/// has no tools to approve, and `ollama run` needs a model named on the
+/// command line, which is a choice this list has no way to make.
 pub const CLIS: &[Cli] = &[
-    Cli { id: "claude", label: "Claude Code", stem: "claude" },
-    Cli { id: "gemini", label: "Gemini CLI", stem: "gemini" },
-    Cli { id: "copilot", label: "Copilot CLI", stem: "copilot" },
+    Cli {
+        id: "claude",
+        label: "Claude Code",
+        stem: "claude",
+        prompt_args: &["-p"],
+        streams: true,
+    },
+    Cli { id: "gemini", label: "Gemini CLI", stem: "gemini", prompt_args: &["-p"], streams: false },
+    Cli {
+        id: "copilot",
+        label: "Copilot CLI",
+        stem: "copilot",
+        prompt_args: &["-p"],
+        streams: false,
+    },
+    Cli {
+        id: "codex",
+        label: "Codex CLI",
+        stem: "codex",
+        prompt_args: &["exec"],
+        streams: false,
+    },
+    Cli {
+        id: "cursor-agent",
+        label: "Cursor Agent",
+        stem: "cursor-agent",
+        prompt_args: &["-p"],
+        streams: false,
+    },
+    Cli { id: "qwen", label: "Qwen Code", stem: "qwen", prompt_args: &["-p"], streams: false },
+    Cli {
+        id: "opencode",
+        label: "OpenCode",
+        stem: "opencode",
+        prompt_args: &["run"],
+        streams: false,
+    },
 ];
 
 fn cli(id: &str) -> Option<&'static Cli> {
     CLIS.iter().find(|c| c.id == id)
 }
 
-#[derive(Serialize)]
+/// One installed CLI, as the island and the settings window show it.
+#[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct CliInfo {
     pub id: &'static str,
     pub label: &'static str,
-    /// Where it was found, for the settings window.
+    /// Where it was found. Worth showing: which copy is being run is exactly
+    /// the thing that surprises people with four package managers installed.
     pub path: String,
+    /// What it answers to `--version`, or empty when it did not answer.
+    pub version: String,
+    pub streams: bool,
 }
 
-/// Which agent CLIs are actually installed. Looked up on demand rather than
-/// cached: installing one should not need a restart to show up.
+/// What each executable answered to `--version`, so it is asked once.
+static VERSIONS: Mutex<Option<std::collections::HashMap<PathBuf, String>>> = Mutex::new(None);
+
+/// Where each CLI in the table was found, if it was.
+fn found() -> Vec<(&'static Cli, PathBuf)> {
+    CLIS.iter().filter_map(|c| platform::find_exe(c.stem).map(|exe| (c, exe))).collect()
+}
+
+/// Which agent CLIs are on this machine, with whatever versions are known.
+///
+/// Instant on purpose. The lookup itself is cheap and is done on every call —
+/// installing a CLI should not need a restart to show up — but a version costs
+/// a process start, and an npm shim starting cold takes seconds. So the
+/// versions are only read from the cache here and filled in by `versions()`.
 pub fn installed() -> Vec<CliInfo> {
-    CLIS.iter()
-        .filter_map(|c| {
-            platform::find_on_path(c.stem).map(|p| CliInfo {
-                id: c.id,
-                label: c.label,
-                path: p.to_string_lossy().to_string(),
-            })
+    let known = VERSIONS.lock().unwrap();
+    found()
+        .into_iter()
+        .map(|(spec, exe)| CliInfo {
+            id: spec.id,
+            label: spec.label,
+            path: display_path(&exe),
+            version: known
+                .as_ref()
+                .and_then(|seen| seen.get(&exe))
+                .cloned()
+                .unwrap_or_default(),
+            streams: spec.streams,
         })
         .collect()
+}
+
+/// Asks every installed CLI its version and hands back the finished list, or
+/// `None` when it says nothing `installed()` did not already know.
+///
+/// All of them at once: in series, seven CLIs would be seven cold starts.
+pub async fn versions() -> Option<Vec<CliInfo>> {
+    let before = installed();
+    let asking: Vec<_> = found()
+        .into_iter()
+        .map(|(_, exe)| tokio::spawn(async move { version_of(&exe).await }))
+        .collect();
+    for asked in asking {
+        let _ = asked.await;
+    }
+
+    let after = installed();
+    let changed = before.len() != after.len()
+        || before.iter().zip(&after).any(|(a, b)| a.version != b.version);
+    changed.then_some(after)
+}
+
+/// What `exe --version` says, trimmed to one line. Empty when it says nothing,
+/// takes too long, or is not the kind of program that answers that flag.
+async fn version_of(exe: &Path) -> String {
+    if let Some(known) = VERSIONS.lock().unwrap().as_ref().and_then(|seen| seen.get(exe)).cloned() {
+        return known;
+    }
+
+    let mut cmd = Command::new(exe);
+    cmd.arg("--version");
+    cmd.stdin(Stdio::null());
+    #[cfg(windows)]
+    cmd.creation_flags(0x0800_0000);
+
+    let answer = match tokio::time::timeout(VERSION_TIMEOUT, cmd.output()).await {
+        Ok(Ok(out)) if out.status.success() => {
+            let text = String::from_utf8_lossy(&out.stdout).to_string();
+            first_chars(text.lines().next().unwrap_or("").trim(), 40)
+        }
+        _ => String::new(),
+    };
+
+    VERSIONS
+        .lock()
+        .unwrap()
+        .get_or_insert_with(std::collections::HashMap::new)
+        .insert(exe.to_path_buf(), answer.clone());
+    answer
 }
 
 // ── Slash commands ────────────────────────────────────────────────────────────
@@ -465,7 +588,7 @@ pub async fn send(
     let Some(spec) = cli(cli_id) else {
         return Err(format!("Unknown agent `{cli_id}`."));
     };
-    let Some(exe) = platform::find_on_path(spec.stem) else {
+    let Some(exe) = platform::find_exe(spec.stem) else {
         return Err(format!("{} is not installed.", spec.label));
     };
     let Some(root) = project.current() else {
@@ -485,43 +608,39 @@ pub async fn send(
     #[cfg(windows)]
     cmd.creation_flags(0x0800_0000);
 
+    // However this CLI takes a one-shot prompt, from the table.
+    cmd.args(spec.prompt_args);
+    cmd.arg(&prompt);
+
     // Resuming is per-CLI; only Claude Code gives us a session id to hold on to.
     let resumed = session.current();
-    match spec.id {
-        "claude" => {
-            // stream-json so the island can show the reply as it is written and
-            // name each tool as it is reached for. The CLI requires --verbose
-            // for stream-json under -p.
-            cmd.arg("-p").arg(&prompt);
-            cmd.arg("--output-format").arg("stream-json");
-            cmd.arg("--verbose").arg("--include-partial-messages");
-            match &resumed {
-                Some(id) => {
-                    cmd.arg("--resume").arg(id);
-                }
-                None => {
-                    // We choose the id rather than reading it back, so the
-                    // island can recognise this session's hook events from the
-                    // first one — before any reply has arrived.
-                    let id = uuid_v4();
-                    cmd.arg("--session-id").arg(&id);
-                    session.set(id);
-                }
+    if spec.streams {
+        // stream-json so the island can show the reply as it is written and
+        // name each tool as it is reached for. The CLI requires --verbose for
+        // stream-json under -p.
+        cmd.arg("--output-format").arg("stream-json");
+        cmd.arg("--verbose").arg("--include-partial-messages");
+        match &resumed {
+            Some(id) => {
+                cmd.arg("--resume").arg(id);
             }
-            for dir in extra_dirs() {
-                cmd.arg("--add-dir").arg(dir);
+            None => {
+                // We choose the id rather than reading it back, so the island
+                // can recognise this session's hook events from the first one —
+                // before any reply has arrived.
+                let id = uuid_v4();
+                cmd.arg("--session-id").arg(&id);
+                session.set(id);
             }
         }
-        // The others have no session handle we can reuse, so each message is
-        // its own turn. Said plainly in the UI rather than faked here.
-        _ => {
-            cmd.arg("-p").arg(&prompt);
+        for dir in extra_dirs() {
+            cmd.arg("--add-dir").arg(dir);
         }
     }
 
     note(format!("agent {} in {}", spec.id, display_path(&root)));
 
-    if spec.id == "claude" {
+    if spec.streams {
         stream_turn(cmd, cancel, session, resumed.is_some(), spec.label, on).await
     } else {
         one_shot(cmd, session, resumed.is_some(), spec.label).await
@@ -902,6 +1021,26 @@ mod tests {
         // Nothing worth naming, and an input shape we have never seen.
         assert_eq!(label(r#"{"name":"TodoWrite","input":{"todos":[]}}"#), "TodoWrite");
         assert_eq!(label(r#"{"input":{}}"#), "Tool");
+    }
+
+    #[test]
+    fn every_cli_in_the_table_is_usable() {
+        let mut seen: Vec<&str> = Vec::new();
+        for spec in CLIS {
+            assert!(!seen.contains(&spec.id), "{} is listed twice", spec.id);
+            seen.push(spec.id);
+            assert!(!spec.stem.is_empty(), "{} has nothing to look for", spec.id);
+            assert!(
+                !spec.prompt_args.is_empty(),
+                "{} would be run with the prompt as its first argument",
+                spec.id
+            );
+            // Streaming means the flags only Claude Code takes, so anything
+            // else claiming it would be run with arguments it does not know.
+            assert_eq!(spec.streams, spec.id == "claude", "{} claims to stream", spec.id);
+        }
+        assert!(cli("claude").is_some(), "the one whose hooks we install must be there");
+        assert!(cli("ollama").is_none(), "a model runner is not an agent CLI");
     }
 
     #[test]

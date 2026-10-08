@@ -317,7 +317,16 @@ async fn chat_send(
 /// Which agent CLIs are on this machine. The island shows these in the picker
 /// above the chat box, next to the API models.
 #[tauri::command]
-fn agent_clis() -> Vec<agent::CliInfo> {
+fn agent_clis(app: AppHandle) -> Vec<agent::CliInfo> {
+    // The versions are filled in behind this and sent on when they land: a
+    // CLI installed as an npm shim can take seconds to answer `--version`, and
+    // the start screen lists the agents before any of them has spoken.
+    let handle = app.clone();
+    tauri::async_runtime::spawn(async move {
+        if let Some(full) = agent::versions().await {
+            let _ = handle.emit("agent-clis", full);
+        }
+    });
     agent::installed()
 }
 

@@ -1,7 +1,7 @@
 // Windows: Win32 for the island window and the cursor, %APPDATA% for files.
 
 use std::os::windows::process::CommandExt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use tauri::{AppHandle, Manager, WebviewWindow};
@@ -97,17 +97,62 @@ pub fn reveal_folder(path: &str) {
 /// Rust quotes arguments correctly for `.cmd`/`.bat` targets since 1.77, so
 /// spawning `code.cmd` directly is safe.
 pub fn find_on_path(stem: &str) -> Option<PathBuf> {
-    let exts = std::env::var("PATHEXT").unwrap_or_else(|_| ".COM;.EXE;.BAT;.CMD".into());
     let dirs = std::env::var_os("PATH")?;
-    for dir in std::env::split_paths(&dirs) {
-        for ext in exts.split(';').filter(|e| !e.is_empty()) {
-            let candidate = dir.join(format!("{stem}{}", ext.to_lowercase()));
-            if candidate.is_file() {
-                return Some(candidate);
-            }
+    std::env::split_paths(&dirs).find_map(|dir| find_in(&dir, stem))
+}
+
+/// `stem` as an executable inside `dir`, whatever suffix it carries here.
+pub fn find_in(dir: &Path, stem: &str) -> Option<PathBuf> {
+    let exts = std::env::var("PATHEXT").unwrap_or_else(|_| ".COM;.EXE;.BAT;.CMD".into());
+    for ext in exts.split(';').filter(|e| !e.is_empty()) {
+        let candidate = dir.join(format!("{stem}{}", ext.to_lowercase()));
+        if candidate.is_file() {
+            return Some(candidate);
         }
     }
     None
+}
+
+/// Where the tools that install agent CLIs actually put them.
+///
+/// PATH alone misses too much here. An npm global, a Volta or Bun or pnpm
+/// shim, a vendor's own installer — each writes to its own folder and adds it
+/// to the PATH of the shell the user installed from. Coucou is started by the
+/// session rather than by a shell, so it often sees neither.
+pub fn extra_bin_dirs() -> Vec<PathBuf> {
+    let home = super::home_dir();
+    let mut dirs = vec![
+        // Where the Claude Code installer puts `claude`.
+        home.join(".local").join("bin"),
+        home.join(".bun").join("bin"),
+        home.join(".cargo").join("bin"),
+    ];
+    if let Some(appdata) = std::env::var_os("APPDATA").map(PathBuf::from) {
+        dirs.push(appdata.join("npm"));
+        // nvm keeps one folder per Node version, and the global installs of
+        // whichever is current live inside it.
+        if let Ok(entries) = std::fs::read_dir(appdata.join("nvm")) {
+            for entry in entries.flatten() {
+                if entry.path().is_dir() {
+                    dirs.push(entry.path());
+                }
+            }
+        }
+    }
+    if let Some(local) = std::env::var_os("LOCALAPPDATA").map(PathBuf::from) {
+        dirs.push(local.join("pnpm"));
+        dirs.push(local.join("Volta").join("bin"));
+        dirs.push(local.join("Yarn").join("bin"));
+        dirs.push(local.join("Microsoft").join("WinGet").join("Links"));
+    }
+
+    let mut kept: Vec<PathBuf> = Vec::new();
+    for dir in dirs {
+        if dir.is_dir() && !kept.contains(&dir) {
+            kept.push(dir);
+        }
+    }
+    kept
 }
 
 // ── Who we are ────────────────────────────────────────────────────────────────

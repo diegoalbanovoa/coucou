@@ -7,8 +7,10 @@ import { calls, replies, sent } from "./tauri.mjs";
 import { loadAgentEnvironment, nextProvider } from "../src/island/agent.ts";
 import { State } from "../src/core/state.ts";
 
-const CLAUDE = { id: "claude", label: "Claude Code", path: "C:/bin/claude.exe" };
-const GEMINI = { id: "gemini", label: "Gemini CLI", path: "C:/bin/gemini.cmd" };
+const CLAUDE =
+  { id: "claude", label: "Claude Code", path: "C:/bin/claude.exe", version: "2.0.1", streams: true };
+const GEMINI =
+  { id: "gemini", label: "Gemini CLI", path: "C:/bin/gemini.cmd", version: "0.4.2", streams: false };
 
 /** What Rust answers: the CLIs it found, and the state it restored. */
 function machine({ clis = [CLAUDE, GEMINI], project = null, cli = null } = {}) {
@@ -61,7 +63,7 @@ test("no CLI installed leaves the chat on the API, with nothing remembered", asy
   assert.deepEqual(sent("agent_set_cli"), []);
 });
 
-test("switching agent remembers the choice, the API included", async () => {
+test("switching agent cycles the installed CLIs and remembers the choice", async () => {
   machine({ cli: "claude" });
   await loadAgentEnvironment();
   calls.length = 0;
@@ -69,11 +71,23 @@ test("switching agent remembers the choice, the API included", async () => {
   nextProvider();
   assert.equal(State.agentCli, "gemini");
 
-  // One past the last CLI is the API chat, and that is a choice too.
+  // Past the last one it comes back round. There is no API-key mode at the end
+  // of the list to fall into any more.
   nextProvider();
-  assert.equal(State.agentCli, null);
+  assert.equal(State.agentCli, "claude");
 
-  assert.deepEqual(sent("agent_set_cli"), [{ cli: "gemini" }, { cli: null }]);
+  assert.deepEqual(sent("agent_set_cli"), [{ cli: "gemini" }, { cli: "claude" }]);
+});
+
+test("one installed CLI has nothing to switch to", async () => {
+  machine({ clis: [CLAUDE], cli: "claude" });
+  await loadAgentEnvironment();
+  calls.length = 0;
+
+  nextProvider();
+
+  assert.equal(State.agentCli, "claude");
+  assert.deepEqual(sent("agent_set_cli"), []);
 });
 
 test("the project Rust restored is what `/` is asked about", async () => {

@@ -6,7 +6,7 @@
 // card — arrives as ordinary Claude Code hook events, because the session
 // Coucou spawns runs the same hooks any terminal session does. See agent.rs.
 
-import { Bridge } from "../core/bridge";
+import { Bridge, onEvent } from "../core/bridge";
 import type { CliInfo, SlashCommand } from "../core/bridge";
 import { State } from "../core/state";
 import type { Island } from "./island";
@@ -22,6 +22,13 @@ let island: Island | null = null;
 
 export function registerAgentHandlers(host: Island) {
   island = host;
+
+  // The versions are not known when the list first arrives — asking a CLI
+  // costs a process start — so Rust sends the finished list on afterwards.
+  void onEvent<CliInfo[]>("agent-clis", (clis) => {
+    availableClis = clis;
+    State.notify();
+  });
 }
 
 export async function loadAgentEnvironment() {
@@ -83,23 +90,31 @@ export async function toggleProject() {
   }
 }
 
-/** Cycles to the next installed CLI, or back to the API chat. */
-export function nextProvider() {
-  if (availableClis.length === 0) return;
-  const index = availableClis.findIndex((c) => c.id === State.agentCli);
-  // One past the end is the API chat, which is the only mode that works with
-  // no CLI installed and the only one that needs a key.
-  const next = index + 1;
-  State.agentCli = next >= availableClis.length ? null : availableClis[next].id;
-  // Remembered, so the next run opens on the agent the user actually uses.
-  void Bridge.agentSetCli(State.agentCli);
+/** Picks the agent the chat runs, and remembers the choice. */
+export function chooseProvider(id: string | null) {
+  State.agentCli = id;
+  void Bridge.agentSetCli(id);
   State.notify();
 }
 
-/** The label shown in the chat header for the current provider. */
+/**
+ * Cycles through the installed CLIs.
+ *
+ * There is no API-key mode at the end of the list any more. A CLI brings the
+ * user's own subscription, tools, skills and CLAUDE.md; the key brought a
+ * worse agent and a secret to look after.
+ */
+export function nextProvider() {
+  if (availableClis.length < 2) return;
+  const index = availableClis.findIndex((c) => c.id === State.agentCli);
+  chooseProvider(availableClis[(index + 1) % availableClis.length].id);
+}
+
+/** The label shown in the chat header for the current agent. */
 export function providerLabel(): string {
   const cli = availableClis.find((c) => c.id === State.agentCli);
-  return cli ? cli.label : "Claude API";
+  if (cli) return cli.label;
+  return availableClis.length === 0 ? "No agent CLI found" : "Pick an agent";
 }
 
 /**

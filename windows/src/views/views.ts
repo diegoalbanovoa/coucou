@@ -9,6 +9,7 @@ import { State, type AgentTask } from "../core/state";
 import { washRGBA, type IslandViewName, type Wash } from "../core/layout";
 import { createMiniBot, pruneMiniBots } from "../mochi/minibots";
 import { buildPrompt } from "./chat";
+import { availableClis, chooseProvider } from "../island/agent";
 import { buildChoose, buildUpload, buildUploading } from "./upload";
 import { renderIntegrationCard, type IntegrationCardHooks } from "./integrations";
 
@@ -270,20 +271,73 @@ function lighten(hex: string, amount: number): string {
 
 // ── Empty ─────────────────────────────────────────────────────────────────────
 
+/**
+ * The start screen: the agent CLIs found on this machine.
+ *
+ * What used to be here was "Nothing running right now" and a button. The
+ * agents are the useful thing to show — which ones this machine has, which one
+ * the chat will run, and where each was found.
+ */
 function buildEmpty(actions: ViewActions): ViewHost {
+  const title = h("div", { class: "title" });
+  const sub = h("div", { class: "sub" });
+  const list = h("div", { class: "agent-list" });
   const body = h(
     "div",
-    { class: "stack", style: "padding:0 18px 0 118px;flex-direction:row;align-items:center;gap:16px" },
-    h(
-      "div",
-      { style: "display:flex;flex-direction:column;gap:5px" },
-      h("div", { class: "title", text: "Nothing running right now." }),
-      h("div", { class: "sub", text: "Drop a file or window, or ask me anything." }),
-    ),
-    h("div", { class: "grow" }),
-    btn("Ask Claude", "primary", () => actions.setView("prompt")),
+    { class: "stack", style: "padding:0 16px 0 104px;gap:6px" },
+    h("div", { style: "display:flex;align-items:baseline;gap:8px" }, title, h("div", { class: "grow" }), sub),
+    list,
   );
-  return { el: h("div", { class: "view" }, card(null, body)), sync() {} };
+
+  let key = "";
+  return {
+    el: h("div", { class: "view" }, card(null, body)),
+    sync() {
+      const clis = availableClis;
+      const current = State.agentCli;
+      const shape = `${clis.map((c) => `${c.id}:${c.version}`).join("|")}~${current}`;
+      if (shape === key) return;
+      key = shape;
+
+      title.textContent = clis.length > 0 ? "Agents on this machine" : "No agent CLI found";
+      sub.textContent =
+        clis.length > 0
+          ? "click one to use it"
+          : "install Claude Code, Gemini, Codex…";
+      clear(list);
+
+      if (clis.length === 0) {
+        list.append(
+          h("div", {
+            class: "agent-empty",
+            text: "Coucou looks on PATH and in the folders npm, nvm, Volta, Bun, pnpm and the vendors' own installers use.",
+          }),
+        );
+        return;
+      }
+
+      for (const cli of clis) {
+        const on = cli.id === current;
+        const row = h(
+          "button",
+          { class: on ? "agent-row on" : "agent-row", title: cli.path },
+          dot(on ? "#22C55E" : "#5a5f69", 6),
+          h("span", { class: "agent-name", text: cli.label }),
+          h("span", { class: "agent-version", text: cli.version }),
+          h("div", { class: "grow" }),
+          h("span", {
+            class: "agent-tag",
+            text: cli.streams ? "streams · resumes" : "one shot",
+          }),
+        );
+        row.addEventListener("click", () => {
+          chooseProvider(cli.id);
+          actions.setView("prompt");
+        });
+        list.append(row);
+      }
+    },
+  };
 }
 
 // ── Approval ──────────────────────────────────────────────────────────────────

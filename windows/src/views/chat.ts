@@ -4,7 +4,7 @@
 import { h, svg, clear, copyToClipboard } from "./dom";
 import { ICONS } from "./icons";
 import { render } from "./markdown";
-import { Bridge, onEvent, type AgentTurn, type ChatContext } from "../core/bridge";
+import { Bridge, onEvent, type AgentTurn } from "../core/bridge";
 import { Sound } from "../core/sound";
 import { State, type ChatMessage } from "../core/state";
 import {
@@ -159,9 +159,10 @@ function lastPathComponent(path: string): string {
  * do what they expect, so it names the one blocker rather than a generic hint.
  */
 function placeholder(): string {
-  if (State.agentCli && !State.attachedProject) return "Attach a project folder first…";
+  if (!State.agentCli) return "No agent CLI found — install one to chat…";
+  if (!State.attachedProject) return "Attach a project folder first…";
   if (State.chatHistory.length > 0) return "Continue…";
-  return State.agentCli ? "Ask, or / for a command…" : "Ask me anything…";
+  return "Ask, or / for a command…";
 }
 
 export function buildPrompt(onHeightChange: () => void): ViewHost {
@@ -308,18 +309,24 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
     State.notify();
     onHeightChange();
 
+    // A dropped file is only context for the first question about it, and the
+    // agent is told where it is rather than handed its bytes: it can open the
+    // file itself, which is the whole point of running the real CLI.
     const file = State.droppedFile;
-    const context: ChatContext | null =
-      State.chatHistory.length === 1 && file ? { kind: "file", name: file.name, path: file.path } : null;
+    const prompt =
+      State.chatHistory.length === 1 && file?.path
+        ? `${query}\n\nThe file this is about: ${file.path}`
+        : query;
 
     try {
-      // A CLI runs the real agent — its own tools, skills and CLAUDE.md — and
-      // reports what it does through the hooks, so the steps and the
-      // permission card show up in the island exactly as a terminal session's
-      // would. The API path stays for anyone with a key and no CLI.
+      // The CLI runs the real agent — its own tools, skills and CLAUDE.md — and
+      // reports what it does through the hooks, so the steps and the permission
+      // card show up in the island exactly as a terminal session's would.
       const text = State.agentCli
-        ? await Bridge.agentSend(State.agentCli, query)
-        : (await Bridge.chatSend(query, context)).text;
+        ? await Bridge.agentSend(State.agentCli, prompt)
+        : await Promise.reject(
+            new Error("No agent CLI found. Install Claude Code, or another agent CLI, and Coucou will pick it up."),
+          );
       State.chatHistory.push({
         id: nextId++,
         role: "assistant",
