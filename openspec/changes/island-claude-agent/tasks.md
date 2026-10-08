@@ -1,5 +1,14 @@
 # Tasks
 
+> **Superseded — see `OUTCOME.md`.** The goal of this change shipped, by
+> shelling out to the agent CLI already installed on the machine rather than
+> building the loop and the tools inside `claude.rs`. None of the tasks below
+> were worked through, and the architecture they assume is not the one in the
+> code: `claude.rs` no longer exists. Left unticked and unarchived on purpose —
+> ticking them would claim work that was never done, and the archive step
+> waits on the diff review this file asks for.
+
+
 ## 1. Project attach/detach state (Rust)
 
 - [ ] 1.1 Add an `AttachedProject` struct (canonical root path) behind a `Mutex` on app state, with `attach(path)`, `detach()`, `current()`; `attach` canonicalizes the path and fails with an error the caller can surface if canonicalization fails — verify with a unit test covering attach, replace, detach, and a bad-path error
