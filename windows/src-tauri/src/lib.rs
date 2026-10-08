@@ -122,17 +122,33 @@ fn shared_settings(app: &AppHandle) -> Settings {
 /// app whose whole job is to be there when something needs answering cannot
 /// depend on the user having toggled a switch once.
 fn reconcile_autostart(app: &AppHandle, wanted: bool) {
+    // A debug build runs out of target/debug and takes its page from the Vite
+    // dev server, so a login entry pointing at it would start something that
+    // cannot draw — and would break the moment the tree is cleaned. The
+    // preference is left alone; it applies to the build that ships.
+    if cfg!(debug_assertions) {
+        log::line(format!("autostart left alone: a debug build must not own it (want {wanted})"));
+        return;
+    }
+
     let manager = app.autolaunch();
-    match manager.is_enabled() {
-        Ok(actual) if actual == wanted => {}
-        Ok(_) => {
-            let result = if wanted { manager.enable() } else { manager.disable() };
-            match result {
-                Ok(()) => log::line(format!("autostart now {wanted}")),
-                Err(err) => log::line(format!("could not set autostart: {err}")),
-            }
+    let result = if wanted {
+        // Written on every boot rather than only on a change. `enable` stamps
+        // the path of the executable running now, which is the only thing that
+        // corrects an entry left behind by an older install or another build —
+        // `is_enabled` answers whether there is an entry, never whether it
+        // points at us.
+        manager.enable()
+    } else {
+        match manager.is_enabled() {
+            // Nothing registered and nothing wanted: leave the registry alone.
+            Ok(false) => return,
+            _ => manager.disable(),
         }
-        Err(err) => log::line(format!("could not read autostart: {err}")),
+    };
+    match result {
+        Ok(()) => log::line(format!("autostart set to {wanted}")),
+        Err(err) => log::line(format!("could not set autostart: {err}")),
     }
 }
 
