@@ -1,9 +1,10 @@
 // Chat view — DOM port of PromptView / ChatBubble / TypingDotsView from
 // IslandViewContent.swift.
 
-import { h, svg, clear } from "./dom";
+import { h, svg, clear, copyToClipboard } from "./dom";
 import { ICONS } from "./icons";
-import { Bridge, type ChatContext } from "../core/bridge";
+import { render } from "./markdown";
+import { Bridge, onEvent, type AgentTurn, type ChatContext } from "../core/bridge";
 import { Sound } from "../core/sound";
 import { State, type ChatMessage } from "../core/state";
 import {
@@ -16,23 +17,129 @@ import type { ViewHost } from "./views";
 
 let nextId = 1;
 
+/** How much reply fits before it is folded down. Measured in characters
+ * because the island's width is fixed and its height is what we are saving. */
+const CLIP_AT = 1400;
+
+function clockOf(at: number): string {
+  return new Date(at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+function plural(n: number, one: string): string {
+  return `${n} ${one}${n === 1 ? "" : "s"}`;
+}
+
+/**
+ * What the agent did during a turn, folded into one line.
+ *
+ * While the turn runs the line is the step in flight, which is the thing worth
+ * watching; once it is over the line is the count, and the list is there for
+ * anyone who wants it.
+ */
+function stepsRow(steps: string[], live: boolean): HTMLElement | null {
+  if (steps.length === 0) return null;
+  const head = h("button", { class: "steps-head" });
+  const list = h("div", { class: "steps-list" });
+  for (const step of steps) list.append(h("div", { class: "step", text: step }));
+
+  let open = false;
+  const draw = () => {
+    head.textContent = open
+      ? `${plural(steps.length, "step")} · hide`
+      : live
+        ? steps[steps.length - 1]
+        : plural(steps.length, "step");
+    head.classList.toggle("live", live && !open);
+    list.classList.toggle("open", open);
+  };
+  head.addEventListener("click", () => {
+    open = !open;
+    draw();
+  });
+  draw();
+  return h("div", { class: "steps" }, head, list);
+}
+
+/** Copy — the one thing worth doing to a reply that is already on screen. */
+function replyActions(content: string): HTMLElement {
+  const copy = h("button", { class: "msg-btn", title: "Copy the reply" }, svg(ICONS.copy, 10));
+  copy.addEventListener("click", () => {
+    void copyToClipboard(content).then((done) => {
+      clear(copy);
+      copy.append(svg(done ? ICONS.check : ICONS.bang, 10));
+      copy.title = done ? "Copied" : "Could not copy";
+      window.setTimeout(() => {
+        clear(copy);
+        copy.append(svg(ICONS.copy, 10));
+        copy.title = "Copy the reply";
+      }, 1400);
+    });
+  });
+  return h("div", { class: "msg-actions" }, copy);
+}
+
+/** The reply text, folded down when it is long enough to bury the question. */
+function replyBody(content: string): HTMLElement {
+  const body = h("div", { class: "reply" });
+  body.append(render(content));
+  if (content.length <= CLIP_AT) return body;
+
+  body.classList.add("clipped");
+  const more = h("button", { class: "more-btn", text: "Show the whole reply" });
+  more.addEventListener("click", () => {
+    const folded = body.classList.toggle("clipped");
+    more.textContent = folded ? "Show the whole reply" : "Fold it back up";
+  });
+  return h("div", { class: "reply-wrap" }, body, more);
+}
+
 function bubble(message: ChatMessage): HTMLElement {
   if (message.role === "user") {
     return h(
       "div",
       { class: "chat-row user" },
-      h("div", { class: "bubble", text: message.content }),
+      h("div", { class: "bubble", text: message.content, title: clockOf(message.at) }),
     );
   }
-  return h("div", { class: "chat-row" }, h("div", { class: "reply", text: message.content }));
+
+  if (message.role === "error") {
+    const card = h(
+      "div",
+      { class: "reply-error", title: clockOf(message.at) },
+      h("div", { class: "reply-error-head" }, svg(ICONS.bang, 10), h("span", { text: "The turn stopped" })),
+      h("div", { class: "reply-error-detail", text: message.content }),
+    );
+    const row = h("div", { class: "chat-row" });
+    const steps = stepsRow(message.steps ?? [], false);
+    if (steps) row.append(h("div", { class: "reply-col" }, steps, card));
+    else row.append(card);
+    return row;
+  }
+
+  const column = h("div", { class: "reply-col", title: clockOf(message.at) });
+  const steps = stepsRow(message.steps ?? [], false);
+  if (steps) column.append(steps);
+  if (message.content.trim() === "") {
+    column.append(h("div", { class: "reply quiet", text: "No reply came back." }));
+  } else {
+    column.append(replyBody(message.content), replyActions(message.content));
+  }
+  return h("div", { class: "chat-row" }, column);
 }
 
-function typingDots(): HTMLElement {
-  return h(
-    "div",
-    { class: "chat-row" },
-    h("div", { class: "typing" }, h("i"), h("i"), h("i")),
-  );
+/** The reply being written: the steps so far, the text so far, or the dots. */
+function draftRow(): HTMLElement {
+  const column = h("div", { class: "reply-col" });
+  const steps = stepsRow(State.chatSteps, true);
+  if (steps) column.append(steps);
+  if (State.chatDraft === "") {
+    column.append(h("div", { class: "typing" }, h("i"), h("i"), h("i")));
+  } else {
+    const body = h("div", { class: "reply writing" });
+    body.append(render(State.chatDraft));
+    column.append(body);
+  }
+  return h("div", { class: "chat-row" }, column);
 }
 
 /** The coloured chip showing what the question is about (a dropped file). */
@@ -60,6 +167,12 @@ function placeholder(): string {
 export function buildPrompt(onHeightChange: () => void): ViewHost {
   const chipRow = h("div", { class: "chip-row" });
   const log = h("div", { class: "chat-log" });
+  // Rebuilt on their own schedules: the history only when a message lands, the
+  // draft on every frame a token arrives in.
+  const historyBox = h("div", { class: "chat-stack" });
+  const draftBox = h("div", { class: "chat-stack" });
+  log.append(historyBox, draftBox);
+  const jump = h("button", { class: "jump-btn", title: "Jump to the latest" }, svg(ICONS.arrowDown, 10));
   const input = h("input", {
     type: "text",
     class: "chat-input",
@@ -88,15 +201,47 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
     h(
       "div",
       { class: "card wash chat-card" },
-      h("div", { class: "chat-body" }, header, chipRow, log, palette, bar),
+      h("div", { class: "chat-body" }, header, chipRow, log, jump, palette, bar),
     ),
   );
   (el.querySelector(".card") as HTMLElement).style.setProperty("--wash", "rgba(99,102,241,0.5)");
 
   let sending = false;
   let renderedCount = -1;
+  let renderedDraft = "";
   let paletteKey = "";
   let highlighted = 0;
+  /** Whether new text should scroll into view — false once the user reads back. */
+  let stick = true;
+
+  log.addEventListener("scroll", () => {
+    stick = log.scrollHeight - log.scrollTop - log.clientHeight < 24;
+    jump.classList.toggle("on", !stick);
+  });
+  jump.addEventListener("click", () => {
+    stick = true;
+    log.scrollTop = log.scrollHeight;
+    jump.classList.remove("on");
+  });
+
+  // One repaint per frame however fast the tokens arrive: a reply streams in
+  // faster than the island can usefully be redrawn.
+  let painting = false;
+  function paint() {
+    if (painting) return;
+    painting = true;
+    requestAnimationFrame(() => {
+      painting = false;
+      State.notify();
+      onHeightChange();
+    });
+  }
+
+  void onEvent<AgentTurn>("agent-turn", (turn) => {
+    if (turn.kind === "text") State.chatDraft += turn.text;
+    else State.chatSteps.push(turn.label);
+    paint();
+  });
 
   provider.addEventListener("click", () => {
     nextProvider();
@@ -155,7 +300,10 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
     sending = true;
     Sound.play("send");
 
-    State.chatHistory.push({ id: nextId++, role: "user", content: query });
+    State.chatHistory.push({ id: nextId++, role: "user", content: query, at: Date.now() });
+    State.chatDraft = "";
+    State.chatSteps = [];
+    stick = true;
     State.stateOverride = "thinking";
     State.notify();
     onHeightChange();
@@ -172,15 +320,30 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
       const text = State.agentCli
         ? await Bridge.agentSend(State.agentCli, query)
         : (await Bridge.chatSend(query, context)).text;
-      State.chatHistory.push({ id: nextId++, role: "assistant", content: text });
-      State.stateOverride = null;
+      State.chatHistory.push({
+        id: nextId++,
+        role: "assistant",
+        content: text,
+        at: Date.now(),
+        steps: State.chatSteps.slice(),
+      });
       Sound.play("finish");
     } catch (err) {
-      State.stateOverride = null;
-      State.noteMessage = String(err).replace(/^Error:\s*/, "");
-      State.view = "note";
+      // Kept in the log, beside the question it answers. Switching the island
+      // to the note view took the whole conversation off screen for what is
+      // often one line about a flag.
+      State.chatHistory.push({
+        id: nextId++,
+        role: "error",
+        content: String(err).replace(/^Error:\s*/, ""),
+        at: Date.now(),
+        steps: State.chatSteps.slice(),
+      });
       Sound.play("error");
     } finally {
+      State.stateOverride = null;
+      State.chatDraft = "";
+      State.chatSteps = [];
       sending = false;
       State.notify();
       onHeightChange();
@@ -188,7 +351,12 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
     }
   }
 
-  send.addEventListener("click", () => void submit());
+  send.addEventListener("click", () => {
+    // The same button: there is only ever one thing to do to a turn, and it
+    // changes from "send it" to "stop it" the moment it starts.
+    if (sending) void Bridge.agentCancel();
+    else void submit();
+  });
   input.addEventListener("input", () => {
     highlighted = 0;
     syncPalette();
@@ -232,15 +400,21 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
         if (wantChip) chipRow.append(contextChip(wantChip));
       }
 
-      const thinking = State.stateOverride === "thinking";
-      const count = State.chatHistory.length + (thinking ? 0.5 : 0);
-      if (count !== renderedCount) {
-        renderedCount = count;
-        clear(log);
-        for (const m of State.chatHistory) log.append(bubble(m));
-        if (thinking) log.append(typingDots());
-        log.scrollTop = log.scrollHeight;
+      if (State.chatHistory.length !== renderedCount) {
+        renderedCount = State.chatHistory.length;
+        clear(historyBox);
+        for (const message of State.chatHistory) historyBox.append(bubble(message));
       }
+
+      // The draft is keyed by how much of it there is: enough to notice every
+      // token without comparing the whole reply on every frame.
+      const draftKey = sending ? `${State.chatDraft.length}|${State.chatSteps.length}` : "";
+      if (draftKey !== renderedDraft) {
+        renderedDraft = draftKey;
+        clear(draftBox);
+        if (sending) draftBox.append(draftRow());
+      }
+      if (stick) log.scrollTop = log.scrollHeight;
 
       provider.textContent = providerLabel();
       const attached = State.attachedProject;
@@ -248,6 +422,11 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
       projectBtn.textContent = attached ? lastPathComponent(attached) : "Attach project…";
       projectBtn.title = attached ? `${attached} — click to detach` : "Choose the folder the agent works in";
       projectBtn.classList.toggle("on", attached != null);
+
+      clear(send);
+      send.append(svg(sending ? ICONS.stop : ICONS.arrowUp, sending ? 9 : 11));
+      send.title = sending ? "Stop this turn" : "Send";
+      send.classList.toggle("stopping", sending);
 
       input.placeholder = placeholder();
       input.disabled = sending;

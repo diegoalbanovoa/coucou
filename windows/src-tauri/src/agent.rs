@@ -16,17 +16,23 @@
 // answer — which is exactly the point.
 
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::process::Stdio;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use serde::Serialize;
 use serde_json::Value;
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
+use tokio::process::Command;
 
-use crate::log;
 use crate::platform;
 
 /// A whole agent turn can take a while — a real task runs many tools.
 const TURN_TIMEOUT: Duration = Duration::from_secs(600);
+/// How often a quiet turn is checked for a cancel or the deadline. Short
+/// enough that Stop feels immediate, long enough to cost nothing.
+const POLL: Duration = Duration::from_millis(150);
 /// Output handed back to the island, so one runaway reply cannot flood it.
 const MAX_OUTPUT: usize = 100_000;
 
@@ -168,7 +174,7 @@ fn front_matter_description(path: &Path) -> String {
 /// user's file, not a scratch pad.
 fn note(message: String) {
     #[cfg(not(test))]
-    log::line(message);
+    crate::log::line(message);
     #[cfg(test)]
     eprintln!("{message}");
 }
@@ -311,12 +317,150 @@ fn extra_dirs() -> Vec<PathBuf> {
     if vault.is_dir() { vec![vault] } else { Vec::new() }
 }
 
+/// What the island is told while a turn runs. The reply itself comes back from
+/// `send`; these are what make the wait legible — before this the chat showed
+/// three dots for up to ten minutes and then the whole answer at once.
+#[derive(Serialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase", tag = "kind")]
+pub enum Turn {
+    /// More of the reply, as it is written.
+    Text { text: String },
+    /// A tool the agent just reached for.
+    Step { label: String },
+}
+
+/// The turn in flight, so the island can stop it. One at a time: the chat only
+/// sends the next message once the last reply has landed.
+#[derive(Default)]
+pub struct Cancel(Mutex<Option<Arc<AtomicBool>>>);
+
+impl Cancel {
+    /// A flag for the turn starting now, replacing any stale one.
+    fn arm(&self) -> Arc<AtomicBool> {
+        let flag = Arc::new(AtomicBool::new(false));
+        *self.0.lock().unwrap() = Some(flag.clone());
+        flag
+    }
+
+    fn disarm(&self) {
+        *self.0.lock().unwrap() = None;
+    }
+
+    /// Stops the turn in flight. False when there was nothing to stop.
+    pub fn stop(&self) -> bool {
+        match self.0.lock().unwrap().take() {
+            Some(flag) => {
+                flag.store(true, Ordering::SeqCst);
+                true
+            }
+            None => false,
+        }
+    }
+}
+
+/// Turns the CLI's stream-json lines into what the island shows.
+///
+/// Two shapes carry the same text: `stream_event` deltas, token by token, and
+/// the whole `assistant` message that follows each block. Emitting both would
+/// show everything twice, so a delta wins once one has been seen, and whole
+/// blocks are the fallback for a CLI that ignores --include-partial-messages.
+#[derive(Default)]
+pub struct Stream {
+    saw_delta: bool,
+    /// Everything emitted as text, in case no `result` line ever arrives.
+    text: String,
+    result: Option<String>,
+}
+
+impl Stream {
+    /// What one line of output means. A line that is not JSON is not an error:
+    /// CLIs print their own notices to stdout too.
+    pub fn line(&mut self, line: &str) -> Vec<Turn> {
+        let Ok(value) = serde_json::from_str::<Value>(line) else {
+            return Vec::new();
+        };
+        match value.get("type").and_then(Value::as_str) {
+            Some("stream_event") => {
+                let event = &value["event"];
+                if event.get("type").and_then(Value::as_str) != Some("content_block_delta") {
+                    return Vec::new();
+                }
+                match event["delta"].get("text").and_then(Value::as_str) {
+                    Some(text) if !text.is_empty() => {
+                        self.saw_delta = true;
+                        vec![self.keep(text)]
+                    }
+                    _ => Vec::new(),
+                }
+            }
+            Some("assistant") => {
+                let blocks = value["message"]["content"].as_array().cloned().unwrap_or_default();
+                let mut out = Vec::new();
+                for block in blocks {
+                    match block.get("type").and_then(Value::as_str) {
+                        Some("text") if !self.saw_delta => {
+                            match block["text"].as_str() {
+                                Some(text) if !text.is_empty() => out.push(self.keep(text)),
+                                _ => {}
+                            }
+                        }
+                        Some("tool_use") => out.push(Turn::Step { label: step_label(&block) }),
+                        _ => {}
+                    }
+                }
+                out
+            }
+            Some("result") => {
+                self.result =
+                    value["result"].as_str().map(str::to_string).filter(|s| !s.trim().is_empty());
+                Vec::new()
+            }
+            _ => Vec::new(),
+        }
+    }
+
+    fn keep(&mut self, text: &str) -> Turn {
+        self.text.push_str(text);
+        Turn::Text { text: text.to_string() }
+    }
+
+    /// The reply. The `result` line is authoritative; what was streamed is the
+    /// fallback for a turn that ended without one.
+    pub fn finish(self) -> String {
+        self.result.unwrap_or(self.text)
+    }
+}
+
+/// "Read agent.rs" rather than "Read": the file is the point. Says the same
+/// thing the hook pills already say for a session running in a terminal.
+fn step_label(block: &Value) -> String {
+    let name = block.get("name").and_then(Value::as_str).unwrap_or("Tool");
+    let input = &block["input"];
+    let detail = ["file_path", "path", "command", "pattern", "description", "url", "query"]
+        .iter()
+        .find_map(|key| input.get(*key).and_then(Value::as_str))
+        .unwrap_or("")
+        .trim();
+    if detail.is_empty() {
+        return name.to_string();
+    }
+    // A lone path reads as its file name; anything else is already a phrase.
+    let shown = if detail.contains(['/', '\\']) && !detail.contains(' ') {
+        detail.rsplit(['/', '\\']).next().unwrap_or(detail)
+    } else {
+        detail
+    };
+    format!("{name} {}", first_chars(&shown.replace('\n', " "), 60))
+}
+
 /// One chat turn, run through the chosen CLI in the attached project.
 pub async fn send(
     project: &Project,
     session: &Session,
+    cancel: &Cancel,
     cli_id: &str,
     prompt: String,
+    on: &(dyn Fn(Turn) + Send + Sync),
 ) -> Result<String, String> {
     let Some(spec) = cli(cli_id) else {
         return Err(format!("Unknown agent `{cli_id}`."));
@@ -328,11 +472,11 @@ pub async fn send(
         return Err("Attach a project folder first — the agent runs inside it.".into());
     };
 
-    let mut cmd = tokio::process::Command::new(exe);
+    let mut cmd = Command::new(exe);
     cmd.current_dir(&root);
     // Without this the CLI waits three seconds for piped input that is never
     // coming, and every turn starts with a needless pause.
-    cmd.stdin(std::process::Stdio::null());
+    cmd.stdin(Stdio::null());
     // The turn can time out, and dropping the future drops the Child without
     // killing it: the message said the CLI "was stopped" while it carried on
     // working in the background, against the session the next message resumes.
@@ -345,7 +489,12 @@ pub async fn send(
     let resumed = session.current();
     match spec.id {
         "claude" => {
-            cmd.arg("-p").arg(&prompt).arg("--output-format").arg("json");
+            // stream-json so the island can show the reply as it is written and
+            // name each tool as it is reached for. The CLI requires --verbose
+            // for stream-json under -p.
+            cmd.arg("-p").arg(&prompt);
+            cmd.arg("--output-format").arg("stream-json");
+            cmd.arg("--verbose").arg("--include-partial-messages");
             match &resumed {
                 Some(id) => {
                     cmd.arg("--resume").arg(id);
@@ -370,19 +519,127 @@ pub async fn send(
         }
     }
 
-    log::line(format!("agent {} in {}", spec.id, display_path(&root)));
+    note(format!("agent {} in {}", spec.id, display_path(&root)));
 
+    if spec.id == "claude" {
+        stream_turn(cmd, cancel, session, resumed.is_some(), spec.label, on).await
+    } else {
+        one_shot(cmd, session, resumed.is_some(), spec.label).await
+    }
+}
+
+/// A turn whose output is read as it comes, line by line.
+///
+/// The lines are read in their own task and arrive over a channel rather than
+/// being awaited here directly: a channel receive can be abandoned without
+/// losing what was half-read, which is what lets a quiet turn be checked for a
+/// cancel every `POLL` without the app's tokio needing the `macros` feature.
+async fn stream_turn(
+    mut cmd: Command,
+    cancel: &Cancel,
+    session: &Session,
+    resumed: bool,
+    label: &str,
+    on: &(dyn Fn(Turn) + Send + Sync),
+) -> Result<String, String> {
+    cmd.stdout(Stdio::piped());
+    cmd.stderr(Stdio::piped());
+
+    let mut child = cmd.spawn().map_err(|e| format!("Could not start {label}: {e}"))?;
+    let stdout = child.stdout.take().expect("stdout was piped");
+    let stderr = child.stderr.take().expect("stderr was piped");
+
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<String>(64);
+    tokio::spawn(async move {
+        let mut lines = BufReader::new(stdout).lines();
+        while let Ok(Some(line)) = lines.next_line().await {
+            if tx.send(line).await.is_err() {
+                break;
+            }
+        }
+    });
+    // Drained in its own task: a stderr pipe nobody reads fills up and stops
+    // the child, and what it holds is the only explanation of a failed turn.
+    let errors = tokio::spawn(async move {
+        let mut text = String::new();
+        let _ = BufReader::new(stderr).read_to_string(&mut text).await;
+        text
+    });
+
+    let stop = cancel.arm();
+    let deadline = tokio::time::Instant::now() + TURN_TIMEOUT;
+    let mut stream = Stream::default();
+    let mut stopped = false;
+    let mut timed_out = false;
+
+    loop {
+        if stop.load(Ordering::SeqCst) {
+            stopped = true;
+            break;
+        }
+        match tokio::time::timeout(POLL, rx.recv()).await {
+            Ok(Some(line)) => {
+                for turn in stream.line(&line) {
+                    on(turn);
+                }
+            }
+            // The reader is done, which means the CLI closed its output.
+            Ok(None) => break,
+            Err(_) if tokio::time::Instant::now() >= deadline => {
+                timed_out = true;
+                break;
+            }
+            Err(_) => {}
+        }
+    }
+    cancel.disarm();
+
+    if stopped || timed_out {
+        // Not just dropped: the child would otherwise keep working against the
+        // session the next message resumes. The session id is kept for exactly
+        // that reason — the work may well have landed.
+        let _ = child.start_kill();
+        return Err(if stopped {
+            format!("{label} was stopped.")
+        } else {
+            format!(
+                "{label} was still working after {} minutes and was stopped.",
+                TURN_TIMEOUT.as_secs() / 60
+            )
+        });
+    }
+
+    let status = child.wait().await.map_err(|e| format!("Lost track of {label}: {e}"))?;
+    if !status.success() {
+        let stderr = errors.await.unwrap_or_default();
+        let streamed = stream.finish();
+        let detail = if stderr.trim().is_empty() { streamed.trim() } else { stderr.trim() };
+        // A resume that failed because the session is gone must not strand the
+        // chat on a dead id.
+        if resumed {
+            session.reset();
+        }
+        return Err(first_chars(detail, 400));
+    }
+
+    Ok(first_chars(&stream.finish(), MAX_OUTPUT))
+}
+
+/// A turn from a CLI with no streaming output format: one wait, one answer.
+async fn one_shot(
+    mut cmd: Command,
+    session: &Session,
+    resumed: bool,
+    label: &str,
+) -> Result<String, String> {
     let output = match tokio::time::timeout(TURN_TIMEOUT, cmd.output()).await {
         Ok(Ok(out)) => out,
-        Ok(Err(e)) => return Err(format!("Could not start {}: {e}", spec.label)),
+        Ok(Err(e)) => return Err(format!("Could not start {label}: {e}")),
         Err(_) => {
-            // The session id is kept: the work may well have landed, and the
-            // next message should continue the same conversation.
             return Err(format!(
-                "{} was still working after {} minutes and was stopped.",
-                spec.label,
+                "{label} was still working after {} minutes and was stopped.",
                 TURN_TIMEOUT.as_secs() / 60
-            ));
+            ))
         }
     };
 
@@ -390,34 +647,12 @@ pub async fn send(
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         let detail = if stderr.trim().is_empty() { stdout.trim() } else { stderr.trim() };
-        // A resume that fails because the session is gone must not strand the
-        // chat on a dead id.
-        if resumed.is_some() {
+        if resumed {
             session.reset();
         }
         return Err(first_chars(detail, 400));
     }
-
-    Ok(first_chars(&extract_text(spec.id, &stdout), MAX_OUTPUT))
-}
-
-/// `--output-format json` wraps the reply; everything else prints it plainly.
-fn extract_text(cli_id: &str, stdout: &str) -> String {
-    if cli_id != "claude" {
-        return stdout.trim().to_string();
-    }
-    match serde_json::from_str::<Value>(stdout) {
-        Ok(v) => v
-            .get("result")
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-            .unwrap_or_else(|| stdout.trim())
-            .to_string(),
-        // An older CLI, or a flag it did not honour: the raw text is still the
-        // answer, and showing it beats showing an error.
-        Err(_) => stdout.trim().to_string(),
-    }
+    Ok(first_chars(stdout.trim(), MAX_OUTPUT))
 }
 
 /// Truncates on a character boundary — `String::truncate` panics mid-codepoint,
@@ -539,19 +774,21 @@ mod tests {
         assert!(project.current().is_none());
     }
 
+    /// `send` for the cases that never get as far as running anything, so the
+    /// turns it would report have nowhere to go.
+    async fn quiet_send(project: &Project, cli: &str) -> Result<String, String> {
+        send(project, &Session::default(), &Cancel::default(), cli, "hi".into(), &|_| {}).await
+    }
+
     #[tokio::test]
     async fn refuses_to_run_without_an_attached_project() {
-        let err = send(&Project::default(), &Session::default(), "claude", "hi".into())
-            .await
-            .unwrap_err();
+        let err = quiet_send(&Project::default(), "claude").await.unwrap_err();
         assert!(err.contains("Attach a project"), "got {err:?}");
     }
 
     #[tokio::test]
     async fn refuses_an_unknown_agent() {
-        let err = send(&Project::default(), &Session::default(), "nope", "hi".into())
-            .await
-            .unwrap_err();
+        let err = quiet_send(&Project::default(), "nope").await.unwrap_err();
         assert!(err.contains("Unknown agent"), "got {err:?}");
     }
 
@@ -578,16 +815,104 @@ mod tests {
         assert!("89ab".contains(variant), "{a}");
     }
 
-    #[test]
-    fn claude_json_output_is_unwrapped() {
-        let json = r#"{"type":"result","result":"Hello there.","session_id":"x"}"#;
-        assert_eq!(extract_text("claude", json), "Hello there.");
+    /// The lines of a small but complete turn, in the order the CLI prints
+    /// them: a tool, a partial text delta, the whole message that follows it,
+    /// and the result.
+    fn turn_lines() -> Vec<&'static str> {
+        vec![
+            r#"{"type":"system","subtype":"init","session_id":"s1"}"#,
+            r#"{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read","input":{"file_path":"C:/code/thing/src/agent.rs"}}]}}"#,
+            r#"{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"Half "}}}"#,
+            r#"{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"a sentence."}}}"#,
+            r#"{"type":"assistant","message":{"content":[{"type":"text","text":"Half a sentence."}]}}"#,
+            r#"{"type":"result","subtype":"success","result":"Half a sentence."}"#,
+        ]
+    }
+
+    fn turns_of(lines: &[&str]) -> (Vec<Turn>, String) {
+        let mut stream = Stream::default();
+        let mut turns = Vec::new();
+        for line in lines {
+            turns.extend(stream.line(line));
+        }
+        (turns, stream.finish())
     }
 
     #[test]
-    fn output_that_is_not_json_is_shown_as_it_came() {
-        assert_eq!(extract_text("claude", "  plain text  "), "plain text");
-        assert_eq!(extract_text("gemini", "  plain text  "), "plain text");
+    fn a_turn_is_read_as_steps_and_text_and_then_a_reply() {
+        let (turns, reply) = turns_of(&turn_lines());
+
+        assert_eq!(
+            turns,
+            [
+                Turn::Step { label: "Read agent.rs".into() },
+                Turn::Text { text: "Half ".into() },
+                Turn::Text { text: "a sentence.".into() },
+            ],
+            "the whole message after the deltas must not be sent a second time"
+        );
+        assert_eq!(reply, "Half a sentence.");
+    }
+
+    #[test]
+    fn a_cli_that_ignores_partial_messages_still_streams_whole_blocks() {
+        let lines: Vec<&str> =
+            turn_lines().into_iter().filter(|l| !l.contains("stream_event")).collect();
+        let (turns, reply) = turns_of(&lines);
+
+        assert_eq!(
+            turns,
+            [
+                Turn::Step { label: "Read agent.rs".into() },
+                Turn::Text { text: "Half a sentence.".into() },
+            ]
+        );
+        assert_eq!(reply, "Half a sentence.");
+    }
+
+    #[test]
+    fn a_turn_with_no_result_line_falls_back_to_what_was_streamed() {
+        let lines: Vec<&str> =
+            turn_lines().into_iter().filter(|l| !l.contains(r#""type":"result""#)).collect();
+        let (_, reply) = turns_of(&lines);
+
+        assert_eq!(reply, "Half a sentence.");
+    }
+
+    #[test]
+    fn lines_that_are_not_json_or_not_ours_are_passed_over() {
+        let (turns, reply) = turns_of(&[
+            "Loading the thing…",
+            "",
+            r#"{"type":"something_new","payload":1}"#,
+            r#"{"type":"stream_event","event":{"type":"content_block_stop"}}"#,
+        ]);
+
+        assert!(turns.is_empty(), "nothing to show: {turns:?}");
+        assert_eq!(reply, "");
+    }
+
+    #[test]
+    fn a_step_is_named_by_what_it_acts_on() {
+        let label = |json: &str| step_label(&serde_json::from_str::<Value>(json).unwrap());
+
+        assert_eq!(label(r#"{"name":"Bash","input":{"command":"cargo test"}}"#), "Bash cargo test");
+        assert_eq!(label(r#"{"name":"Grep","input":{"pattern":"fn send"}}"#), "Grep fn send");
+        assert_eq!(label(r#"{"name":"Edit","input":{"file_path":"/a/b/chat.ts"}}"#), "Edit chat.ts");
+        // Nothing worth naming, and an input shape we have never seen.
+        assert_eq!(label(r#"{"name":"TodoWrite","input":{"todos":[]}}"#), "TodoWrite");
+        assert_eq!(label(r#"{"input":{}}"#), "Tool");
+    }
+
+    #[test]
+    fn a_cancel_is_armed_once_and_stops_one_turn() {
+        let cancel = Cancel::default();
+        assert!(!cancel.stop(), "nothing is running");
+
+        let flag = cancel.arm();
+        assert!(cancel.stop(), "the turn in flight is stopped");
+        assert!(flag.load(Ordering::SeqCst), "the turn sees it");
+        assert!(!cancel.stop(), "and it is only stopped once");
     }
 
     #[test]

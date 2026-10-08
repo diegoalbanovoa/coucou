@@ -30,8 +30,13 @@ export interface ApprovalInfo {
 
 export interface ChatMessage {
   id: number;
-  role: "user" | "assistant";
+  /** `error` is a turn that failed: shown in the log, not as a note view. */
+  role: "user" | "assistant" | "error";
   content: string;
+  /** When it landed, for the hover title. */
+  at: number;
+  /** The tools the agent reached for, in order. Assistant turns only. */
+  steps?: string[];
 }
 
 export type PromptContext =
@@ -152,6 +157,10 @@ class AppState {
   attachedProject: string | null = null;
   /** Which CLI the chat runs, or null for the API chat. */
   agentCli: string | null = null;
+  /** The reply being written, as the agent streams it. */
+  chatDraft = "";
+  /** What the turn in flight has done so far, newest last. */
+  chatSteps: string[] = [];
 
   integrations: Record<string, IntegrationInfo> = {};
 

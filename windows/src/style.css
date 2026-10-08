@@ -940,6 +940,262 @@ input[type="range"]::-webkit-slider-thumb {
   50% { transform: scale(1.2); }
 }
 
+/* ── The reply: steps, markdown, and what you can do to it ───────────────── */
+
+.chat-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.reply-col {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.steps-head {
+  align-self: flex-start;
+  max-width: 100%;
+  border: 0;
+  background: rgba(255, 255, 255, 0.07);
+  border-radius: 7px;
+  padding: 2px 7px;
+  font: 400 10.5px var(--font);
+  color: var(--dim-3);
+  cursor: pointer;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.steps-head:hover {
+  color: var(--ink-2);
+}
+
+.steps-head.live {
+  color: #8b93a2;
+}
+
+.steps-list {
+  display: none;
+  flex-direction: column;
+  gap: 1px;
+  padding: 2px 0 2px 7px;
+  border-left: 1px solid rgba(255, 255, 255, 0.1);
+  margin-left: 4px;
+}
+
+.steps-list.open {
+  display: flex;
+}
+
+.step {
+  font: 400 10.5px var(--font);
+  color: var(--dim-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.reply.quiet {
+  color: var(--dim-3);
+  font-style: italic;
+}
+
+/* A reply still being written: the cursor is the only hint it is not done. */
+.reply.writing > :last-child::after {
+  content: "";
+  display: inline-block;
+  width: 5px;
+  height: 11px;
+  margin-left: 2px;
+  vertical-align: -1px;
+  background: #8b93a2;
+  animation: caret 1s steps(2) infinite;
+}
+
+@keyframes caret {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+.reply-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.reply.clipped {
+  max-height: 150px;
+  overflow: hidden;
+  mask-image: linear-gradient(to bottom, #000 105px, transparent);
+}
+
+.more-btn,
+.msg-btn {
+  border: 0;
+  background: none;
+  cursor: pointer;
+  color: var(--dim-3);
+  padding: 0;
+}
+
+.more-btn {
+  align-self: flex-start;
+  font: 400 10.5px var(--font);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.more-btn:hover {
+  color: var(--ink-2);
+}
+
+.msg-actions {
+  display: flex;
+  gap: 4px;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+
+.chat-row:hover .msg-actions {
+  opacity: 1;
+}
+
+.msg-btn {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 5px;
+}
+
+.msg-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--ink-2);
+}
+
+.reply-error {
+  border-left: 2px solid #f4505e;
+  background: rgba(244, 80, 94, 0.08);
+  border-radius: 0 8px 8px 0;
+  padding: 5px 9px;
+  min-width: 0;
+}
+
+.reply-error-head {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font: 500 11.5px var(--font);
+  color: #f4505e;
+}
+
+.reply-error-detail {
+  font: 400 11.5px var(--font);
+  color: #b0b5be;
+  white-space: pre-wrap;
+  user-select: text;
+  margin-top: 2px;
+  max-height: 140px;
+  overflow-y: auto;
+}
+
+.jump-btn {
+  position: absolute;
+  right: 14px;
+  bottom: 46px;
+  display: none;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(40, 42, 48, 0.92);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+  color: var(--ink-2);
+  cursor: pointer;
+}
+
+.jump-btn.on {
+  display: grid;
+}
+
+.send-btn.stopping {
+  background: #f4505e;
+}
+
+/* ── Markdown inside a reply ─────────────────────────────────────────────── */
+
+.reply .md-p {
+  margin: 0 0 5px;
+}
+
+.reply .md-p:last-child {
+  margin-bottom: 0;
+}
+
+.reply .md-h {
+  font-weight: 600;
+  color: var(--ink-2);
+  margin: 6px 0 3px;
+}
+
+.reply .md-h:first-child {
+  margin-top: 0;
+}
+
+.reply .md-h1 { font-size: 13.5px; }
+.reply .md-h2 { font-size: 13px; }
+.reply .md-h3 { font-size: 12.5px; }
+
+.reply .md-list {
+  margin: 0 0 5px;
+  padding-left: 16px;
+}
+
+.reply .md-list li {
+  margin: 1px 0;
+}
+
+.reply .md-code {
+  font-family: var(--mono, ui-monospace, "Cascadia Code", Consolas, monospace);
+  font-size: 11.5px;
+  background: rgba(255, 255, 255, 0.09);
+  border-radius: 4px;
+  padding: 0 3px;
+}
+
+.reply .md-pre {
+  margin: 4px 0 6px;
+  padding: 6px 8px;
+  background: rgba(0, 0, 0, 0.28);
+  border-radius: 7px;
+  overflow-x: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
+}
+
+.reply .md-pre code {
+  font-family: var(--mono, ui-monospace, "Cascadia Code", Consolas, monospace);
+  font-size: 11px;
+  line-height: 1.45;
+  color: #c6ccd6;
+  white-space: pre;
+}
+
+.reply .md-link {
+  color: #8ab4f8;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: help;
+}
+
 .chat-bar {
   display: flex;
   align-items: center;

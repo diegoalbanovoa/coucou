@@ -424,10 +424,18 @@ async fn pick_project(app: AppHandle) -> Option<String> {
 #[tauri::command]
 async fn agent_send(app: AppHandle, cli: String, prompt: String) -> Result<String, String> {
     let before = app.state::<agent::Session>().current();
+    // Each piece of the reply and each tool reached for goes straight to the
+    // island, so the chat fills in as the agent works instead of sitting on
+    // three dots until the whole answer is ready.
+    let emitter = app.clone();
+    let on = move |turn: agent::Turn| {
+        let _ = emitter.emit("agent-turn", turn);
+    };
     let result = {
         let project = app.state::<agent::Project>();
         let session = app.state::<agent::Session>();
-        agent::send(&project, &session, &cli, prompt).await
+        let cancel = app.state::<agent::Cancel>();
+        agent::send(&project, &session, &cancel, &cli, prompt, &on).await
     };
     // The id is minted inside the first turn, and a resume that failed clears
     // it. Either way, what the next boot should continue has just changed.
@@ -436,6 +444,13 @@ async fn agent_send(app: AppHandle, cli: String, prompt: String) -> Result<Strin
         remember(&app, |s| s.agent_session = after);
     }
     result
+}
+
+/// Stops the turn in flight. False when there was nothing to stop — the reply
+/// landed between the click and this call.
+#[tauri::command]
+fn agent_cancel(app: AppHandle) -> bool {
+    app.state::<agent::Cancel>().stop()
 }
 
 /// Starts a fresh conversation with the CLI, leaving the project attached.
@@ -576,6 +591,7 @@ pub fn run() {
         .manage(Chat::default())
         .manage(agent::Project::default())
         .manage(agent::Session::default())
+        .manage(agent::Cancel::default())
         .invoke_handler(tauri::generate_handler![
             boot,
             save_settings,
@@ -603,6 +619,7 @@ pub fn run() {
             detach_project,
             pick_project,
             agent_send,
+            agent_cancel,
             agent_reset,
             ingest_file,
             secret_present,

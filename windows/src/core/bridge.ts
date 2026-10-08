@@ -103,6 +103,8 @@ export const Bridge = {
   /** One agent turn. Tool calls arrive separately, as ordinary hook events. */
   agentSend: (cli: string, prompt: string) =>
     callOrThrow<string>("agent_send", { cli, prompt }),
+  /** Stops the turn in flight. False when the reply had already landed. */
+  agentCancel: () => call<boolean>("agent_cancel"),
   /** Fresh conversation, same project. */
   agentReset: () => call<void>("agent_reset"),
   /** Copies a dropped file into the inbox. */
@@ -138,6 +140,14 @@ export interface CliInfo {
   label: string;
   path: string;
 }
+
+/**
+ * What the island is told while a turn runs: the reply as it is written, and
+ * each tool as it is reached for. The reply itself comes back from `agentSend`.
+ */
+export type AgentTurn =
+  | { kind: "text"; text: string }
+  | { kind: "step"; label: string };
 
 /** The project and CLI the chat should come up in, remembered across restarts. */
 export interface AgentState {
