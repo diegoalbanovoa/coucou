@@ -89,6 +89,10 @@ export const Bridge = {
   // ── Agent chat: the CLIs installed on this machine ────────────────────────
   /** Which agent CLIs are installed. Empty means API-only chat. */
   agentClis: () => call<CliInfo[]>("agent_clis"),
+  /** What the chat comes up in: the project and CLI from the last run. */
+  agentState: () => call<AgentState>("agent_state"),
+  /** Remembers which CLI the chat runs. Null means none chosen yet. */
+  agentSetCli: (cli: string | null) => call<void>("agent_set_cli", { cli }),
   /** What `/` can reach: the user's commands, the project's, and their skills. */
   agentCommands: () => call<SlashCommand[]>("agent_commands"),
   /** Opens the folder picker. Null when the user cancelled. */
@@ -133,6 +137,16 @@ export interface CliInfo {
   id: string;
   label: string;
   path: string;
+}
+
+/** The project and CLI the chat should come up in, remembered across restarts. */
+export interface AgentState {
+  /** The attached project as it should be shown, or null for none. */
+  project: string | null;
+  /** The CLI the chat runs, by id, or null when none has been chosen. */
+  cli: string | null;
+  /** Whether the next message continues an existing conversation. */
+  resuming: boolean;
 }
 
 /** One `/thing` the chat can send straight through to the CLI. */

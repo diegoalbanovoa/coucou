@@ -163,6 +163,68 @@ fn front_matter_description(path: &Path) -> String {
     String::new()
 }
 
+/// One line in coucou.log. Tests must never write to the real one — the same
+/// reason `settings::note` exists: `attach` is unit-tested, and the log is the
+/// user's file, not a scratch pad.
+fn note(message: String) {
+    #[cfg(not(test))]
+    log::line(message);
+    #[cfg(test)]
+    eprintln!("{message}");
+}
+
+/// What marks the top of a repository. The strongest signal there is: it is
+/// what "the project" means to every tool the agent will run inside it.
+const VCS_MARKERS: &[&str] = &[".git", ".hg", ".svn"];
+
+/// What marks a project that is not under version control. Weaker, because
+/// plenty of these sit in subfolders of a bigger project — `windows/` in this
+/// very repo has both a package.json and a Cargo.toml.
+const PROJECT_MARKERS: &[&str] =
+    &[".claude", "CLAUDE.md", "package.json", "Cargo.toml", "pyproject.toml", "go.mod", "pom.xml"];
+
+/// The project root at or above `path`: what the agent should treat as the
+/// origin of the project, whichever folder inside it the user pointed at.
+///
+/// The nearest VCS root wins over any ordinary marker, however deep it is —
+/// picking `windows/src` in this repo means the repo, not `windows/`. With no
+/// VCS folder anywhere above it, the nearest ordinary marker is the root.
+///
+/// The home directory is never a root, and neither is a drive root. `~/.claude`
+/// and `~/CLAUDE.md` exist on most machines Coucou runs on, and snapping a
+/// folder under home up to home itself would hand the agent the whole account.
+///
+/// Expects a canonical path, which is what `Project::attach` has by here.
+pub fn root_of(path: &Path) -> Option<PathBuf> {
+    root_of_under(path, &platform::home_dir())
+}
+
+/// `root_of`, with the ceiling named rather than read from the environment:
+/// tests give it a temp directory, the way `load_from` takes its path. The
+/// environment is the wrong thing to depend on in a test anyway — one of the
+/// hook tests repoints HOME_VAR process-wide while it runs.
+fn root_of_under(path: &Path, ceiling: &Path) -> Option<PathBuf> {
+    // Both forms: `path` is canonical, so on Windows it is a `\\?\C:\…`
+    // verbatim path, while the ceiling as configured usually is not.
+    let stop: Vec<PathBuf> =
+        [ceiling.canonicalize().ok(), Some(ceiling.to_path_buf())].into_iter().flatten().collect();
+    let mut ordinary: Option<PathBuf> = None;
+
+    for dir in path.ancestors() {
+        // A drive root holds other people's folders as well as the user's.
+        if dir.parent().is_none() || stop.iter().any(|s| s == dir) {
+            break;
+        }
+        if VCS_MARKERS.iter().any(|m| dir.join(m).exists()) {
+            return Some(dir.to_path_buf());
+        }
+        if ordinary.is_none() && PROJECT_MARKERS.iter().any(|m| dir.join(m).exists()) {
+            ordinary = Some(dir.to_path_buf());
+        }
+    }
+    ordinary
+}
+
 /// The folder the agent works in. Nothing runs without one: a CLI with no
 /// chosen working directory would quietly inherit Coucou's own, which is not
 /// a project the user picked.
@@ -175,7 +237,18 @@ impl Project {
         if !root.is_dir() {
             return Err("That is not a folder.".into());
         }
-        let root = root.canonicalize().map_err(|e| format!("Cannot open that folder: {e}"))?;
+        let picked = root.canonicalize().map_err(|e| format!("Cannot open that folder: {e}"))?;
+        // The user may well have pointed at a folder inside the project. What
+        // the agent gets is the project itself — its root is where CLAUDE.md,
+        // the .claude folder and the rest of the context live.
+        let root = root_of(&picked).unwrap_or_else(|| picked.clone());
+        if root != picked {
+            note(format!(
+                "agent project: {} is inside {}, which is what was attached",
+                display_path(&picked),
+                display_path(&root)
+            ));
+        }
         let shown = display_path(&root);
         *self.0.lock().unwrap() = Some(root);
         Ok(shown)
@@ -202,7 +275,7 @@ impl Session {
         self.0.lock().unwrap().clone()
     }
 
-    fn set(&self, id: String) {
+    pub fn set(&self, id: String) {
         *self.0.lock().unwrap() = Some(id);
     }
 
@@ -367,10 +440,80 @@ mod tests {
         dir.canonicalize().unwrap()
     }
 
+    /// A ceiling the walk will never reach, for the cases that are not about
+    /// where it stops.
+    fn no_ceiling() -> PathBuf {
+        PathBuf::from("")
+    }
+
+    #[test]
+    fn the_nearest_vcs_root_wins_over_an_ordinary_marker_closer_by() {
+        let root = temp_root("root-vcs");
+        std::fs::create_dir_all(root.join(".git")).unwrap();
+        let inner = root.join("windows").join("src");
+        std::fs::create_dir_all(&inner).unwrap();
+        // windows/ looks like a project of its own — this repo's own shape —
+        // and is still not what "the project" means.
+        std::fs::write(root.join("windows").join("package.json"), "{}").unwrap();
+
+        assert_eq!(root_of_under(&inner.canonicalize().unwrap(), &no_ceiling()), Some(root));
+    }
+
+    #[test]
+    fn without_any_vcs_folder_the_nearest_ordinary_marker_is_the_root() {
+        let root = temp_root("root-marker");
+        let app = root.join("app");
+        let inner = app.join("src");
+        std::fs::create_dir_all(&inner).unwrap();
+        std::fs::write(app.join("Cargo.toml"), "").unwrap();
+
+        assert_eq!(root_of_under(&inner.canonicalize().unwrap(), &no_ceiling()), Some(app));
+    }
+
+    #[test]
+    fn a_folder_with_no_marker_above_it_has_no_root() {
+        let dir = temp_root("root-none");
+        assert_eq!(root_of_under(&dir, dir.parent().unwrap()), None);
+    }
+
+    #[test]
+    fn the_walk_stops_below_the_ceiling_however_marked_it_is() {
+        // What this stands for is the home directory: `~/.claude` and
+        // `~/CLAUDE.md` exist on most machines Coucou runs on, and snapping a
+        // folder under home up to home itself would hand the agent the whole
+        // account.
+        let ceiling = temp_root("root-ceiling");
+        std::fs::create_dir_all(ceiling.join(".claude")).unwrap();
+        std::fs::create_dir_all(ceiling.join(".git")).unwrap();
+        let inner = ceiling.join("notes").join("deep");
+        std::fs::create_dir_all(&inner).unwrap();
+
+        assert_eq!(root_of_under(&inner.canonicalize().unwrap(), &ceiling), None);
+    }
+
+    #[test]
+    fn attaching_a_folder_inside_a_project_attaches_the_project() {
+        let root = temp_root("attach-inner-root");
+        std::fs::create_dir_all(root.join(".git")).unwrap();
+        let inner = root.join("deep").join("inside");
+        std::fs::create_dir_all(&inner).unwrap();
+
+        let project = Project::default();
+        let shown = project.attach(inner.to_str().unwrap()).unwrap();
+
+        assert_eq!(project.current().unwrap(), root);
+        assert_eq!(shown, display_path(&root));
+    }
+
     #[test]
     fn attach_replaces_and_detach_clears() {
+        // Both are roots of their own: `attach` snaps to the project root, and
+        // what that resolves to for an unmarked temp folder depends on the home
+        // directory — which another test repoints while it runs.
         let a = temp_root("attach-a");
         let b = temp_root("attach-b");
+        std::fs::create_dir_all(a.join(".git")).unwrap();
+        std::fs::create_dir_all(b.join(".git")).unwrap();
         let project = Project::default();
         assert!(project.current().is_none());
 

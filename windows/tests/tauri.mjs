@@ -5,6 +5,12 @@
 /** Every command the island invoked, oldest first: [name, args]. */
 export const calls = [];
 
+/**
+ * What a command answers, by name. Anything not in here answers null, which is
+ * what a command returning nothing looks like from the webview.
+ */
+export const replies = new Map();
+
 const listeners = new Map();
 
 export const internals = {
@@ -15,7 +21,7 @@ export const internals = {
       return listeners.size;
     }
     calls.push([cmd, args]);
-    return null;
+    return replies.has(cmd) ? replies.get(cmd) : null;
   },
 };
 

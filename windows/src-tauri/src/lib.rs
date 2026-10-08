@@ -87,6 +87,70 @@ fn save_settings(app: AppHandle, shared: State<Shared>, settings: Settings) {
     let _ = app.emit("settings-changed", settings);
 }
 
+/// Applies a change to the stored settings and writes it out.
+///
+/// This is for the state the app remembers on its own — the attached project,
+/// the chosen CLI, the conversation in flight — as opposed to `save_settings`,
+/// which is the user editing their preferences in the settings window. The file
+/// is written outside the lock: saving is IO, and the island reads settings on
+/// every frame it draws.
+fn remember(app: &AppHandle, change: impl FnOnce(&mut Settings)) {
+    let settings = {
+        let shared = app.state::<Shared>();
+        let mut current = shared.settings.lock().unwrap();
+        change(&mut current);
+        current.clone()
+    };
+    if let Err(err) = settings::save(&settings) {
+        log::line(format!("could not save settings: {err}"));
+    }
+    let _ = app.emit("settings-changed", settings);
+}
+
+/// Makes the autostart registration agree with the stored preference.
+///
+/// The switch in the settings window only acts when the value changes, so a
+/// preference that was never applied would never take effect: the default on a
+/// fresh install, or a registration removed behind our back by another tool. An
+/// app whose whole job is to be there when something needs answering cannot
+/// depend on the user having toggled a switch once.
+fn reconcile_autostart(app: &AppHandle, wanted: bool) {
+    let manager = app.autolaunch();
+    match manager.is_enabled() {
+        Ok(actual) if actual == wanted => {}
+        Ok(_) => {
+            let result = if wanted { manager.enable() } else { manager.disable() };
+            match result {
+                Ok(()) => log::line(format!("autostart now {wanted}")),
+                Err(err) => log::line(format!("could not set autostart: {err}")),
+            }
+        }
+        Err(err) => log::line(format!("could not read autostart: {err}")),
+    }
+}
+
+/// Brings back the project — and the conversation inside it — the app was in
+/// when it last ran, so a restart is not a blank chat with nothing attached.
+fn restore_agent(app: &AppHandle, settings: &Settings) {
+    let Some(stored) = settings.project_root.as_deref() else {
+        return;
+    };
+    match app.state::<agent::Project>().attach(stored) {
+        Ok(name) => {
+            log::line(format!("agent project restored: {name}"));
+            // Only a project that actually came back makes the old conversation
+            // worth resuming: the session ran inside it, and `--resume` in the
+            // wrong folder is worse than a fresh start.
+            if let Some(id) = settings.agent_session.clone() {
+                app.state::<agent::Session>().set(id);
+            }
+        }
+        // Left in settings rather than cleared: a folder on a drive that is not
+        // mounted yet is the usual reason, and it will be back next time.
+        Err(err) => log::line(format!("agent project {stored} not restored: {err}")),
+    }
+}
+
 /// Hidden island → shrink the window to the invisible wake strip and park the
 /// cursor poll; anything else → full panel and 60 Hz polling.
 #[tauri::command]
@@ -257,6 +321,35 @@ fn agent_clis() -> Vec<agent::CliInfo> {
     agent::installed()
 }
 
+/// What the chat should come up in: the project and CLI that were in use when
+/// the app last ran. Asked for once at boot, after `agent_clis`.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AgentState {
+    /// The attached project, as it should be shown, or null for none.
+    project: Option<String>,
+    /// The CLI the chat runs, by id, or null when none has been chosen.
+    cli: Option<String>,
+    /// Whether the next message continues an existing conversation.
+    resuming: bool,
+}
+
+#[tauri::command]
+fn agent_state(app: AppHandle, shared: State<Shared>) -> AgentState {
+    AgentState {
+        project: app.state::<agent::Project>().current().as_deref().map(agent::display_path),
+        cli: shared.settings.lock().unwrap().agent_cli.clone(),
+        resuming: app.state::<agent::Session>().current().is_some(),
+    }
+}
+
+/// Remembers which CLI the chat runs, so the choice survives a restart. `None`
+/// is a real value: it means the user has not chosen one yet.
+#[tauri::command]
+fn agent_set_cli(app: AppHandle, cli: Option<String>) {
+    remember(&app, |s| s.agent_cli = cli);
+}
+
 /// What `/` can reach right now — the user's own commands, the project's, and
 /// their skills.
 #[tauri::command]
@@ -272,6 +365,11 @@ fn attach_project(app: AppHandle, path: String) -> Result<String, String> {
     // it in the wrong folder.
     app.state::<agent::Session>().reset();
     log::line(format!("agent project attached: {name}"));
+    let stored = name.clone();
+    remember(&app, |s| {
+        s.project_root = Some(stored);
+        s.agent_session = None;
+    });
     Ok(name)
 }
 
@@ -280,6 +378,10 @@ fn detach_project(app: AppHandle) {
     app.state::<agent::Project>().detach();
     app.state::<agent::Session>().reset();
     log::line("agent project detached");
+    remember(&app, |s| {
+        s.project_root = None;
+        s.agent_session = None;
+    });
 }
 
 /// Set while a folder picker is on screen. Without it a second click on the
@@ -321,15 +423,26 @@ async fn pick_project(app: AppHandle) -> Option<String> {
 /// Code sessions already use.
 #[tauri::command]
 async fn agent_send(app: AppHandle, cli: String, prompt: String) -> Result<String, String> {
-    let project = app.state::<agent::Project>();
-    let session = app.state::<agent::Session>();
-    agent::send(&project, &session, &cli, prompt).await
+    let before = app.state::<agent::Session>().current();
+    let result = {
+        let project = app.state::<agent::Project>();
+        let session = app.state::<agent::Session>();
+        agent::send(&project, &session, &cli, prompt).await
+    };
+    // The id is minted inside the first turn, and a resume that failed clears
+    // it. Either way, what the next boot should continue has just changed.
+    let after = app.state::<agent::Session>().current();
+    if after != before {
+        remember(&app, |s| s.agent_session = after);
+    }
+    result
 }
 
 /// Starts a fresh conversation with the CLI, leaving the project attached.
 #[tauri::command]
 fn agent_reset(app: AppHandle) {
     app.state::<agent::Session>().reset();
+    remember(&app, |s| s.agent_session = None);
 }
 
 #[tauri::command]
@@ -483,6 +596,8 @@ pub fn run() {
             chat_send,
             chat_reset,
             agent_clis,
+            agent_state,
+            agent_set_cli,
             agent_commands,
             attach_project,
             detach_project,
@@ -519,6 +634,8 @@ pub fn run() {
             island::spawn_cursor_poll(handle.clone(), gate.clone());
 
             log::line(format!("--- Coucou {} started ---", env!("CARGO_PKG_VERSION")));
+            reconcile_autostart(&handle, loaded.autostart);
+            restore_agent(&handle, &loaded);
             hooks::ensure_hook_exe(&handle);
             pipe::start(handle.clone());
             integrations::start(handle.clone());

@@ -92,6 +92,12 @@ export interface Settings {
   hooksInstalled: boolean;
   /** Claude model used by the chat. */
   model: string;
+  /** The folder the chat runs in, remembered across restarts. Null for none. */
+  projectRoot: string | null;
+  /** Which agent CLI the chat runs, by id. Null means the API chat. */
+  agentCli: string | null;
+  /** The CLI conversation being continued, if there is one. */
+  agentSession: string | null;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -103,9 +109,14 @@ export const DEFAULT_SETTINGS: Settings = {
     "integration_resend", "integration_n8n", "integration_vercel", "integration_github",
   ],
   screen: "primary",
-  autostart: false,
+  // Mirrors Settings::default() in settings.rs: the app is only useful if it is
+  // there when something needs answering.
+  autostart: true,
   hooksInstalled: false,
   model: "claude-opus-5",
+  projectRoot: null,
+  agentCli: null,
+  agentSession: null,
 };
 
 type Listener = () => void;

@@ -26,10 +26,21 @@ export function registerAgentHandlers(host: Island) {
 
 export async function loadAgentEnvironment() {
   availableClis = (await Bridge.agentClis()) ?? [];
-  // A CLI is the better default when there is one: it needs no API key and
-  // brings the user's own tools, skills and CLAUDE.md with it.
-  if (!State.agentCli && availableClis.length > 0) {
+  // Rust restored the project it was in when it last ran, so the chat opens on
+  // that conversation instead of on an empty box with nothing attached.
+  const remembered = await Bridge.agentState();
+  State.attachedProject = remembered?.project ?? null;
+
+  // The remembered CLI only counts if it is still installed — one can be
+  // uninstalled between two runs.
+  const stillInstalled = availableClis.some((c) => c.id === remembered?.cli);
+  if (stillInstalled) {
+    State.agentCli = remembered!.cli;
+  } else if (!State.agentCli && availableClis.length > 0) {
+    // A CLI is the better default when there is one: it needs no API key and
+    // brings the user's own tools, skills and CLAUDE.md with it.
     State.agentCli = availableClis[0].id;
+    void Bridge.agentSetCli(State.agentCli);
   }
   await refreshSlashCommands();
   State.notify();
@@ -80,6 +91,8 @@ export function nextProvider() {
   // no CLI installed and the only one that needs a key.
   const next = index + 1;
   State.agentCli = next >= availableClis.length ? null : availableClis[next].id;
+  // Remembered, so the next run opens on the agent the user actually uses.
+  void Bridge.agentSetCli(State.agentCli);
   State.notify();
 }
 

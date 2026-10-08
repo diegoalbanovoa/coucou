@@ -23,6 +23,14 @@ pub struct Settings {
     pub hooks_installed: bool,
     /// Claude model used by the chat. Changeable in the settings window.
     pub model: String,
+    /// The folder the island chat runs in. Remembered so that a restart comes
+    /// back to the project the user was working in rather than to nothing.
+    pub project_root: Option<String>,
+    /// Which agent CLI the chat runs, by `agent::Cli::id`.
+    pub agent_cli: Option<String>,
+    /// The CLI conversation the chat is in the middle of, so a restart
+    /// continues it instead of starting a new one.
+    pub agent_session: Option<String>,
 }
 
 fn default_model() -> String {
@@ -43,9 +51,15 @@ impl Default for Settings {
                 "integration_github".into(),
             ],
             screen: "primary".into(),
-            autostart: false,
+            // The app is only useful if it is there when something needs
+            // answering, so it comes up with the session. `reconcile_autostart`
+            // makes the real registration agree with this on every boot.
+            autostart: true,
             hooks_installed: false,
             model: default_model(),
+            project_root: None,
+            agent_cli: None,
+            agent_session: None,
         }
     }
 }
@@ -304,9 +318,12 @@ mod tests {
   "absenceInterval": 60.0,
   "activeIntegrations": ["integration_notion"],
   "screen": "cursor",
-  "autostart": true,
+  "autostart": false,
   "hooksInstalled": true,
-  "model": "some-model"
+  "model": "some-model",
+  "projectRoot": "C:/code/thing",
+  "agentCli": "gemini",
+  "agentSession": "7f3c9a10-0000-4000-8000-000000000000"
 }"#;
 
     fn custom() -> Value {
@@ -632,6 +649,9 @@ mod tests {
                 "autostart",
                 "hooksInstalled",
                 "model",
+                "projectRoot",
+                "agentCli",
+                "agentSession",
             ]
         );
         let _ = std::fs::remove_dir_all(&dir);
