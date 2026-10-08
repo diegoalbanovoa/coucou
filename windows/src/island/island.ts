@@ -739,8 +739,13 @@ export class Island {
     // looping animation — breathing, ratelimit sweat, sleeping z's, the search
     // sweep — so a hidden island went on burning frames in exactly the states it
     // spends most of its life in. Geometry still has to finish retracting.
+    // A view with an animation of its own — the overview's step ticker — has to
+    // be asked. Without this the loop stopped mid-transition and left the
+    // ticker's three rows frozen eleven pixels apart inside a two-row window,
+    // which read as steps printed on top of each other in no order.
+    const viewAnimating = this.views.get(State.view)?.animating?.() ?? false;
     const settling =
-      this.width.animating || this.height.animating || this.radius.animating;
+      this.width.animating || this.height.animating || this.radius.animating || viewAnimating;
     const busy = State.mode === "hidden"
       ? settling
       : settling ||

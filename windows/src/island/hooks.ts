@@ -36,6 +36,13 @@ interface HookPayload {
   tool_input?: Record<string, unknown>;
   /** Optional agent tag: lowercase, digits and hyphens, ≤ 24 chars. */
   coucou_agent?: string;
+  /**
+   * Where the session runs. The relay reads these out of the environment on
+   * every event (see hook/src/main.rs); nothing used them until now.
+   */
+  term_program?: string;
+  wt_session?: string;
+  vscode_pid?: string;
 }
 
 /** Same rule as HookServer.validateAgent on macOS. "claude" is reserved. */
@@ -131,10 +138,34 @@ function approvalTarget(tool: string, input: Record<string, unknown>): string {
   return tool;
 }
 
-function upsert(projectName: string, cwd: string) {
+/**
+ * Where this session is running, from the environment the relay already
+ * forwards. None of it was read before: the pill said "VS Code" whatever the
+ * truth was, which on Windows is usually a terminal.
+ *
+ * Checked most specific first. A VS Code integrated terminal sets both
+ * VSCODE_PID and WT_SESSION on some setups, and the editor is the better
+ * answer there.
+ */
+function hostOf(payload: HookPayload): string {
+  const program = (payload.term_program ?? "").trim().toLowerCase();
+  if (program === "vscode" || (payload.vscode_pid ?? "").trim()) return "VS Code";
+  if (program === "cursor") return "Cursor";
+  if (program === "windsurf") return "Windsurf";
+  if (program === "mintty") return "Git Bash";
+  if (program === "tabby") return "Tabby";
+  if (program === "wezterm") return "WezTerm";
+  if (program === "alacritty") return "Alacritty";
+  if ((payload.wt_session ?? "").trim()) return "Windows Terminal";
+  // Something ran it, and saying so beats naming the wrong thing.
+  return program ? program : "Terminal";
+}
+
+function upsert(projectName: string, cwd: string, host: string) {
   const t = State.tasks.find((x) => x.id === CLAUDE_ID);
   if (!t) return;
   t.name = projectName;
+  t.host = host;
   if (cwd) t.sessionCwd = cwd;
 }
 
@@ -143,7 +174,9 @@ function clearSession() {
   if (!t) return;
   t.steps = [];
   t.stepIndex = 0;
-  t.name = "VS Code";
+  // Back to naming the agent. The host is kept: between two sessions it is
+  // still the last true answer, and it stops the subtitle flickering.
+  t.name = "Claude Code";
   t.pillBadge = null;
 }
 
@@ -189,7 +222,7 @@ function handleHook(island: Island, payload: HookPayload) {
     if (isExternalAgent) {
       State.upsertExternalAgent(agentId, validAgent!, agentColor(validAgent!));
     } else {
-      upsert(projectName, cwd);
+      upsert(projectName, cwd, hostOf(payload));
     }
   };
 
@@ -322,7 +355,7 @@ function handleHook(island: Island, payload: HookPayload) {
         if (requestId) void Bridge.approvalDecline(requestId);
         break;
       }
-      upsert(projectName, cwd);
+      upsert(projectName, cwd, hostOf(payload));
       supersedeStop();
       if (pendingTimeout != null) window.clearTimeout(pendingTimeout);
       const tool = payload.tool_name ?? "Tool";

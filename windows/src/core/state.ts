@@ -19,6 +19,8 @@ export interface AgentTask {
   miniEye?: EyeShape | null;
   pillBadge?: PillBadge | null;
   sessionCwd?: string | null;
+  /** Where the session runs — "Windows Terminal", "VS Code"… Empty until known. */
+  host?: string;
 }
 
 export interface ApprovalInfo {
@@ -63,7 +65,11 @@ const task = (
 
 /** AgentTask.integrationAgents — same ids, names and colours as macOS. */
 export const INTEGRATION_AGENTS: AgentTask[] = [
-  task("integration_claude", "VS Code", "#F5F6F8", "claudeCode"),
+  // "Claude Code" is the agent; where it runs is `host`, filled in from the
+  // first hook event of a session. This used to read "VS Code", inherited from
+  // the Mac, where the pill really was the editor — on Windows a session comes
+  // from whatever terminal the user happens to be in.
+  task("integration_claude", "Claude Code", "#F5F6F8", "claudeCode"),
   task("integration_resend", "Resend", "#22C55E", "n8n"),
   task("integration_n8n", "n8n", "#F29B38", "n8n"),
   task("integration_vercel", "Vercel", "#7C5CFF", "n8n"),

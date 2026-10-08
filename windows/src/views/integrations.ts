@@ -110,7 +110,11 @@ function idleCard(task: AgentTask, openSettings: () => void): HTMLElement {
   return h(
     "div",
     { class: "int-card" },
-    header(task.color, task.id === "integration_claude" ? "VS Code" : task.name, "Integration"),
+    header(
+      task.color,
+      task.name,
+      task.id === "integration_claude" ? (task.host ?? "Claude Code") : "Integration",
+    ),
     h("div", { class: "int-status" }, dot(statusColor, 5), h("span", { text: label })),
     actions,
   );

@@ -62,7 +62,7 @@ test("a paused island hands a permission request straight back to the terminal",
 test("a paused island ignores every other event", () => {
   State.paused = true;
   hook({ hook_event_name: "SessionStart", cwd: "C:\\Users\\me\\proj" });
-  assert.equal(task().name, "VS Code");
+  assert.equal(task().name, "Claude Code");
   assert.deepEqual(asked, []);
   assert.deepEqual(calls, []);
 });
@@ -144,7 +144,7 @@ test("a notification is a rate limit, a question, or nothing", () => {
 test("an unknown event changes nothing", () => {
   hook({ hook_event_name: "SomethingNew", cwd: "/p" });
   assert.equal(task().state, "idle");
-  assert.equal(task().name, "VS Code");
+  assert.equal(task().name, "Claude Code");
   assert.deepEqual(asked, []);
 });
 
@@ -189,7 +189,7 @@ test("the end of a session puts the pill back as it was", () => {
   hook({ hook_event_name: "PreToolUse", cwd: "/p/proj", tool_name: "Bash", tool_input: { command: "ls" } });
   hook({ hook_event_name: "SessionEnd", cwd: "/p/proj" });
   assert.equal(task().state, "idle");
-  assert.equal(task().name, "VS Code");
+  assert.equal(task().name, "Claude Code");
   assert.deepEqual(task().steps, []);
 });
 
@@ -217,7 +217,7 @@ test("a tagged agent gets its own pill next to Claude Code's", () => {
   assert.deepEqual(agent.steps, ["Exécute · ls"]);
   assert.match(agent.color, /^#[0-9A-F]{6}$/);
   // Claude Code's own pill is not the one that moved.
-  assert.equal(task().name, "VS Code");
+  assert.equal(task().name, "Claude Code");
   assert.equal(task().state, "idle");
 });
 
@@ -490,4 +490,51 @@ test("a declined permission request leaves the stop timer running", () => {
   afterStop(() => ask("r2"));
   assert.deepEqual(sent("approval_decline"), [{ requestId: "r1" }, { requestId: "r2" }]);
   assert.equal(task().state, "idle");
+});
+
+// ── Where the session runs ───────────────────────────────────────────────────
+//
+// The relay forwards the terminal's environment on every event. The pill used
+// to say "VS Code" whatever it held, which on Windows is usually wrong.
+
+test("a session in Windows Terminal says so", () => {
+  hook({ hook_event_name: "SessionStart", cwd: "C:/code/thing", wt_session: "abc-123" });
+  assert.equal(task().host, "Windows Terminal");
+});
+
+test("a session in VS Code says so, even inside its terminal", () => {
+  hook({
+    hook_event_name: "SessionStart",
+    cwd: "C:/code/thing",
+    vscode_pid: "4242",
+    wt_session: "abc-123",
+  });
+  assert.equal(task().host, "VS Code", "the editor wins over the terminal host");
+});
+
+test("TERM_PROGRAM names the rest", () => {
+  for (const [program, shown] of [
+    ["vscode", "VS Code"],
+    ["cursor", "Cursor"],
+    ["mintty", "Git Bash"],
+    ["wezterm", "WezTerm"],
+  ]) {
+    hook({ hook_event_name: "SessionStart", cwd: "C:/code/x", term_program: program });
+    assert.equal(task().host, shown, program);
+  }
+});
+
+test("a terminal that says nothing about itself is still a terminal", () => {
+  hook({ hook_event_name: "SessionStart", cwd: "C:/code/thing" });
+  assert.equal(task().host, "Terminal");
+});
+
+test("the end of a session keeps the host but goes back to naming the agent", () => {
+  hook({ hook_event_name: "SessionStart", cwd: "C:/code/thing", wt_session: "abc" });
+  assert.equal(task().name, "thing");
+
+  hook({ hook_event_name: "SessionEnd" });
+
+  assert.equal(task().name, "Claude Code");
+  assert.equal(task().host, "Windows Terminal", "still the last true answer");
 });

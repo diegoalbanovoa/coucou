@@ -36,6 +36,12 @@ export interface ViewHost {
   focus?(): void;
   /** Called every frame while the view is on screen. */
   tick?(nowMs: number): void;
+  /**
+   * Whether this view still needs frames. The island's loop stops as soon as
+   * nothing is moving, so a view with an animation of its own has to say so or
+   * it freezes part-way through.
+   */
+  animating?(): boolean;
 }
 
 // ── Shared pieces ─────────────────────────────────────────────────────────────
@@ -164,6 +170,9 @@ function buildOverview(actions: ViewActions): ViewHost {
     tick(nowMs: number) {
       if (mode === "ticker") ticker.tick(nowMs);
     },
+    animating() {
+      return mode === "ticker" && ticker.animating;
+    },
     sync() {
       const task = State.focusTask;
       if (task?.id !== lastFocus) {
@@ -186,10 +195,13 @@ function buildOverview(actions: ViewActions): ViewHost {
           cardKey = "";
         }
         clear(who);
+        const agent = task.source === "claudeCode" ? "Claude Code" : "n8n";
         who.append(
           dot(task.color, 7),
           h("span", { class: "name", text: task.name }),
-          h("span", { class: "tool", text: task.source === "claudeCode" ? "Claude Code" : "n8n" }),
+          // The agent, and where it runs when that is known: "Claude Code ·
+          // Windows Terminal" rather than a flat "VS Code".
+          h("span", { class: "tool", text: task.host ? `${agent} · ${task.host}` : agent }),
         );
         if (task.steps.length > 1) {
           who.append(h("span", {
@@ -228,7 +240,10 @@ function buildOverview(actions: ViewActions): ViewHost {
 }
 
 function buildPill(task: AgentTask, actions: ViewActions): HTMLElement {
-  const label = task.id === "integration_claude" ? "VS Code" : task.name;
+  // No override: `task.name` is the project while a session runs and the agent
+  // between sessions, and both are more use than the name of an editor that
+  // may not be involved at all.
+  const label = task.name;
   const canvas = createMiniBot(task, 24);
   const pill = h(
     "div",
