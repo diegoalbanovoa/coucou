@@ -95,8 +95,6 @@ export interface Settings {
   screen: "primary" | "cursor";
   autostart: boolean;
   hooksInstalled: boolean;
-  /** Claude model used by the chat. */
-  model: string;
   /** The folder the chat runs in, remembered across restarts. Null for none. */
   projectRoot: string | null;
   /** Which agent CLI the chat runs, by id. Null means the API chat. */
@@ -120,7 +118,6 @@ export const DEFAULT_SETTINGS: Settings = {
   // there when something needs answering.
   autostart: true,
   hooksInstalled: false,
-  model: "claude-opus-5",
   projectRoot: null,
   agentCli: null,
   agentSession: null,

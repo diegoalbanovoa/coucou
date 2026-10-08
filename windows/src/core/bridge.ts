@@ -82,8 +82,6 @@ export const Bridge = {
 
   // ── Chat, files, secrets ──────────────────────────────────────────────────
   /** One chat turn. The API key and any file bytes never leave Rust. */
-  chatSend: (query: string, context: ChatContext | null) =>
-    callOrThrow<{ text: string }>("chat_send", { query, context }),
 
   // ── Agent chat: the CLIs installed on this machine ────────────────────────
   /** Which agent CLIs are installed. Empty means API-only chat. */
@@ -141,11 +139,6 @@ export interface IntegrationUpdate {
   event: { success: boolean; label: string; detail: string | null } | null;
 }
 
-export type ChatContext =
-  | { kind: "file"; name: string; path: string }
-  | { kind: "window"; appName: string; title: string; url?: string };
-
-/** One message as it is kept on disk between runs. */
 export interface KeptMessage {
   role: "user" | "assistant" | "error";
   content: string;

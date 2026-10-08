@@ -21,8 +21,6 @@ pub struct Settings {
     pub screen: String,
     pub autostart: bool,
     pub hooks_installed: bool,
-    /// Claude model used by the chat. Changeable in the settings window.
-    pub model: String,
     /// The folder the island chat runs in. Remembered so that a restart comes
     /// back to the project the user was working in rather than to nothing.
     pub project_root: Option<String>,
@@ -34,10 +32,6 @@ pub struct Settings {
     /// The Obsidian vault the agent may read and write, when Obsidian's own
     /// list is not where it was found. See vault.rs.
     pub vault_path: Option<String>,
-}
-
-fn default_model() -> String {
-    crate::claude::DEFAULT_MODEL.to_string()
 }
 
 impl Default for Settings {
@@ -59,7 +53,6 @@ impl Default for Settings {
             // makes the real registration agree with this on every boot.
             autostart: true,
             hooks_installed: false,
-            model: default_model(),
             project_root: None,
             agent_cli: None,
             agent_session: None,
@@ -324,7 +317,6 @@ mod tests {
   "screen": "cursor",
   "autostart": false,
   "hooksInstalled": true,
-  "model": "some-model",
   "projectRoot": "C:/code/thing",
   "agentCli": "gemini",
   "agentSession": "7f3c9a10-0000-4000-8000-000000000000",
@@ -408,14 +400,6 @@ mod tests {
     fn unknown_fields_are_ignored_and_the_known_ones_kept() {
         let bytes = custom_with("somethingFromALaterVersion", Some(json!({ "a": [1, 2] })));
         assert_eq!(shown(&parse(&bytes).unwrap()), custom());
-    }
-
-    #[test]
-    fn a_file_from_before_the_model_setting_keeps_everything_else() {
-        let loaded = shown(&parse(&custom_with("model", None)).unwrap());
-        let mut expected = custom();
-        expected["model"] = json!(crate::claude::DEFAULT_MODEL);
-        assert_eq!(loaded, expected);
     }
 
     #[test]
@@ -653,7 +637,6 @@ mod tests {
                 "screen",
                 "autostart",
                 "hooksInstalled",
-                "model",
                 "projectRoot",
                 "agentCli",
                 "agentSession",

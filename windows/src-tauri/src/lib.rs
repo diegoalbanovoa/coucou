@@ -1,7 +1,6 @@
 // Coucou for Windows — app wiring and the commands the island calls.
 
 mod agent;
-mod claude;
 mod files;
 mod hooks;
 mod integrations;
@@ -23,7 +22,6 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_autostart::{ManagerExt, MacosLauncher};
 
-use claude::{Chat, ChatContext, ChatReply};
 use files::DroppedFile;
 use hooks::{HookPreview, HookStatus};
 use island::{PollGate, ScreenInfo};
@@ -307,19 +305,7 @@ fn approval_decline(app: AppHandle, request_id: String) {
     pipe::decline(&app, &request_id);
 }
 
-// ── Chat, files and secrets ───────────────────────────────────────────────────
-
-/// One chat turn. The API key and any file bytes stay on the Rust side.
-#[tauri::command]
-async fn chat_send(
-    shared: State<'_, Shared>,
-    chat: State<'_, Chat>,
-    query: String,
-    context: Option<ChatContext>,
-) -> Result<ChatReply, String> {
-    let model = shared.settings.lock().unwrap().model.clone();
-    claude::send(&chat, &model, query, context).await
-}
+// ── Files and secrets ─────────────────────────────────────────────────────────
 
 // ── Agent chat: the installed CLIs, in an attached project ────────────────────
 
@@ -483,12 +469,10 @@ fn chat_keep(messages: Vec<transcript::Message>) {
     transcript::save(&messages);
 }
 
-/// A new conversation: the CLI session, the API chat and the transcript all go
-/// together, or the island would show one conversation while the CLI resumed
-/// another.
+/// A new conversation: the CLI session and the transcript go together, or the
+/// island would show one conversation while the CLI resumed another.
 #[tauri::command]
-fn chat_forget(app: AppHandle, chat: State<Chat>) {
-    chat.reset();
+fn chat_forget(app: AppHandle) {
     app.state::<agent::Session>().reset();
     transcript::clear();
     remember(&app, |s| s.agent_session = None);
@@ -664,7 +648,6 @@ pub fn run() {
             gate: gate.clone(),
         })
         .manage(Pending::default())
-        .manage(Chat::default())
         .manage(agent::Project::default())
         .manage(agent::Session::default())
         .manage(agent::Cancel::default())
@@ -685,7 +668,6 @@ pub fn run() {
             approval_ack,
             approval_decline,
             log_line,
-            chat_send,
             agent_clis,
             agent_state,
             agent_set_cli,
