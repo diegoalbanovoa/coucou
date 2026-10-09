@@ -367,6 +367,18 @@ fn root_of_under(path: &Path, ceiling: &Path) -> Option<PathBuf> {
     ordinary
 }
 
+/// Where a turn runs: the attached project, else the default folder from
+/// settings. Split out and taking both as arguments so the order is one thing
+/// in one place, testable without a running app.
+///
+/// A default folder that is no longer there resolves to nothing rather than
+/// being handed to a CLI as a working directory that does not exist. The value
+/// itself is left in settings — a drive that is not mounted yet is the usual
+/// reason, and the settings window says so instead of forgetting it.
+pub fn folder_for_turn(attached: Option<PathBuf>, default: Option<&str>) -> Option<PathBuf> {
+    attached.or_else(|| default.map(PathBuf::from).filter(|p| p.is_dir()))
+}
+
 /// The folder the agent works in. Nothing runs without one: a CLI with no
 /// chosen working directory would quietly inherit Coucou's own, which is not
 /// a project the user picked.
@@ -1007,6 +1019,39 @@ mod tests {
     /// where it stops.
     fn no_ceiling() -> PathBuf {
         PathBuf::from("")
+    }
+
+    #[test]
+    fn the_attached_project_beats_the_default_folder() {
+        let attached = temp_root("turn-attached");
+        let default = temp_root("turn-default");
+        let default_str = default.to_string_lossy().to_string();
+
+        assert_eq!(
+            folder_for_turn(Some(attached.clone()), Some(&default_str)),
+            Some(attached),
+            "an explicit choice is not overridden by a default"
+        );
+    }
+
+    #[test]
+    fn with_nothing_attached_the_default_folder_is_used() {
+        let default = temp_root("turn-fallback");
+        let default_str = default.to_string_lossy().to_string();
+
+        assert_eq!(folder_for_turn(None, Some(&default_str)), Some(default));
+    }
+
+    #[test]
+    fn a_default_folder_that_is_gone_resolves_to_nothing() {
+        let parent = temp_root("turn-missing");
+        let gone = parent.join("not-there").to_string_lossy().to_string();
+
+        // Not the path, not the parent, nothing: a working directory that does
+        // not exist is an argument error waiting to happen.
+        assert_eq!(folder_for_turn(None, Some(&gone)), None);
+        assert_eq!(folder_for_turn(None, Some("")), None);
+        assert_eq!(folder_for_turn(None, None), None);
     }
 
     #[test]

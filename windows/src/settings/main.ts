@@ -346,6 +346,61 @@ function integrationsSection(present: Record<string, boolean>): HTMLElement {
   return h("section", {}, h("h2", {}, h("span", { text: "Advanced" })), fold);
 }
 
+// ── The chat's folder ────────────────────────────────────────────────────────
+
+/**
+ * Where the chat runs when no project has been attached.
+ *
+ * The resolution is: the project you attached, then this, then nothing — and
+ * "nothing" means the chat says so rather than running somewhere you did not
+ * pick. A folder set here that has since been deleted is reported, never
+ * silently dropped: an unmounted drive is the usual reason.
+ */
+function chatFolderSection(): HTMLElement {
+  const note = h("div", { class: "hint" });
+  const where = h("code", { class: "path" });
+  const dot = statusDot(false);
+  const choose = h("button", { text: "Choose the folder…" });
+  const forget = h("button", { text: "Clear" });
+
+  async function draw() {
+    const state = (await Bridge.chatFolderState()) ?? { path: "", exists: false };
+    const set = state.path !== "";
+
+    dot.style.background = !set ? "#6b7079" : state.exists ? "#22c55e" : "#f4505e";
+    where.textContent = set ? state.path : "none";
+    where.title = state.path;
+    choose.textContent = set ? "Choose another…" : "Choose the folder…";
+    forget.style.display = set ? "" : "none";
+
+    note.textContent = !set
+      ? "Not set, so the chat needs a project attached from the island before it can run a turn."
+      : state.exists
+        ? "Used when no project is attached. Attaching one from the island still wins."
+        : "This folder is not there any more. The setting is kept in case the drive comes back — clear it or choose another.";
+  }
+
+  choose.addEventListener("click", async () => {
+    const picked = await Bridge.pickChatFolder();
+    if (picked) await draw();
+  });
+  forget.addEventListener("click", async () => {
+    await Bridge.forgetChatFolder();
+    await draw();
+  });
+
+  void draw();
+
+  return h(
+    "section",
+    {},
+    h("h2", {}, dot, h("span", { text: "The chat's folder" })),
+    note,
+    h("div", { class: "row" }, h("label", { text: "Default" }), where),
+    h("div", { class: "row" }, choose, forget),
+  );
+}
+
 // ── Knowledge base section ───────────────────────────────────────────────────
 
 /**
@@ -484,6 +539,7 @@ async function main() {
     h("h1", {}, h("span", { text: "Coucou" }), h("span", { class: "version", text: version })),
     claudeSection(status),
     agentsSection(),
+    chatFolderSection(),
     vaultSection(),
     generalSection(),
     integrationsSection(present),

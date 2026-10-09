@@ -109,6 +109,8 @@ export interface Settings {
   agentSession: string | null;
   /** The Obsidian vault chosen by hand, or null to use the one Obsidian has. */
   vaultPath: string | null;
+  /** Where the chat runs when no project is attached. Null for nowhere. */
+  defaultChatFolder: string | null;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -128,6 +130,7 @@ export const DEFAULT_SETTINGS: Settings = {
   agentCli: null,
   agentSession: null,
   vaultPath: null,
+  defaultChatFolder: null,
 };
 
 type Listener = () => void;

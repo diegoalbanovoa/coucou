@@ -3,11 +3,12 @@
 
 import { beforeEach, test } from "node:test";
 import assert from "node:assert/strict";
-import { calls, replies, sent } from "./tauri.mjs";
+import { calls, emit, replies, sent } from "./tauri.mjs";
 import {
   keepConversation,
   loadAgentEnvironment,
   nextProvider,
+  registerAgentHandlers,
   startFreshConversation,
 } from "../src/island/agent.ts";
 import { State } from "../src/core/state.ts";
@@ -169,4 +170,35 @@ test("starting fresh drops the log, the draft and what is on disk together", () 
   assert.equal(State.chatDraft, "");
   assert.deepEqual(State.chatSteps, []);
   assert.equal(sent("chat_forget").length, 1);
+});
+
+// ── What Rust pushes at the island ──────────────────────────────────────────
+//
+// registerAgentHandlers subscribes to both; the island is only needed for the
+// chat to hold itself open, which none of this touches.
+registerAgentHandlers({ pin: () => {}, dropPin: () => {} });
+
+test("the versions arriving late replace the CLI list", async () => {
+  machine({ clis: [CLAUDE], cli: "claude" });
+  await loadAgentEnvironment();
+
+  emit("agent-clis", [{ ...CLAUDE, version: "2.1.241" }, GEMINI]);
+
+  // Switching now reaches Gemini, which was not in the list a moment ago.
+  nextProvider();
+  assert.equal(State.agentCli, "gemini");
+});
+
+test("a turn that fell back to the default folder tells the chip where it ran", async () => {
+  machine({ cli: "claude" });
+  await loadAgentEnvironment();
+  assert.equal(State.attachedProject, null);
+  calls.length = 0;
+
+  emit("agent-folder", "C:/code/thing");
+
+  assert.equal(State.attachedProject, "C:/code/thing");
+  // And `/` is asked about again, or it would still offer the old project's
+  // commands — or none at all.
+  assert.equal(sent("agent_commands").length, 1);
 });

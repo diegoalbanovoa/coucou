@@ -178,7 +178,13 @@ fn reconcile_autostart(app: &AppHandle, wanted: bool) {
 /// Brings back the project — and the conversation inside it — the app was in
 /// when it last ran, so a restart is not a blank chat with nothing attached.
 fn restore_agent(app: &AppHandle, settings: &Settings) {
-    let Some(stored) = settings.project_root.as_deref() else {
+    // Nothing remembered falls through to the default folder, so a fresh
+    // install with one configured opens on it rather than on nothing.
+    let Some(stored) = settings
+        .project_root
+        .as_deref()
+        .or(settings.default_chat_folder.as_deref())
+    else {
         return;
     };
     match app.state::<agent::Project>().attach(stored) {
@@ -446,22 +452,32 @@ impl Drop for PickingGuard {
 }
 
 /// The folder picker, opened from Rust so the webview never handles a path it
-/// did not get from the user.
-#[tauri::command]
-async fn pick_project(app: AppHandle) -> Option<String> {
-    let win = island::window(&app)?;
+/// did not get from the user. `win` owns the modal, so each caller passes the
+/// window the dialog should belong to.
+///
+/// The dialog is modal and stays up for as long as the user wants it to.
+/// Awaiting it on a runtime worker would park that worker for minutes, and the
+/// hook pipe server and the agent turn share the same runtime — so it goes to
+/// the blocking pool instead.
+async fn choose_folder(win: tauri::WebviewWindow) -> Option<String> {
     if PICKING.swap(true, Ordering::SeqCst) {
         return None;
     }
     let _guard = PickingGuard;
-    // The dialog is modal and stays up for as long as the user wants it to.
-    // Awaiting it on a runtime worker would park that worker for minutes, and
-    // the hook pipe server and the agent turn share the same runtime — so it
-    // goes to the blocking pool instead.
     tauri::async_runtime::spawn_blocking(move || platform::pick_folder(&win))
         .await
         .ok()
         .flatten()
+}
+
+/// The window a dialog opened from the settings window should belong to.
+fn settings_or_island(app: &AppHandle) -> Option<tauri::WebviewWindow> {
+    app.get_webview_window("settings").or_else(|| island::window(app))
+}
+
+#[tauri::command]
+async fn pick_project(app: AppHandle) -> Option<String> {
+    choose_folder(island::window(&app)?).await
 }
 
 /// One agent turn through the chosen CLI. Its tool calls come back to the
@@ -477,9 +493,29 @@ async fn agent_send(app: AppHandle, cli: String, prompt: String) -> Result<Strin
     let on = move |turn: agent::Turn| {
         let _ = emitter.emit("agent-turn", turn);
     };
+    let settings = shared_settings(&app);
+
+    // Nothing attached, but a default folder set: the chat runs there. Attached
+    // rather than used for this turn alone, so the chip says where it is
+    // running — a turn in a folder the user cannot see is worse than none.
+    if app.state::<agent::Project>().current().is_none() {
+        if let Some(folder) =
+            agent::folder_for_turn(None, settings.default_chat_folder.as_deref())
+        {
+            match app.state::<agent::Project>().attach(&folder.to_string_lossy()) {
+                Ok(name) => {
+                    log::line(format!("agent project from the default folder: {name}"));
+                    let stored = name.clone();
+                    remember(&app, |s| s.project_root = Some(stored));
+                    let _ = app.emit("agent-folder", name);
+                }
+                Err(err) => log::line(format!("default chat folder unusable: {err}")),
+            }
+        }
+    }
+
     let knowledge = {
-        let chosen = shared_settings(&app).vault_path;
-        let found = vault::resolve(chosen.as_deref());
+        let found = vault::resolve(settings.vault_path.as_deref());
         agent::Knowledge { briefing: vault::briefing(found.as_deref()), vault: found }
     };
     let result = {
@@ -532,15 +568,7 @@ fn vault_state(app: AppHandle) -> vault::VaultInfo {
 /// not installed, or the notes live somewhere it has never been pointed at.
 #[tauri::command]
 async fn pick_vault(app: AppHandle) -> Option<String> {
-    let win = app.get_webview_window("settings").or_else(|| island::window(&app))?;
-    if PICKING.swap(true, Ordering::SeqCst) {
-        return None;
-    }
-    let _guard = PickingGuard;
-    let picked = tauri::async_runtime::spawn_blocking(move || platform::pick_folder(&win))
-        .await
-        .ok()
-        .flatten()?;
+    let picked = choose_folder(settings_or_island(&app)?).await?;
     let stored = picked.clone();
     remember(&app, |s| s.vault_path = Some(stored));
     log::line(format!("vault chosen: {picked}"));
@@ -551,6 +579,41 @@ async fn pick_vault(app: AppHandle) -> Option<String> {
 #[tauri::command]
 fn forget_vault(app: AppHandle) {
     remember(&app, |s| s.vault_path = None);
+}
+
+// ── The chat's default folder ─────────────────────────────────────────────────
+
+/// Where the chat runs when nothing has been attached, and whether it is still
+/// there. Kept apart from the plain setting because "set but missing" is a
+/// state the settings window has to be able to say out loud.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FolderState {
+    /// Empty when none is set.
+    path: String,
+    /// False when it is set but no longer a folder.
+    exists: bool,
+}
+
+#[tauri::command]
+fn chat_folder_state(app: AppHandle) -> FolderState {
+    let path = shared_settings(&app).default_chat_folder.unwrap_or_default();
+    let exists = !path.is_empty() && std::path::Path::new(&path).is_dir();
+    FolderState { path, exists }
+}
+
+#[tauri::command]
+async fn pick_chat_folder(app: AppHandle) -> Option<String> {
+    let picked = choose_folder(settings_or_island(&app)?).await?;
+    let stored = picked.clone();
+    remember(&app, |s| s.default_chat_folder = Some(stored));
+    log::line(format!("default chat folder: {picked}"));
+    Some(picked)
+}
+
+#[tauri::command]
+fn forget_chat_folder(app: AppHandle) {
+    remember(&app, |s| s.default_chat_folder = None);
 }
 
 /// Stops the turn in flight. False when there was nothing to stop — the reply
@@ -725,6 +788,9 @@ pub fn run() {
             vault_state,
             pick_vault,
             forget_vault,
+            chat_folder_state,
+            pick_chat_folder,
+            forget_chat_folder,
             agent_reset,
             ingest_file,
             secret_present,

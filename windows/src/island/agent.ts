@@ -29,6 +29,14 @@ export function registerAgentHandlers(host: Island) {
     availableClis = clis;
     State.notify();
   });
+
+  // A turn sent with nothing attached runs in the default folder from
+  // settings, and Rust attaches it. The chip has to say so, or the chat would
+  // be running somewhere the island never mentioned.
+  void onEvent<string>("agent-folder", (project) => {
+    State.attachedProject = project;
+    void refreshSlashCommands().then(() => State.notify());
+  });
 }
 
 export async function loadAgentEnvironment() {

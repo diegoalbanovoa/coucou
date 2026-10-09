@@ -108,6 +108,12 @@ export const Bridge = {
   pickVault: () => call<string | null>("pick_vault"),
   /** Goes back to whatever vault Obsidian itself has open. */
   forgetVault: () => call<void>("forget_vault"),
+  /** Where the chat runs with nothing attached, and whether it is still there. */
+  chatFolderState: () => call<FolderState>("chat_folder_state"),
+  /** Chooses that folder. Null when the user cancelled the picker. */
+  pickChatFolder: () => call<string | null>("pick_chat_folder"),
+  /** Clears it: the chat then needs a project attached by hand. */
+  forgetChatFolder: () => call<void>("forget_chat_folder"),
   /** Fresh conversation, same project. */
   agentReset: () => call<void>("agent_reset"),
   /** The conversation the last run ended on. */
@@ -144,6 +150,14 @@ export interface KeptMessage {
   content: string;
   at: number;
   steps: string[];
+}
+
+/** A folder setting, and whether what it points at is still there. */
+export interface FolderState {
+  /** Empty when none is set. */
+  path: string;
+  /** False when it is set but no longer a folder. */
+  exists: boolean;
 }
 
 /** The knowledge base the agent can reach. */

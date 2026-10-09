@@ -32,6 +32,9 @@ pub struct Settings {
     /// The Obsidian vault the agent may read and write, when Obsidian's own
     /// list is not where it was found. See vault.rs.
     pub vault_path: Option<String>,
+    /// Where the chat runs when no project has been attached. The last level of
+    /// the resolution in `agent::folder_for_turn`, before "nowhere".
+    pub default_chat_folder: Option<String>,
 }
 
 impl Default for Settings {
@@ -57,6 +60,7 @@ impl Default for Settings {
             agent_cli: None,
             agent_session: None,
             vault_path: None,
+            default_chat_folder: None,
         }
     }
 }
@@ -320,7 +324,8 @@ mod tests {
   "projectRoot": "C:/code/thing",
   "agentCli": "gemini",
   "agentSession": "7f3c9a10-0000-4000-8000-000000000000",
-  "vaultPath": "C:/notes/vault"
+  "vaultPath": "C:/notes/vault",
+  "defaultChatFolder": "C:/code"
 }"#;
 
     fn custom() -> Value {
@@ -641,6 +646,7 @@ mod tests {
                 "agentCli",
                 "agentSession",
                 "vaultPath",
+                "defaultChatFolder",
             ]
         );
         let _ = std::fs::remove_dir_all(&dir);
