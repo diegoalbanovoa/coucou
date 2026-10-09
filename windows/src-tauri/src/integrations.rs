@@ -21,6 +21,10 @@ use crate::log;
 use crate::secrets;
 
 const TIMEOUT: Duration = Duration::from_secs(10);
+/// How often a poller that is switched off wakes up — often enough to notice
+/// that it was switched on, and no more. Its own cadence is for when it has
+/// something to do.
+const IDLE_EVERY: Duration = Duration::from_secs(300);
 
 /// What the island receives. `event` is only set when something actually changed,
 /// which is what drives the pill badge and the sound.
@@ -90,11 +94,25 @@ where
         tokio::time::sleep(Duration::from_secs(delay_secs)).await;
         let mut ticker = tokio::time::interval(Duration::from_secs(every_secs));
         loop {
+            // An integration nobody switched on does not need waking at its own
+            // cadence. It used to: seven pollers ticked forever whatever the
+            // settings said, the fastest every fifteen seconds, each one only to
+            // decline the work. For an app meant to sit there for weeks that is
+            // the wrong default — so a switched-off poller waits on the long
+            // cadence instead, and `save_settings` polls it the moment it is
+            // switched on rather than making it wait this out.
+            if PAUSED.load(Ordering::Relaxed) || !enabled(&app, id) {
+                tokio::time::sleep(IDLE_EVERY).await;
+                // The interval went unattended meanwhile, and an unreset one
+                // fires immediately for every tick it missed.
+                ticker.reset();
+                continue;
+            }
             ticker.tick().await;
-            // The ticker keeps its cadence; we just decline to do the work. An
-            // integration the user switched off, or a paused app, must make no
-            // network calls at all — CLAUDE.md allows talking only to services
-            // the user configured, and a disabled one is not configured.
+            // Checked again: the wait above is minutes, and a network call for
+            // an integration switched off in between is exactly what CLAUDE.md
+            // forbids — only services the user configured, and a disabled one
+            // is not configured.
             if PAUSED.load(Ordering::Relaxed) || !enabled(&app, id) {
                 continue;
             }

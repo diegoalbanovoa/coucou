@@ -63,13 +63,28 @@ fn boot(app: AppHandle, shared: State<Shared>) -> BootInfo {
 
 #[tauri::command]
 fn save_settings(app: AppHandle, shared: State<Shared>, settings: Settings) {
-    let (screen_changed, autostart_changed) = {
+    let (screen_changed, autostart_changed, switched_on) = {
         let mut current = shared.settings.lock().unwrap();
         let screen_changed = current.screen != settings.screen;
         let autostart_changed = current.autostart != settings.autostart;
+        // Which integrations were just switched on. Their pollers are waiting
+        // on the long idle cadence, so without this the first data would be up
+        // to five minutes away.
+        let switched_on: Vec<String> = settings
+            .active_integrations
+            .iter()
+            .filter(|id| !current.active_integrations.contains(id))
+            .cloned()
+            .collect();
         *current = settings.clone();
-        (screen_changed, autostart_changed)
+        (screen_changed, autostart_changed, switched_on)
     };
+    for id in switched_on {
+        let handle = app.clone();
+        tauri::async_runtime::spawn(async move {
+            integrations::poll_once(handle, &id).await;
+        });
+    }
     if let Err(err) = settings::save(&settings) {
         log::line(format!("could not save settings: {err}"));
     }
