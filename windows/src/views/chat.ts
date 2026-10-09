@@ -16,6 +16,7 @@ import {
   toggleProject,
 } from "../island/agent";
 import type { ViewHost } from "./views";
+import { t, tn, getLocale } from "../i18n/index";
 
 /**
  * The next message id. Counted off what is already in the log rather than from
@@ -31,10 +32,6 @@ const CLIP_AT = 1400;
 
 function clockOf(at: number): string {
   return new Date(at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-}
-
-function plural(n: number, one: string): string {
-  return `${n} ${one}${n === 1 ? "" : "s"}`;
 }
 
 /**
@@ -53,10 +50,10 @@ function stepsRow(steps: string[], live: boolean): HTMLElement | null {
   let open = false;
   const draw = () => {
     head.textContent = open
-      ? `${plural(steps.length, "step")} · hide`
+      ? `${tn("chat.steps", steps.length)} · ${t("chat.hideSteps")}`
       : live
         ? steps[steps.length - 1]
-        : plural(steps.length, "step");
+        : tn("chat.steps", steps.length);
     head.classList.toggle("live", live && !open);
     list.classList.toggle("open", open);
   };
@@ -70,16 +67,16 @@ function stepsRow(steps: string[], live: boolean): HTMLElement | null {
 
 /** Copy — the one thing worth doing to a reply that is already on screen. */
 function replyActions(content: string): HTMLElement {
-  const copy = h("button", { class: "msg-btn", title: "Copy the reply" }, icon("copy", { size: 10 }));
+  const copy = h("button", { class: "msg-btn", title: t("chat.copyReply") }, icon("copy", { size: 10 }));
   copy.addEventListener("click", () => {
     void copyToClipboard(content).then((done) => {
       clear(copy);
       copy.append(icon(done ? "check" : "bang", { size: 10 }));
-      copy.title = done ? "Copied" : "Could not copy";
+      copy.title = done ? t("chat.copied") : t("chat.copyFailed");
       window.setTimeout(() => {
         clear(copy);
         copy.append(icon("copy", { size: 10 }));
-        copy.title = "Copy the reply";
+        copy.title = t("chat.copyReply");
       }, 1400);
     });
   });
@@ -93,10 +90,10 @@ function replyBody(content: string): HTMLElement {
   if (content.length <= CLIP_AT) return body;
 
   body.classList.add("clipped");
-  const more = h("button", { class: "more-btn", text: "Show the whole reply" });
+  const more = h("button", { class: "more-btn", text: t("chat.showWhole") });
   more.addEventListener("click", () => {
     const folded = body.classList.toggle("clipped");
-    more.textContent = folded ? "Show the whole reply" : "Fold it back up";
+    more.textContent = folded ? t("chat.showWhole") : t("chat.foldBack");
   });
   return h("div", { class: "reply-wrap" }, body, more);
 }
@@ -114,7 +111,7 @@ function bubble(message: ChatMessage): HTMLElement {
     const card = h(
       "div",
       { class: "reply-error", title: clockOf(message.at) },
-      h("div", { class: "reply-error-head" }, icon("bang", { size: 10 }), h("span", { text: "The turn stopped" })),
+      h("div", { class: "reply-error-head" }, icon("bang", { size: 10 }), h("span", { text: t("chat.turnStopped") })),
       h("div", { class: "reply-error-detail", text: message.content }),
     );
     const row = h("div", { class: "chat-row" });
@@ -128,7 +125,7 @@ function bubble(message: ChatMessage): HTMLElement {
   const steps = stepsRow(message.steps ?? [], false);
   if (steps) column.append(steps);
   if (message.content.trim() === "") {
-    column.append(h("div", { class: "reply quiet", text: "No reply came back." }));
+    column.append(h("div", { class: "reply quiet", text: t("chat.noReply") }));
   } else {
     column.append(replyBody(message.content), replyActions(message.content));
   }
@@ -185,7 +182,7 @@ const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
  */
 function imageChip(file: DroppedFile, onRemove: () => void): HTMLElement {
   const thumb = h("span", { class: "shot-thumb" });
-  const drop = h("button", { class: "shot-drop", title: `Remove ${file.name}` });
+  const drop = h("button", { class: "shot-drop", title: t("chat.removeImage", { name: file.name }) });
   drop.append(icon("xmark", { size: 9 }));
   drop.addEventListener("click", onRemove);
 
@@ -221,10 +218,10 @@ function lastPathComponent(path: string): string {
  * do what they expect, so it names the one blocker rather than a generic hint.
  */
 function placeholder(): string {
-  if (!State.agentCli) return "No agent CLI found — install one to chat…";
-  if (!State.attachedProject) return "Attach a project folder first…";
-  if (State.chatHistory.length > 0) return "Continue…";
-  return "Ask, or / for a command…";
+  if (!State.agentCli) return t("chat.placeholderNoCli");
+  if (!State.attachedProject) return t("chat.placeholderNoProject");
+  if (State.chatHistory.length > 0) return t("chat.placeholderContinue");
+  return t("chat.placeholderAsk");
 }
 
 export function buildPrompt(onHeightChange: () => void): ViewHost {
@@ -236,25 +233,21 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
   const historyBox = h("div", { class: "chat-stack" });
   const draftBox = h("div", { class: "chat-stack" });
   log.append(historyBox, draftBox);
-  const jump = h("button", { class: "jump-btn", title: "Jump to the latest" }, icon("arrowDown", { size: 10 }));
+  const jump = h("button", { class: "jump-btn", title: t("chat.jumpToLatest") }, icon("arrowDown", { size: 10 }));
   const input = h("input", {
     type: "text",
     class: "chat-input",
-    placeholder: "Ask me anything…",
     spellcheck: "false",
   }) as HTMLInputElement;
-  const send = h("button", { class: "send-btn", title: "Send" }, icon("arrowUp", { size: 11 }));
+  const send = h("button", { class: "send-btn", title: t("chat.send") }, icon("arrowUp", { size: 11 }));
   const bar = h("div", { class: "chat-bar" }, input, send);
 
   // The header carries the two things that decide what a message does: which
   // agent runs it, and where. Both read as plain text until hovered, so an
   // ordinary question is not surrounded by machinery.
-  const provider = h("button", {
-    class: "chat-meta-btn",
-    title: "Switch between the installed agent consoles",
-  });
+  const provider = h("button", { class: "chat-meta-btn", title: t("chat.switchConsole") });
   const projectBtn = h("button", { class: "chat-meta-btn" });
-  const findBtn = h("button", { class: "chat-icon-btn", title: "Find in the conversation (Ctrl+F)" });
+  const findBtn = h("button", { class: "chat-icon-btn", title: t("chat.findTitle") });
   findBtn.append(icon("search", { size: 11 }));
   const growBtn = h("button", { class: "chat-icon-btn" });
   const header = h(
@@ -275,15 +268,15 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
   const findInput = h("input", {
     type: "text",
     class: "find-input",
-    placeholder: "Find in the conversation…",
+    placeholder: t("chat.findPlaceholder"),
     spellcheck: "false",
   }) as HTMLInputElement;
   const findCount = h("span", { class: "find-count" });
-  const prevBtn = h("button", { class: "chat-icon-btn", title: "Previous (Shift+Enter)" });
+  const prevBtn = h("button", { class: "chat-icon-btn", title: t("chat.findPrev") });
   prevBtn.append(icon("arrowUp", { size: 10 }));
-  const nextBtn = h("button", { class: "chat-icon-btn", title: "Next (Enter)" });
+  const nextBtn = h("button", { class: "chat-icon-btn", title: t("chat.findNext") });
   nextBtn.append(icon("arrowDown", { size: 10 }));
-  const closeFind = h("button", { class: "chat-icon-btn", title: "Close (Escape)" });
+  const closeFind = h("button", { class: "chat-icon-btn", title: t("chat.findClose") });
   closeFind.append(icon("xmark", { size: 10 }));
   const findBar = h(
     "div",
@@ -324,6 +317,7 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
   let renderedCount = -1;
   let renderedDraft = "";
   let renderedShots = "";
+  let shownLocale = getLocale();
   let paletteKey = "";
   let highlighted = 0;
   /** Whether new text should scroll into view — false once the user reads back. */
@@ -420,14 +414,14 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
   async function attach(paths: string[]) {
     for (const path of paths) {
       if (State.chatImages.length >= MAX_IMAGES) {
-        State.noteMessage = `Up to ${MAX_IMAGES} images on one message.`;
+        State.noteMessage = tn("files.tooManyImages", MAX_IMAGES, { max: MAX_IMAGES });
         break;
       }
       if (!/\.(png|jpe?g|webp|gif)$/i.test(path)) continue;
       try {
         const file = await Bridge.ingestFile(path);
         if (file.size > MAX_IMAGE_BYTES) {
-          State.noteMessage = `${file.name} is larger than 10 MB.`;
+          State.noteMessage = t("files.tooLarge", { name: file.name, max: "10 MB" });
           continue;
         }
         State.chatImages.push(file);
@@ -658,6 +652,17 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
   return {
     el,
     sync() {
+      // The history, the draft and the shot tray are each keyed by what
+      // changed about their own data — none of that notices a locale flip on
+      // its own, so the sentinels below force each one to redraw on the next
+      // pass through this function, same as a real content change would.
+      if (getLocale() !== shownLocale) {
+        shownLocale = getLocale();
+        renderedCount = -1;
+        renderedShots = "";
+        renderedDraft = "";
+      }
+
       const file = State.droppedFile;
       const wantChip = file?.name ?? "";
       if (chipRow.dataset.label !== wantChip) {
@@ -709,19 +714,21 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
       provider.textContent = providerLabel();
       const attached = State.attachedProject;
       // The folder name is enough to recognise it; the full path is the title.
-      projectBtn.textContent = attached ? lastPathComponent(attached) : "Attach project…";
-      projectBtn.title = attached ? `${attached} — click to detach` : "Choose the folder the agent works in";
+      projectBtn.textContent = attached ? lastPathComponent(attached) : t("chat.attachProject");
+      projectBtn.title = attached
+        ? t("chat.detachProject", { path: attached })
+        : t("chat.chooseProjectFolder");
       projectBtn.classList.toggle("on", attached != null);
 
       findBtn.classList.toggle("on", State.chatQuery !== null);
       clear(growBtn);
       growBtn.append(icon(State.chatExpanded ? "chevronLeft" : "chevronRight", { size: 11 }));
-      growBtn.title = State.chatExpanded ? "Make the chat smaller" : "Use the whole height";
+      growBtn.title = State.chatExpanded ? t("chat.shrink") : t("chat.grow");
       growBtn.classList.toggle("on", State.chatExpanded);
 
       clear(send);
       send.append(icon(sending ? "stop" : "arrowUp", { size: sending ? 9 : 11 }));
-      send.title = sending ? "Stop this turn" : "Send";
+      send.title = sending ? t("chat.stopTurn") : t("chat.send");
       send.classList.toggle("stopping", sending);
 
       input.placeholder = placeholder();

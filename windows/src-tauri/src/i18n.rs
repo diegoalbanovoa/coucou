@@ -1,0 +1,86 @@
+// What little of the UI is Rust's to say: the tray menu, today. See
+// docs/plan-v2.md § 2.3 — the folder and file pickers use whatever title
+// Windows itself gives an `IFileOpenDialog`, which this crate does not set,
+// so there is nothing of theirs to translate yet.
+//
+// `TypeScript` owns the real dictionary (src/i18n/); this is deliberately a
+// much smaller mirror of just the tray's four labels; a new key here does not
+// need a matching one there, and vice versa.
+
+/// "system", "en" or "es" — the same three values `Settings::language`
+/// stores, resolved the same way `i18n/index.ts`'s `resolveLocale` does.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Locale {
+    En,
+    Es,
+}
+
+impl Locale {
+    /// `setting` is `Settings.language` as stored: "system", "en" or "es".
+    /// "system" reads `platform::system_locale()` — no new dependency; see
+    /// that function on each platform (GetUserDefaultLocaleName on Windows,
+    /// $LC_ALL/$LC_MESSAGES/$LANG on Linux).
+    pub fn resolve(setting: &str) -> Self {
+        match setting {
+            "es" => Locale::Es,
+            "en" => Locale::En,
+            _ => {
+                if crate::platform::system_locale().is_some_and(|l| l.to_lowercase().starts_with("es")) {
+                    Locale::Es
+                } else {
+                    Locale::En
+                }
+            }
+        }
+    }
+}
+
+pub enum Key {
+    Open,
+    Settings,
+    Pause,
+    Quit,
+}
+
+pub fn tr(locale: Locale, key: Key) -> &'static str {
+    match (locale, key) {
+        (Locale::En, Key::Open) => "Open Coucou",
+        (Locale::Es, Key::Open) => "Abrir Coucou",
+        (Locale::En, Key::Settings) => "Settings…",
+        (Locale::Es, Key::Settings) => "Ajustes…",
+        (Locale::En, Key::Pause) => "Pause",
+        (Locale::Es, Key::Pause) => "Pausar",
+        (Locale::En, Key::Quit) => "Quit",
+        (Locale::Es, Key::Quit) => "Salir",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_key_answers_in_both_locales() {
+        for key in [Key::Open, Key::Settings, Key::Pause, Key::Quit] {
+            assert!(!tr(Locale::En, key_copy(&key)).is_empty());
+            assert!(!tr(Locale::Es, key).is_empty());
+        }
+    }
+
+    // `Key` carries no data, so a second copy for the English half of the
+    // pair above is just this — cheaper than deriving Clone for an enum nothing else needs it on.
+    fn key_copy(key: &Key) -> Key {
+        match key {
+            Key::Open => Key::Open,
+            Key::Settings => Key::Settings,
+            Key::Pause => Key::Pause,
+            Key::Quit => Key::Quit,
+        }
+    }
+
+    #[test]
+    fn an_explicit_setting_wins_over_the_system_locale() {
+        assert!(Locale::resolve("en") == Locale::En);
+        assert!(Locale::resolve("es") == Locale::Es);
+    }
+}

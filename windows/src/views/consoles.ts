@@ -18,6 +18,7 @@ import type { Console } from "../core/bridge";
 import { State } from "../core/state";
 import { stillMiniBot } from "../mochi/minibots";
 import { availableClis, chooseProvider, reloadConsoles } from "../island/agent";
+import { t, tn, getLocale } from "../i18n/index";
 
 /** How long after a focus a re-scan is worth doing. */
 const RESCAN_AFTER_MS = 5_000;
@@ -46,12 +47,14 @@ function badge(text: string, kind: "can" | "cannot" | "warn"): HTMLElement {
 function capabilities(c: Console): HTMLElement {
   const row = h("div", { class: "cap-row" });
   row.append(
-    c.can.streaming ? badge("streams", "can") : badge("one shot", "cannot"),
-    c.can.approvable ? badge("approvable here", "can") : badge("asks in its terminal", "cannot"),
+    c.can.streaming ? badge(t("consoles.cap.streams"), "can") : badge(t("consoles.cap.oneShot"), "cannot"),
+    c.can.approvable
+      ? badge(t("consoles.cap.approvableHere"), "can")
+      : badge(t("consoles.cap.asksInTerminal"), "cannot"),
   );
   // Said plainly rather than left for the user to discover: four of the seven
   // are driven the way their own documentation says and have never run here.
-  if (!c.verified) row.append(badge("unverified", "warn"));
+  if (!c.verified) row.append(badge(t("consoles.cap.unverified"), "warn"));
   return row;
 }
 
@@ -114,23 +117,17 @@ export function buildConsolePanel(opts: { onPick?: () => void } = {}) {
         State.agentCli,
         sessions.length,
         State.tasks.map((t) => `${t.id}:${t.name}:${t.host ?? ""}:${t.state}`).join("|"),
+        getLocale(),
       ].join("~");
       if (shape === rendered) return;
       rendered = shape;
 
       title.textContent =
-        availableClis.length > 0
-          ? `${availableClis.length} console${availableClis.length === 1 ? "" : "s"}`
-          : "No agent console found";
+        availableClis.length > 0 ? tn("consoles.count", availableClis.length) : t("consoles.found");
 
       clear(list);
       if (availableClis.length === 0) {
-        list.append(
-          h("div", {
-            class: "console-empty",
-            text: "Coucou looks on PATH and where npm, nvm, Volta, Bun, pnpm and the vendors' own installers put things.",
-          }),
-        );
+        list.append(h("div", { class: "console-empty", text: t("consoles.searchHint") }));
       }
 
       for (const console of availableClis) {
@@ -161,7 +158,7 @@ export function buildConsolePanel(opts: { onPick?: () => void } = {}) {
 
       clear(live);
       if (sessions.length > 0) {
-        live.append(h("div", { class: "live-title", text: "running now" }), ...sessions);
+        live.append(h("div", { class: "live-title", text: t("consoles.runningNow") }), ...sessions);
       }
     },
     /** Called when the panel becomes visible. */

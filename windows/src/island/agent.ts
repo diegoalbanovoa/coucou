@@ -10,6 +10,7 @@ import { Bridge, onEvent } from "../core/bridge";
 import type { Console, KeptMessage, SlashCommand } from "../core/bridge";
 import { State } from "../core/state";
 import type { Island } from "./island";
+import { t } from "../i18n/index";
 
 /** CLIs found on this machine, loaded once at boot. */
 export let availableClis: Console[] = [];
@@ -177,7 +178,7 @@ export function nextProvider() {
 export function providerLabel(): string {
   const cli = availableClis.find((c) => c.id === State.agentCli);
   if (cli) return cli.label;
-  return availableClis.length === 0 ? "No agent CLI found" : "Pick an agent";
+  return availableClis.length === 0 ? t("chat.noAgentFound") : t("chat.pickAgent");
 }
 
 /**

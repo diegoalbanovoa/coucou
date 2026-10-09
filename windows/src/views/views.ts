@@ -14,6 +14,7 @@ import { buildSystem } from "./system";
 import { buildChoose, buildUpload, buildUploading } from "./upload";
 import { renderIntegrationCard, type IntegrationCardHooks } from "./integrations";
 import { tile } from "../ui/tile";
+import { t, getLocale } from "../i18n/index";
 
 export interface ViewActions {
   setView(v: IslandViewName): void;
@@ -93,13 +94,13 @@ function stack(padLeft: number, padRight: number, ...children: Node[]): HTMLElem
 // ── Header ────────────────────────────────────────────────────────────────────
 
 export function buildHeader(actions: ViewActions): ViewHost {
-  const tabHome = h("button", { class: "tab", title: "Overview", onclick: () => go("overview") }, icon("house", { size: 13 }));
-  const tabChat = h("button", { class: "tab", title: "Ask", onclick: () => go("prompt") }, icon("bubble", { size: 13 }));
-  const tabDrop = h("button", { class: "tab", title: "Drop", onclick: () => go("upload") }, icon("plus", { size: 13 }));
-  const tabSystem = h("button", { class: "tab", title: "System", onclick: () => go("system") }, icon("disk", { size: 13 }));
+  const tabHome = h("button", { class: "tab", onclick: () => go("overview") }, icon("house", { size: 13 }));
+  const tabChat = h("button", { class: "tab", onclick: () => go("prompt") }, icon("bubble", { size: 13 }));
+  const tabDrop = h("button", { class: "tab", onclick: () => go("upload") }, icon("plus", { size: 13 }));
+  const tabSystem = h("button", { class: "tab", onclick: () => go("system") }, icon("disk", { size: 13 }));
 
-  const gearBtn = h("button", { title: "Settings", onclick: () => go("settings") }, icon("gear", { size: 14 }));
-  const soundBtn = h("button", { title: "Mute", onclick: () => actions.toggleSound() }, icon("speakerOn", { size: 14 }));
+  const gearBtn = h("button", { onclick: () => go("settings") }, icon("gear", { size: 14 }));
+  const soundBtn = h("button", { onclick: () => actions.toggleSound() }, icon("speakerOn", { size: 14 }));
 
   function go(v: IslandViewName) {
     actions.blip();
@@ -127,6 +128,13 @@ export function buildHeader(actions: ViewActions): ViewHost {
       clear(soundBtn);
       soundBtn.append(icon(State.settings.soundEnabled ? "speakerOn" : "speakerOff", { size: 14 }));
       el.style.opacity = v === "confused" ? "0" : "1";
+
+      tabHome.title = t("tabs.home");
+      tabChat.title = t("tabs.chat");
+      tabDrop.title = t("tabs.drop");
+      tabSystem.title = t("tabs.system");
+      gearBtn.title = t("tabs.settings");
+      soundBtn.title = t("tabs.mute");
     },
   };
 }
@@ -140,7 +148,7 @@ function buildOverview(actions: ViewActions): ViewHost {
   const leftBody = h("div", { class: "left-body" });
   const jump = h(
     "button",
-    { class: "icon-btn jump", title: "Open", onclick: () => actions.openTarget() },
+    { class: "icon-btn jump", onclick: () => actions.openTarget() },
     icon("arrowUpRight", { size: 8 }),
   );
   const left = card(null, leftBody, jump);
@@ -230,7 +238,7 @@ function buildOverview(actions: ViewActions): ViewHost {
         const key = [
           task.id, detailOpen, task.state, task.steps.join("|"),
           info?.loaded, info?.error, info?.configured,
-          JSON.stringify(info?.data ?? {}),
+          JSON.stringify(info?.data ?? {}), getLocale(),
         ].join("~");
         if (key !== cardKey) {
           cardKey = key;
@@ -241,6 +249,7 @@ function buildOverview(actions: ViewActions): ViewHost {
       }
 
       jump.style.display = detailOpen ? "none" : "";
+      jump.title = t("tabs.openTarget");
 
       const others = State.otherTasks.slice(0, 4);
       const pillKey = others.map((t) => `${t.id}:${t.pillBadge ?? ""}`).join("|");
@@ -304,25 +313,26 @@ function buildApproval(actions: ViewActions): ViewHost {
   const code = h("div", { class: "code" });
   const row = h("div", { class: "actions" });
   const el = h("div", { class: "view" }, card("amber", stack(116, 16, who, code, row)));
-  let rowKey = "";
+  // Rebuilt once per locale rather than every sync: rebuilding between a
+  // mouse-down and a mouse-up would swallow the click, and nothing else about
+  // these two buttons ever changes — except their words, when the language
+  // does, which is rare enough never to land mid-click in practice.
+  let builtFor = "";
   return {
     el,
     sync() {
       clear(who);
-      who.append(agentWho(State.focusTask, "needs permission"));
+      who.append(agentWho(State.focusTask, t("overview.needsPermission")));
       // The whole point of approving here rather than in the terminal: this line
       // is the command, the file path or the URL being authorised, not just the
       // name of the tool asking.
       code.textContent = State.pendingApproval?.command || State.pendingApproval?.tool || "…";
-      // Two buttons, built once. Rebuilding them between a mouse-down and a
-      // mouse-up would swallow the click, and there is nothing left to vary:
-      // "Always" is gone until the remembered-rules list exists to back it.
-      if (rowKey === "built") return;
-      rowKey = "built";
+      if (builtFor === getLocale()) return;
+      builtFor = getLocale();
       clear(row);
       row.append(
-        btn("Deny", "secondary", () => actions.decide("deny"), "N"),
-        btn("Allow", "primary", () => actions.decide("allow"), "Y"),
+        btn(t("overview.deny"), "secondary", () => actions.decide("deny"), "N"),
+        btn(t("overview.allow"), "primary", () => actions.decide("allow"), "Y"),
       );
     },
   };
@@ -339,11 +349,11 @@ function buildQuestion(): ViewHost {
     el,
     sync() {
       clear(who);
-      who.append(agentWho(State.focusTask, "Claude Code is asking a question"));
+      who.append(agentWho(State.focusTask, t("overview.askingQuestion")));
       const task = State.focusTask;
-      title.textContent = task?.steps.at(-1) ?? "Claude needs an answer.";
+      title.textContent = task?.steps.at(-1) ?? t("overview.claudeNeedsAnswer");
       clear(row);
-      row.append(h("div", { class: "sub", text: "Answer in your terminal — Coucou can't reply for you yet." }));
+      row.append(h("div", { class: "sub", text: t("overview.answerInTerminal") }));
     },
   };
 }
@@ -352,21 +362,27 @@ function buildQuestion(): ViewHost {
 
 function buildError(actions: ViewActions): ViewHost {
   const who = h("div");
-  const title = h("div", { class: "title", text: "Workflow stopped." });
+  const title = h("div", { class: "title" });
   const detail = h("div", { class: "detail" });
-  const row = h("div", { class: "actions" },
-    btn("Retry", "primary", () => actions.setView(State.defaultView())),
-    btn("Open in n8n", "secondary", () => actions.openUrl("")),
-  );
+  const row = h("div", { class: "actions" });
   const el = h("div", { class: "view" }, card("red", stack(116, 16, who, title, detail, row)));
+  let builtFor = "";
   return {
     el,
     sync() {
       const task = State.focusTask;
       clear(who);
       who.append(agentWho(task, task?.source === "n8n" ? "n8n" : "Claude Code"));
-      title.textContent = task?.source === "n8n" ? "Workflow stopped." : "Session stopped on an error.";
-      detail.textContent = task?.steps.at(-1) ?? "No detail available.";
+      title.textContent = task?.source === "n8n" ? t("overview.workflowStopped") : t("overview.sessionStoppedOnError");
+      detail.textContent = task?.steps.at(-1) ?? t("overview.noDetail");
+      // See buildApproval's note: rebuilt once per locale, not every sync.
+      if (builtFor === getLocale()) return;
+      builtFor = getLocale();
+      clear(row);
+      row.append(
+        btn(t("overview.retry"), "primary", () => actions.setView(State.defaultView())),
+        btn(t("overview.openInN8n"), "secondary", () => actions.openUrl("")),
+      );
     },
   };
 }
@@ -376,17 +392,23 @@ function buildError(actions: ViewActions): ViewHost {
 function buildFinished(actions: ViewActions): ViewHost {
   const who = h("div");
   const title = h("div", { class: "title" });
-  const row = h("div", { class: "actions" },
-    btn("Open terminal", "primary", () => actions.openTerminal()),
-    btn("OK", "secondary", () => actions.collapse()),
-  );
+  const row = h("div", { class: "actions" });
   const el = h("div", { class: "view" }, card("green", stack(116, 16, who, title, row)));
+  let builtFor = "";
   return {
     el,
     sync() {
       clear(who);
-      who.append(agentWho(State.focusTask, "Claude Code finished"));
-      title.textContent = State.focusTask?.steps.at(-1) ?? "Session finished";
+      who.append(agentWho(State.focusTask, t("overview.claudeCodeFinished")));
+      title.textContent = State.focusTask?.steps.at(-1) ?? t("overview.sessionFinished");
+      // See buildApproval's note: rebuilt once per locale, not every sync.
+      if (builtFor === getLocale()) return;
+      builtFor = getLocale();
+      clear(row);
+      row.append(
+        btn(t("overview.openTerminal"), "primary", () => actions.openTerminal()),
+        btn(t("overview.ok"), "secondary", () => actions.collapse()),
+      );
     },
   };
 }
@@ -394,13 +416,16 @@ function buildFinished(actions: ViewActions): ViewHost {
 // ── Confused ──────────────────────────────────────────────────────────────────
 
 function buildConfused(): ViewHost {
-  const body = h(
-    "div",
-    { class: "stack", style: "padding:0 18px 0 128px" },
-    h("div", { class: "title", text: "Too many hits at once." }),
-    h("div", { class: "sub", text: "Give me a sec — back to work in three seconds." }),
-  );
-  return { el: h("div", { class: "view" }, card("pink", body)), sync() {} };
+  const title = h("div", { class: "title" });
+  const sub = h("div", { class: "sub" });
+  const body = h("div", { class: "stack", style: "padding:0 18px 0 128px" }, title, sub);
+  return {
+    el: h("div", { class: "view" }, card("pink", body)),
+    sync() {
+      title.textContent = t("overview.tooManyHits");
+      sub.textContent = t("overview.backToWork");
+    },
+  };
 }
 
 // ── Note ──────────────────────────────────────────────────────────────────────
@@ -430,11 +455,17 @@ function buildSettings(actions: ViewActions): ViewHost {
   );
   const claudeBadge = h("span", { class: "status-badge" });
   const apiBadge = h("span", { class: "status-badge" });
+  const soundLabel = h("span", {});
+  const settingsLink = h("button", {
+    class: "link-btn",
+    style: "color:#8e939c;font-size:11.5px",
+    onclick: () => actions.openSettingsWindow(),
+  });
 
   const rows = h(
     "div",
     { class: "settings-rows" },
-    h("div", { class: "settings-row" }, soundSwitch, h("span", { text: "Sound" }), volume),
+    h("div", { class: "settings-row" }, soundSwitch, soundLabel, volume),
     h(
       "div",
       { class: "settings-row" },
@@ -448,12 +479,7 @@ function buildSettings(actions: ViewActions): ViewHost {
       claudeBadge,
       apiBadge,
       h("div", { class: "grow" }),
-      h("button", {
-        class: "link-btn",
-        style: "color:#8e939c;font-size:11.5px",
-        text: "Settings…",
-        onclick: () => actions.openSettingsWindow(),
-      }),
+      settingsLink,
     ),
   );
 
@@ -465,10 +491,12 @@ function buildSettings(actions: ViewActions): ViewHost {
     sync() {
       const s = State.settings;
       soundSwitch.classList.toggle("on", s.soundEnabled);
+      soundLabel.textContent = t("settings.general.sound");
       volume.value = String(s.soundVolume);
       volume.style.opacity = s.soundEnabled ? "1" : "0.4";
-      autoLabel.textContent = `Auto-close · ${Math.round(s.autoCloseInterval)}s`;
+      autoLabel.textContent = `${t("settings.general.autoClose")} · ${Math.round(s.autoCloseInterval)}s`;
       segButtons.forEach((b, i) => b.classList.toggle("on", s.autoCloseInterval === [10, 15, 30][i]));
+      settingsLink.textContent = t("integrations.settingsLink");
       clear(claudeBadge);
       claudeBadge.append(
         dot(s.hooksInstalled ? "#22C55E" : "#F4505E", 6),
@@ -482,14 +510,17 @@ function buildSettings(actions: ViewActions): ViewHost {
 
 // ── Placeholders filled in later stages ───────────────────────────────────────
 
-function buildPlaceholder(title: string, sub: string): ViewHost {
-  const body = h(
-    "div",
-    { class: "stack", style: "padding:0 18px 0 118px" },
-    h("div", { class: "title", text: title }),
-    h("div", { class: "sub", text: sub }),
-  );
-  return { el: h("div", { class: "view" }, card(null, body)), sync() {} };
+function buildPlaceholder(titleKey: Parameters<typeof t>[0], subKey?: Parameters<typeof t>[0]): ViewHost {
+  const title = h("div", { class: "title" });
+  const sub = h("div", { class: "sub" });
+  const body = h("div", { class: "stack", style: "padding:0 18px 0 118px" }, title, sub);
+  return {
+    el: h("div", { class: "view" }, card(null, body)),
+    sync() {
+      title.textContent = t(titleKey);
+      sub.textContent = subKey ? t(subKey) : "";
+    },
+  };
 }
 
 // ── Registry ──────────────────────────────────────────────────────────────────
@@ -514,8 +545,8 @@ export function buildViews(
   map.set("uploading", buildUploading());
   map.set("choose", buildChoose(actions));
   // Not in the Windows v1: sending a file by email, window attach + web result.
-  map.set("mail", buildPlaceholder("Sending by email isn't in this version.", ""));
-  map.set("searching", buildPlaceholder("Claude is searching…", ""));
-  map.set("result", buildPlaceholder("Result", ""));
+  map.set("mail", buildPlaceholder("overview.sendingByEmail"));
+  map.set("searching", buildPlaceholder("overview.searching"));
+  map.set("result", buildPlaceholder("overview.result"));
   return map;
 }

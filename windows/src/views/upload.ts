@@ -7,6 +7,7 @@
 import { h, clear } from "./dom";
 import { State } from "../core/state";
 import type { ViewActions, ViewHost } from "./views";
+import { t } from "../i18n/index";
 
 /** Dashed rounded rect drawn as SVG so the dashes can march like on macOS. */
 function dashedFrame(): SVGSVGElement {
@@ -29,12 +30,12 @@ function dashedFrame(): SVGSVGElement {
 
 export function buildUpload(): ViewHost {
   const frame = dashedFrame();
-  const title = h("div", { class: "drop-title", text: "Drop your files here" });
-  const tags = h(
-    "div",
-    { class: "drop-tags" },
-    ...["PDF", "Images", "Code", "Docs"].map((t) => h("span", { text: t })),
-  );
+  const title = h("div", { class: "drop-title" });
+  const tagPdf = h("span", {});
+  const tagImages = h("span", {});
+  const tagCode = h("span", {});
+  const tagDocs = h("span", {});
+  const tags = h("div", { class: "drop-tags" }, tagPdf, tagImages, tagCode, tagDocs);
   const card = h(
     "div",
     { class: "card drop-card" },
@@ -47,6 +48,11 @@ export function buildUpload(): ViewHost {
     el,
     sync() {
       card.classList.toggle("over", State.fileDragOver);
+      title.textContent = t("files.dropTitle");
+      tagPdf.textContent = t("files.kind.pdf");
+      tagImages.textContent = t("files.kind.images");
+      tagCode.textContent = t("files.kind.code");
+      tagDocs.textContent = t("files.kind.docs");
     },
   };
 }
@@ -69,9 +75,8 @@ export function buildUploading(): ViewHost {
     sync() {
       const done = State.uploadProgress >= 0.999;
       const pct = Math.round(State.uploadProgress * 100);
-      label.textContent = done
-        ? `✓  ${State.droppedFile?.name ?? "File"}`
-        : `Uploading ${State.droppedFile?.name ?? "file"}`;
+      const name = State.droppedFile?.name ?? t("files.uploadingFallback");
+      label.textContent = done ? t("files.uploaded", { name }) : t("files.uploading", { name });
       label.classList.toggle("done", done);
       percent.textContent = done ? "" : `${pct} %`;
       const w = State.uploadProgress * 526;
@@ -85,21 +90,13 @@ export function buildUploading(): ViewHost {
 
 export function buildChoose(actions: ViewActions): ViewHost {
   const title = h("div", { class: "title" });
-  const sub = h("div", { class: "sub", text: "What do you want to do with it?" });
-  const row = h(
-    "div",
-    { class: "actions" },
-    h("button", {
-      class: "btn primary",
-      text: "Ask a question",
-      onclick: () => actions.setView("prompt"),
-    }),
-    h("button", {
-      class: "btn secondary",
-      text: "Cancel",
-      onclick: () => actions.setView(State.defaultView()),
-    }),
-  );
+  const sub = h("div", { class: "sub" });
+  const askBtn = h("button", { class: "btn primary", onclick: () => actions.setView("prompt") });
+  const cancelBtn = h("button", {
+    class: "btn secondary",
+    onclick: () => actions.setView(State.defaultView()),
+  });
+  const row = h("div", { class: "actions" }, askBtn, cancelBtn);
   const el = h(
     "div",
     { class: "view" },
@@ -113,10 +110,13 @@ export function buildChoose(actions: ViewActions): ViewHost {
   return {
     el,
     sync() {
+      sub.textContent = t("files.whatNow");
+      askBtn.textContent = t("files.askQuestion");
+      cancelBtn.textContent = t("common.cancel");
       clear(title);
       title.append(
-        h("b", { text: State.droppedFile?.name ?? "file" }),
-        document.createTextNode(" is ready."),
+        h("b", { text: State.droppedFile?.name ?? t("files.readyFileFallback") }),
+        document.createTextNode(t("files.readySuffix")),
       );
     },
   };

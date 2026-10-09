@@ -41,6 +41,10 @@ State.settings.activeIntegrations = pane === "services" ? [...MOCK_ACTIVE_INTEGR
 for (const [id, data] of Object.entries(MOCK_INTEGRATION_DATA)) {
   State.integrations[id] = { data, error: null, loaded: true, configured: true };
 }
+// `main.ts` reads `State.settings.language` right after boot and calls
+// `setLocale()` with it — this is what makes `?lang=` drive the real i18n
+// engine (src/i18n/index.ts), not just the cosmetic <html lang> attribute.
+State.settings.language = lang;
 document.documentElement.lang = lang;
 
 // ── boot / settings ────────────────────────────────────────────────────────────

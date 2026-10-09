@@ -94,6 +94,14 @@ pub fn local_time() -> LocalTime {
     }
 }
 
+/// The desktop locale, as whatever `LC_ALL`/`LC_MESSAGES`/`LANG` says first —
+/// the same order glibc itself checks. Usually "es_CO.UTF-8" or similar;
+/// `i18n::Locale::resolve` only reads the first two letters, so the rest of
+/// the tag and any encoding suffix do not need stripping here.
+pub fn system_locale() -> Option<String> {
+    ["LC_ALL", "LC_MESSAGES", "LANG"].iter().find_map(|var| std::env::var(var).ok())
+}
+
 /// Creates `dir` and closes it to other users. The log, the inbox of dropped
 /// files and the relay binary live under these directories; with the default
 /// umask they would come out 0755 and readable by anyone on the machine.

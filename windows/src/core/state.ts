@@ -112,6 +112,8 @@ export interface Settings {
   vaultPath: string | null;
   /** Where the chat runs when no project is attached. Null for nowhere. */
   defaultChatFolder: string | null;
+  /** "system" follows `navigator.languages`; see i18n/index.ts's resolveLocale. */
+  language: "system" | "en" | "es";
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -132,6 +134,7 @@ export const DEFAULT_SETTINGS: Settings = {
   agentSession: null,
   vaultPath: null,
   defaultChatFolder: null,
+  language: "system",
 };
 
 type Listener = () => void;

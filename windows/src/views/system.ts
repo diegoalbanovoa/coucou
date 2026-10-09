@@ -12,6 +12,7 @@
 import { h, clear } from "./dom";
 import { icon } from "./icons";
 import { Bridge, type Found, type ProcInfo, type Stats, type Swept } from "../core/bridge";
+import { t, tn, getLocale } from "../i18n/index";
 
 /** How often the numbers refresh while the tab is open. */
 const POLL_MS = 3_000;
@@ -35,14 +36,14 @@ export function size(bytes: number): string {
 /** What one thing would free, as the preview line reads. */
 export function foundLine(found: Found): string {
   if (found.note) return found.note;
-  if (found.files === 0) return "nothing to clean";
-  return `${found.files} ${found.files === 1 ? "file" : "files"} · ${size(found.bytes)}`;
+  if (found.files === 0) return t("system.nothingToClean");
+  return `${tn("system.fileCount", found.files)} · ${size(found.bytes)}`;
 }
 
 /** What it actually freed. */
 export function sweptLine(swept: Swept): string {
-  const freed = `${swept.files} removed · ${size(swept.bytes)} freed`;
-  return swept.inUse > 0 ? `${freed} · ${swept.inUse} in use, left alone` : freed;
+  const freed = tn("system.removedFreed", swept.files, { size: size(swept.bytes) });
+  return swept.inUse > 0 ? `${freed} · ${tn("system.inUseLeftAlone", swept.inUse)}` : freed;
 }
 
 /** A bar for a proportion, with the colour saying when it matters. */
@@ -64,18 +65,18 @@ export function buildSystem() {
   const actions = h("div", { class: "sys-actions" });
   const result = h("div", { class: "sys-result" });
 
-  const diskCleanupBtn = h("button", { class: "sys-btn quiet", text: "Open Windows Disk Cleanup" });
+  const diskCleanupBtn = h("button", { class: "sys-btn quiet", text: t("system.openCleanup") });
   cleanup.append(diskCleanupBtn);
   diskCleanupBtn.addEventListener("click", async () => {
     diskCleanupBtn.disabled = true;
     const started = await Bridge.systemOpenDiskCleanup();
     diskCleanupBtn.disabled = false;
-    if (!started) diskCleanupBtn.textContent = "Could not start it";
+    if (!started) diskCleanupBtn.textContent = t("system.cleanupFailed");
   });
 
-  const scanBtn = h("button", { class: "sys-btn", text: "Look for what can go" });
+  const scanBtn = h("button", { class: "sys-btn", text: t("system.scanFirst") });
   const cleanBtn = h("button", { class: "sys-btn danger" });
-  const cancelBtn = h("button", { class: "sys-btn quiet", text: "Never mind" });
+  const cancelBtn = h("button", { class: "sys-btn quiet", text: t("system.neverMind") });
   actions.append(scanBtn, cleanBtn, cancelBtn);
 
   const el = h(
@@ -95,6 +96,7 @@ export function buildSystem() {
   let timer: number | null = null;
   let shown = "";
   let shownProcs = "";
+  let shownLocale = getLocale();
   /** The pid waiting on a second click, if any. Never more than one at once. */
   let endPid: number | null = null;
 
@@ -113,7 +115,7 @@ export function buildSystem() {
           icon("disk", { size: 12 }),
           h("span", { class: "sys-stat-name", text: drive.name }),
           meter(used, drive.total),
-          h("span", { class: "sys-stat-value", text: `${size(drive.free)} free` }),
+          h("span", { class: "sys-stat-value", text: t("system.free", { size: size(drive.free) }) }),
         ),
       );
     }
@@ -123,11 +125,11 @@ export function buildSystem() {
           "div",
           { class: "sys-stat" },
           icon("memory", { size: 12 }),
-          h("span", { class: "sys-stat-name", text: "Memory" }),
+          h("span", { class: "sys-stat-name", text: t("system.memory") }),
           meter(s.memoryUsed, s.memoryTotal),
           h("span", {
             class: "sys-stat-value",
-            text: `${size(s.memoryUsed)} of ${size(s.memoryTotal)}`,
+            text: t("system.usedOf", { used: size(s.memoryUsed), total: size(s.memoryTotal) }),
           }),
         ),
       );
@@ -137,13 +139,13 @@ export function buildSystem() {
 
   /** The heaviest processes, each with a button that asks before it ends one. */
   function drawProcs(list: ProcInfo[]) {
-    const key = JSON.stringify(list) + endPid;
+    const key = JSON.stringify(list) + endPid + getLocale();
     if (key === shownProcs) return;
     shownProcs = key;
 
     clear(procs);
     if (list.length === 0) return;
-    procs.append(h("div", { class: "sys-procs-title", text: "using the most memory" }));
+    procs.append(h("div", { class: "sys-procs-title", text: t("system.topMemory") }));
 
     for (const p of list) {
       const row = h(
@@ -154,8 +156,8 @@ export function buildSystem() {
       );
 
       if (endPid === p.pid) {
-        const yes = h("button", { class: "sys-proc-yes", text: "End it" });
-        const no = h("button", { class: "sys-proc-no", text: "Never mind" });
+        const yes = h("button", { class: "sys-proc-yes", text: t("system.endProcess") });
+        const no = h("button", { class: "sys-proc-no", text: t("system.neverMind") });
         yes.addEventListener("click", async () => {
           yes.disabled = true;
           try {
@@ -173,7 +175,7 @@ export function buildSystem() {
         });
         row.append(h("span", { class: "sys-proc-confirm" }, yes, no));
       } else {
-        const end = h("button", { class: "sys-proc-end", title: `End ${p.name}` });
+        const end = h("button", { class: "sys-proc-end", title: t("system.endProcessTitle", { name: p.name }) });
         end.append(icon("xmark", { size: 10 }));
         end.addEventListener("click", () => {
           endPid = p.pid;
@@ -202,7 +204,7 @@ export function buildSystem() {
           h("b", { text: f?.label ?? id }),
           // The description comes with the scan, so before the first one there
           // is nothing honest to say but that nothing has been looked at.
-          h("span", { class: "sys-row-about", text: f ? foundLine(f) : "not looked at yet" }),
+          h("span", { class: "sys-row-about", text: f ? foundLine(f) : t("system.notLookedAt") }),
         ),
       );
       box.title = f?.path ?? "";
@@ -229,13 +231,13 @@ export function buildSystem() {
     const total = totalFound();
     const previewed = found.length > 0 && total.files > 0;
 
-    scanBtn.textContent = found.length > 0 ? "Look again" : "Look for what can go";
+    scanBtn.textContent = found.length > 0 ? t("system.scanAgain") : t("system.scanFirst");
     scanBtn.disabled = chosen.size === 0;
 
     // The delete button exists only once a scan has something to delete, and
     // says exactly what it will take.
     cleanBtn.style.display = previewed ? "" : "none";
-    cleanBtn.textContent = `Delete ${total.files} ${total.files === 1 ? "file" : "files"} · ${size(total.bytes)}`;
+    cleanBtn.textContent = tn("system.deleteN", total.files, { size: size(total.bytes) });
     cancelBtn.style.display = previewed ? "" : "none";
   }
 
@@ -291,8 +293,17 @@ export function buildSystem() {
   return {
     el,
     sync() {
-      // Nothing to do here: the numbers come from the poll, and the lists are
-      // redrawn by the things that change them.
+      // Everything here is otherwise redrawn by the poll or by whatever the
+      // user just clicked — except the language, which can change while this
+      // tab just sits there, so it is the one thing worth checking on every
+      // sync rather than waiting for the next click or poll tick to catch up.
+      if (getLocale() === shownLocale) return;
+      shownLocale = getLocale();
+      diskCleanupBtn.textContent = t("system.openCleanup");
+      shown = ""; // forces drawStats to redraw "Memory"/"{free} free" next poll
+      drawList();
+      drawActions();
+      void refresh();
     },
     focus() {
       void refresh();

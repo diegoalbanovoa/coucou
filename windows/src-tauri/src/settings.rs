@@ -35,6 +35,11 @@ pub struct Settings {
     /// Where the chat runs when no project has been attached. The last level of
     /// the resolution in `agent::folder_for_turn`, before "nowhere".
     pub default_chat_folder: Option<String>,
+    /// "system", "en" or "es". Not a typed enum: this crosses the Tauri bridge
+    /// as plain JSON, and TypeScript's `i18n/index.ts` is the side that gives
+    /// it meaning — a Rust enum here would just be one more place a new value
+    /// has to be taught about.
+    pub language: String,
 }
 
 impl Default for Settings {
@@ -61,6 +66,7 @@ impl Default for Settings {
             agent_session: None,
             vault_path: None,
             default_chat_folder: None,
+            language: "system".into(),
         }
     }
 }
@@ -325,7 +331,8 @@ mod tests {
   "agentCli": "gemini",
   "agentSession": "7f3c9a10-0000-4000-8000-000000000000",
   "vaultPath": "C:/notes/vault",
-  "defaultChatFolder": "C:/code"
+  "defaultChatFolder": "C:/code",
+  "language": "es"
 }"#;
 
     fn custom() -> Value {
@@ -647,6 +654,7 @@ mod tests {
                 "agentSession",
                 "vaultPath",
                 "defaultChatFolder",
+                "language",
             ]
         );
         let _ = std::fs::remove_dir_all(&dir);

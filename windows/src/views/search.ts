@@ -11,6 +11,7 @@
 // counter says so by counting what is there.
 
 import type { ChatMessage } from "../core/state";
+import { t } from "../i18n/index";
 
 /** Where one hit is: which message, and where in its text. */
 export interface Match {
@@ -47,7 +48,7 @@ export function findMatches(messages: ChatMessage[], query: string): Match[] {
 
 /** "3/12", or "none" when there is nothing — never "0/0". */
 export function counter(matches: Match[], index: number): string {
-  if (matches.length === 0) return "none";
+  if (matches.length === 0) return t("chat.searchNone");
   return `${index + 1}/${matches.length}`;
 }
 

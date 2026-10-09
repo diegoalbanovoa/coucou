@@ -9,6 +9,7 @@ import { loadAgentEnvironment, registerAgentHandlers } from "./island/agent";
 import { rescanOnFocus } from "./views/consoles";
 import { registerHookHandlers } from "./island/hooks";
 import { registerIntegrationHandlers, refreshConfigured } from "./island/integrations";
+import { setLocale, resolveLocale } from "./i18n/index";
 
 async function main() {
   const root = document.getElementById("root");
@@ -22,6 +23,8 @@ async function main() {
   if (boot) {
     State.settings = { ...State.settings, ...boot.settings };
   }
+  setLocale(resolveLocale(State.settings.language));
+  document.documentElement.lang = resolveLocale(State.settings.language);
   island.applySettings();
   State.loadIntegrationTasks();
   if (boot && !boot.cursorPoll) island.followPageCursor();
@@ -58,6 +61,8 @@ async function main() {
   // The settings window writes preferences; apply them here without a restart.
   await onEvent<Settings>("settings-changed", (s) => {
     State.settings = { ...State.settings, ...s };
+    setLocale(resolveLocale(State.settings.language));
+    document.documentElement.lang = resolveLocale(State.settings.language);
     island.applySettings();
     State.loadIntegrationTasks();
     void refreshConfigured();

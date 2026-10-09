@@ -6,6 +6,8 @@ import "./settings.css";
 import { Bridge, onEvent, type HookStatus } from "../core/bridge";
 import { DEFAULT_SETTINGS, type Settings } from "../core/state";
 import { h, clear } from "../views/dom";
+import { t, tn, setLocale, resolveLocale, type LocaleSetting } from "../i18n/index";
+import { segmented } from "../ui/segmented";
 
 let settings: Settings = { ...DEFAULT_SETTINGS };
 let version = "";
@@ -48,7 +50,7 @@ function claudeSection(status: HookStatus): HTMLElement {
   const section = h(
     "section",
     {},
-    h("h2", {}, statusDot(status.installed), h("span", { text: "Claude Code" })),
+    h("h2", {}, statusDot(status.installed), h("span", { text: t("settings.claudeCode.title") })),
     body,
   );
 
@@ -59,52 +61,47 @@ function claudeSection(status: HookStatus): HTMLElement {
     draw();
     const head = section.querySelector("h2")!;
     clear(head);
-    head.append(statusDot(status.installed), h("span", { text: "Claude Code" }));
+    head.append(statusDot(status.installed), h("span", { text: t("settings.claudeCode.title") }));
   };
 
   function draw() {
     body.append(
       h("div", {
         class: "hint",
-        text: status.installed
-          ? "Coucou is hooked into your Claude Code sessions. Tool calls, questions and permission requests show up in the island, and you can answer them there."
-          : "Install the hooks to see your Claude Code sessions in the island and approve permissions without leaving what you are doing.",
+        text: status.installed ? t("settings.claudeCode.hookedIn") : t("settings.claudeCode.notHookedIn"),
       }),
       h("div", { class: "row" },
-        h("label", { text: "settings.json" }),
+        h("label", { text: t("settings.claudeCode.settingsJson") }),
         h("span", { class: "path", text: status.settingsPath }),
       ),
       h("div", { class: "row" },
-        h("label", { text: "Relay" }),
+        h("label", { text: t("settings.claudeCode.relay") }),
         h("span", { class: "path", text: status.hookPath }),
         statusDot(status.hookReady),
       ),
     );
 
     if (!status.hookReady) {
-      body.append(h("div", {
-        class: "notice warn",
-        text: "coucou-hook.exe is not in place yet. Restart Coucou; if it still fails, build it with `cargo build -p coucou-hook`.",
-      }));
+      body.append(h("div", { class: "notice warn", text: t("settings.claudeCode.relayMissing") }));
     }
 
     const actions = h("div", { class: "row" });
     const install = h("button", {
       class: "primary",
-      text: status.installed ? "Reinstall hooks…" : "Install hooks…",
+      text: status.installed ? t("settings.claudeCode.reinstall") : t("settings.claudeCode.install"),
       onclick: () => showPreview(true),
     });
     // Writing hook commands that point at a relay which isn't there would give
     // every Claude Code session a broken hook and nothing to show for it.
     if (!status.hookReady) {
       install.disabled = true;
-      install.title = "The relay isn't installed yet.";
+      install.title = t("settings.claudeCode.relayNotReady");
     }
     actions.append(install);
     if (status.installed) {
       actions.append(h("button", {
         class: "danger",
-        text: "Uninstall hooks…",
+        text: t("settings.claudeCode.uninstallHooks"),
         onclick: () => showPreview(false),
       }));
     }
@@ -122,7 +119,7 @@ function claudeSection(status: HookStatus): HTMLElement {
       body.append(
         h("div", { class: "notice err", text: String(err).replace(/^Error:\s*/, "") }),
         h("div", { class: "row" }, h("button", {
-          text: "Back",
+          text: t("settings.claudeCode.back"),
           onclick: () => { clear(body); draw(); },
         })),
       );
@@ -133,18 +130,16 @@ function claudeSection(status: HookStatus): HTMLElement {
     body.append(
       h("div", {
         class: "hint",
-        text: install
-          ? "This is exactly what will change in your settings.json. Your own hooks are left untouched."
-          : "This removes Coucou's entries only. Your own hooks are left untouched.",
+        text: install ? t("settings.claudeCode.previewInstall") : t("settings.claudeCode.previewUninstall"),
       }),
       renderDiff(preview.diff),
       h("div", { class: "row" },
-        h("span", { class: "path", text: `Backup → ${preview.backup}` }),
+        h("span", { class: "path", text: t("settings.claudeCode.backupLabel", { backup: preview.backup }) }),
       ),
     );
     const confirm = h("button", {
       class: install ? "primary" : "danger",
-      text: install ? "Back up and write" : "Back up and remove",
+      text: install ? t("settings.claudeCode.confirmInstall") : t("settings.claudeCode.confirmUninstall"),
     });
     confirm.addEventListener("click", async () => {
       confirm.disabled = true;
@@ -153,16 +148,16 @@ function claudeSection(status: HookStatus): HTMLElement {
         clear(body);
         body.append(h("div", {
           class: "notice ok",
-          text: `Done. Previous settings saved as ${backup}. Open a new Claude Code session to pick the hooks up.`,
+          text: t("settings.claudeCode.doneMessage", { backup }),
         }));
         window.setTimeout(() => void rebuild(), 2600);
       } catch (err) {
         confirm.disabled = false;
-        body.append(h("div", { class: "notice err", text: `Could not write: ${String(err)}` }));
+        body.append(h("div", { class: "notice err", text: t("settings.claudeCode.writeError", { error: String(err) }) }));
       }
     });
     body.append(h("div", { class: "row" }, confirm, h("button", {
-      text: "Cancel",
+      text: t("settings.claudeCode.cancel"),
       onclick: () => { clear(body); draw(); },
     })));
   }
@@ -184,20 +179,18 @@ function claudeSection(status: HookStatus): HTMLElement {
 function agentsSection(): HTMLElement {
   const body = h("div", { style: "display:flex;flex-direction:column;gap:8px" });
   const note = h("div", { class: "hint" });
-  const rescan = h("button", { text: "Look again" });
+  const rescan = h("button", { text: t("settings.agents.rescan") });
 
   async function draw() {
-    note.textContent = "Looking…";
+    note.textContent = t("settings.agents.looking");
     clear(body);
     const clis = (await Bridge.agentClis()) ?? [];
 
     if (clis.length === 0) {
-      note.textContent =
-        "None found. Coucou looks on PATH and in the folders npm, nvm, Volta, Bun, pnpm and the vendors' own installers use.";
+      note.textContent = t("settings.agents.noneFound");
       return;
     }
-    note.textContent =
-      `${clis.length} found. The chat runs whichever one you pick in the island; only Claude Code streams its reply and can be resumed, because it is the one whose hooks Coucou installs.`;
+    note.textContent = tn("settings.agents.summary", clis.length);
 
     for (const cli of clis) {
       body.append(
@@ -206,7 +199,7 @@ function agentsSection(): HTMLElement {
           { class: "row" },
           statusDot(true),
           h("label", { text: cli.label }),
-          h("span", { class: "hint", style: "flex:0 0 auto", text: cli.version || "version unknown" }),
+          h("span", { class: "hint", style: "flex:0 0 auto", text: cli.version || t("settings.agents.versionUnknown") }),
           h("code", { class: "path", text: cli.path }),
         ),
         // The file is the place to add a flag, lengthen a turn, or let the
@@ -215,7 +208,7 @@ function agentsSection(): HTMLElement {
           "div",
           { class: "row" },
           h("label", { text: "" }),
-          h("span", { class: "hint", style: "flex:0 0 auto", text: "config" }),
+          h("span", { class: "hint", style: "flex:0 0 auto", text: t("settings.agents.config") }),
           h("code", { class: "path", text: cli.configPath }),
         ),
       );
@@ -228,7 +221,7 @@ function agentsSection(): HTMLElement {
   return h(
     "section",
     {},
-    h("h2", {}, h("span", { text: "Agents" })),
+    h("h2", {}, h("span", { text: t("settings.agents.title") })),
     note,
     body,
     h("div", { class: "row" }, rescan),
@@ -245,25 +238,30 @@ interface IntegrationDef {
   fields: { key: string; label: string; placeholder: string; secret: boolean }[];
 }
 
-const INTEGRATIONS: IntegrationDef[] = [
-  { id: "integration_stripe", name: "Stripe", color: "#0570DE",
-    fields: [{ key: "stripe-api-key", label: "Secret key", placeholder: "sk_live_…", secret: true }] },
-  { id: "integration_github", name: "GitHub", color: "#F4505E",
-    fields: [{ key: "github-token", label: "Token", placeholder: "ghp_…", secret: true }] },
-  { id: "integration_vercel", name: "Vercel", color: "#7C5CFF",
-    fields: [{ key: "vercel-token", label: "Token", placeholder: "…", secret: true }] },
-  { id: "integration_n8n", name: "n8n", color: "#F29B38",
-    fields: [
-      { key: "n8n-url", label: "Instance URL", placeholder: "https://n8n.example.com", secret: false },
-      { key: "n8n-api-key", label: "API key", placeholder: "…", secret: true },
-    ] },
-  { id: "integration_resend", name: "Resend", color: "#22C55E",
-    fields: [{ key: "resend-api-key", label: "API key", placeholder: "re_…", secret: true }] },
-  { id: "integration_notion", name: "Notion", color: "#8C8C8C",
-    fields: [{ key: "notion-api-key", label: "Integration token", placeholder: "ntn_…", secret: true }] },
-  { id: "integration_calcom", name: "Cal.com", color: "#C9956A",
-    fields: [{ key: "calcom-api-key", label: "API key", placeholder: "cal_…", secret: true }] },
-];
+/** Built lazily: field labels go through `t()`, and this file's top level
+ *  runs before `setLocale()` has read the boot settings. */
+function integrationDefs(): IntegrationDef[] {
+  const f = (key: string) => t(`settings.integrations.fields.${key}` as Parameters<typeof t>[0]);
+  return [
+    { id: "integration_stripe", name: "Stripe", color: "#0570DE",
+      fields: [{ key: "stripe-api-key", label: f("secretKey"), placeholder: "sk_live_…", secret: true }] },
+    { id: "integration_github", name: "GitHub", color: "#F4505E",
+      fields: [{ key: "github-token", label: f("token"), placeholder: "ghp_…", secret: true }] },
+    { id: "integration_vercel", name: "Vercel", color: "#7C5CFF",
+      fields: [{ key: "vercel-token", label: f("token"), placeholder: "…", secret: true }] },
+    { id: "integration_n8n", name: "n8n", color: "#F29B38",
+      fields: [
+        { key: "n8n-url", label: f("instanceUrl"), placeholder: "https://n8n.example.com", secret: false },
+        { key: "n8n-api-key", label: f("apiKey"), placeholder: "…", secret: true },
+      ] },
+    { id: "integration_resend", name: "Resend", color: "#22C55E",
+      fields: [{ key: "resend-api-key", label: f("apiKey"), placeholder: "re_…", secret: true }] },
+    { id: "integration_notion", name: "Notion", color: "#8C8C8C",
+      fields: [{ key: "notion-api-key", label: f("integrationToken"), placeholder: "ntn_…", secret: true }] },
+    { id: "integration_calcom", name: "Cal.com", color: "#C9956A",
+      fields: [{ key: "calcom-api-key", label: f("apiKey"), placeholder: "cal_…", secret: true }] },
+  ];
+}
 
 const MAX_ACTIVE = 4;
 
@@ -273,10 +271,10 @@ function integrationsSection(present: Record<string, boolean>): HTMLElement {
 
   function updateNote() {
     const used = settings.activeIntegrations.length;
-    note.textContent = `Pick up to ${MAX_ACTIVE} pills to show next to Mochi — ${used}/${MAX_ACTIVE} in use. Keys are stored in the Windows Credential Manager, never on disk.`;
+    note.textContent = t("settings.integrations.pickUpTo", { max: MAX_ACTIVE, used });
   }
 
-  for (const def of INTEGRATIONS) {
+  for (const def of integrationDefs()) {
     const active = settings.activeIntegrations.includes(def.id);
     const sw = h("button", { class: active ? "switch on" : "switch" });
     sw.addEventListener("click", () => {
@@ -296,12 +294,12 @@ function integrationsSection(present: Record<string, boolean>): HTMLElement {
     for (const field of def.fields) {
       const input = h("input", {
         type: field.secret ? "password" : "text",
-        placeholder: present[field.key] ? "••••••••  (stored)" : field.placeholder,
+        placeholder: present[field.key] ? t("settings.integrations.stored") : field.placeholder,
         autocomplete: "off",
         spellcheck: "false",
         style: "flex:1 1 auto;min-width:0",
       }) as HTMLInputElement;
-      const saveBtn = h("button", { text: "Save" });
+      const saveBtn = h("button", { text: t("settings.integrations.save") });
       const dotEl = statusDot(present[field.key] ?? false);
       saveBtn.addEventListener("click", async () => {
         const value = input.value.trim();
@@ -309,7 +307,7 @@ function integrationsSection(present: Record<string, boolean>): HTMLElement {
           await Bridge.secretSet(field.key, value);
           present[field.key] = value.length > 0;
           input.value = "";
-          input.placeholder = value ? "••••••••  (stored)" : field.placeholder;
+          input.placeholder = value ? t("settings.integrations.stored") : field.placeholder;
           dotEl.style.background = value ? "#22c55e" : "#f4505e";
         } catch {
           dotEl.style.background = "#f5a524";
@@ -340,10 +338,10 @@ function integrationsSection(present: Record<string, boolean>): HTMLElement {
   // service, and they are nobody's first reason to open this window.
   const fold = h("details", { class: "fold" });
   fold.append(
-    h("summary", { text: "Integration keys" }),
+    h("summary", { text: t("settings.integrations.integrationKeys") }),
     h("div", { class: "fold-body" }, note, list),
   );
-  return h("section", {}, h("h2", {}, h("span", { text: "Advanced" })), fold);
+  return h("section", {}, h("h2", {}, h("span", { text: t("settings.integrations.advanced") })), fold);
 }
 
 // ── The chat's folder ────────────────────────────────────────────────────────
@@ -360,8 +358,8 @@ function chatFolderSection(): HTMLElement {
   const note = h("div", { class: "hint" });
   const where = h("code", { class: "path" });
   const dot = statusDot(false);
-  const choose = h("button", { text: "Choose the folder…" });
-  const forget = h("button", { text: "Clear" });
+  const choose = h("button", { text: t("settings.chatFolder.choose") });
+  const forget = h("button", { text: t("settings.chatFolder.clear") });
 
   async function draw() {
     const state = (await Bridge.chatFolderState()) ?? { path: "", exists: false };
@@ -370,14 +368,14 @@ function chatFolderSection(): HTMLElement {
     dot.style.background = !set ? "#6b7079" : state.exists ? "#22c55e" : "#f4505e";
     where.textContent = set ? state.path : "none";
     where.title = state.path;
-    choose.textContent = set ? "Choose another…" : "Choose the folder…";
+    choose.textContent = set ? t("settings.chatFolder.chooseAnother") : t("settings.chatFolder.choose");
     forget.style.display = set ? "" : "none";
 
     note.textContent = !set
-      ? "Not set, so the chat needs a project attached from the island before it can run a turn."
+      ? t("settings.chatFolder.noneSet")
       : state.exists
-        ? "Used when no project is attached. Attaching one from the island still wins."
-        : "This folder is not there any more. The setting is kept in case the drive comes back — clear it or choose another.";
+        ? t("settings.chatFolder.usedWhenNoProject")
+        : t("settings.chatFolder.folderGone");
   }
 
   choose.addEventListener("click", async () => {
@@ -394,9 +392,9 @@ function chatFolderSection(): HTMLElement {
   return h(
     "section",
     {},
-    h("h2", {}, dot, h("span", { text: "The chat's folder" })),
+    h("h2", {}, dot, h("span", { text: t("settings.chatFolder.title") })),
     note,
-    h("div", { class: "row" }, h("label", { text: "Default" }), where),
+    h("div", { class: "row" }, h("label", { text: t("settings.chatFolder.default") }), where),
     h("div", { class: "row" }, choose, forget),
   );
 }
@@ -414,8 +412,8 @@ function vaultSection(): HTMLElement {
   const note = h("div", { class: "hint" });
   const where = h("code", { class: "path" });
   const dot = statusDot(false);
-  const choose = h("button", { text: "Choose the folder…" });
-  const forget = h("button", { text: "Use Obsidian's" });
+  const choose = h("button", { text: t("settings.vault.choose") });
+  const forget = h("button", { text: t("settings.vault.useObsidians") });
 
   async function draw() {
     const info = (await Bridge.vaultState()) ?? { path: "", source: "none" as const, known: 0 };
@@ -424,15 +422,17 @@ function vaultSection(): HTMLElement {
     dot.style.background = found ? "#22c55e" : "#f4505e";
     where.textContent = info.path;
     where.title = info.path;
-    choose.textContent = found ? "Choose another…" : "Choose the folder…";
+    choose.textContent = found ? t("settings.vault.chooseAnother") : t("settings.vault.choose");
     forget.style.display = info.source === "chosen" && info.known > 0 ? "" : "none";
 
     note.textContent =
       info.source === "obsidian"
-        ? `Read from Obsidian's own list of vaults${info.known > 1 ? ` (${info.known} of them)` : ""}. The agent can read and write inside it.`
+        ? info.known > 1
+          ? t("settings.vault.fromObsidianMany", { n: info.known })
+          : t("settings.vault.fromObsidian")
         : info.source === "chosen"
-          ? "Chosen here, which overrides Obsidian's own list."
-          : "None found. Obsidian is not installed, or its vault list is empty — point Coucou at the folder and the agent can use it as a knowledge base.";
+          ? t("settings.vault.chosenOverride")
+          : t("settings.vault.noneFound");
   }
 
   choose.addEventListener("click", async () => {
@@ -449,9 +449,9 @@ function vaultSection(): HTMLElement {
   return h(
     "section",
     {},
-    h("h2", {}, dot, h("span", { text: "Knowledge base" })),
+    h("h2", {}, dot, h("span", { text: t("settings.vault.title") })),
     note,
-    h("div", { class: "row" }, h("label", { text: "Vault" }), where),
+    h("div", { class: "row" }, h("label", { text: t("settings.vault.vault") }), where),
     h("div", { class: "row" }, choose, forget),
   );
 }
@@ -481,8 +481,8 @@ function generalSection(): HTMLElement {
 
   const screen = h("select", {}) as HTMLSelectElement;
   screen.append(
-    h("option", { value: "primary", text: "Main display" }),
-    h("option", { value: "cursor", text: "Display under the cursor" }),
+    h("option", { value: "primary", text: t("settings.general.mainDisplay") }),
+    h("option", { value: "cursor", text: t("settings.general.displayUnderCursor") }),
   );
   screen.value = settings.screen;
   screen.addEventListener("change", () => {
@@ -490,32 +490,80 @@ function generalSection(): HTMLElement {
     void save();
   });
 
+  const language = segmented<LocaleSetting>({
+    items: [
+      { value: "system", label: t("settings.general.languageSystem") },
+      { value: "en", label: "English" },
+      { value: "es", label: "Español" },
+    ],
+    value: settings.language,
+    size: "sm",
+    onChange: (value) => {
+      settings.language = value;
+      void save();
+      // The click already told this window which language it is in; the
+      // render() this triggers is what the rest of the page catches up to.
+      renderForLocaleChange();
+    },
+  });
+
   return h(
     "section",
     {},
-    h("h2", {}, h("span", { text: "General" })),
+    h("h2", {}, h("span", { text: t("settings.general.title") })),
     h("div", { class: "row" },
-      h("label", { text: "Sound" }),
+      h("label", { text: t("settings.general.sound") }),
       toggle(settings.soundEnabled, (v) => { settings.soundEnabled = v; void save(); }),
       volume,
     ),
     h("div", { class: "row" },
-      h("label", { text: "Auto-close" }),
+      h("label", { text: t("settings.general.autoClose") }),
       autoClose,
-      h("span", { class: "hint", text: "seconds after you leave the island" }),
+      h("span", { class: "hint", text: t("settings.general.autoCloseHint") }),
     ),
     h("div", { class: "row" },
-      h("label", { text: "Island lives on" }),
+      h("label", { text: t("settings.general.islandLivesOn") }),
       screen,
     ),
     h("div", { class: "row" },
-      h("label", { text: "Launch at startup" }),
+      h("label", { text: t("settings.general.launchAtStartup") }),
       toggle(settings.autostart, (v) => { settings.autostart = v; void save(); }),
+    ),
+    h("div", { class: "row" },
+      h("label", { text: t("settings.general.language") }),
+      language.el,
     ),
   );
 }
 
 // ── Boot ──────────────────────────────────────────────────────────────────────
+
+/** Everything render() needs that is worth asking Rust for only once. */
+let hookStatus: HookStatus = { installed: false, settingsPath: "", hookPath: "", hookReady: false };
+let secretsPresent: Record<string, boolean> = {};
+
+function render() {
+  clear(root);
+  root.append(
+    h("h1", {}, h("span", { text: "Coucou" }), h("span", { class: "version", text: version })),
+    claudeSection(hookStatus),
+    agentsSection(),
+    chatFolderSection(),
+    vaultSection(),
+    generalSection(),
+    integrationsSection(secretsPresent),
+    h("div", { class: "hint", text: t("settings.footer") }),
+  );
+}
+
+/** The language picker's own `onChange` — the click already updated
+ *  `settings.language`, so this only needs to re-read the locale it implies
+ *  and draw the page again in it. */
+function renderForLocaleChange() {
+  setLocale(resolveLocale(settings.language));
+  document.documentElement.lang = resolveLocale(settings.language);
+  render();
+}
 
 async function main() {
   const boot = await Bridge.boot();
@@ -523,34 +571,26 @@ async function main() {
     settings = { ...settings, ...boot.settings };
     version = boot.version;
   }
-  const status = (await Bridge.hooksStatus()) ?? {
-    installed: false, settingsPath: "", hookPath: "", hookReady: false,
-  };
+  setLocale(resolveLocale(settings.language));
+  document.documentElement.lang = resolveLocale(settings.language);
+
+  hookStatus = (await Bridge.hooksStatus()) ?? hookStatus;
 
   const keys = [
     "stripe-api-key", "github-token", "vercel-token",
     "n8n-url", "n8n-api-key", "resend-api-key", "notion-api-key", "calcom-api-key",
   ];
-  const present: Record<string, boolean> = {};
-  for (const k of keys) present[k] = (await Bridge.secretPresent(k)) ?? false;
+  for (const k of keys) secretsPresent[k] = (await Bridge.secretPresent(k)) ?? false;
 
-  clear(root);
-  root.append(
-    h("h1", {}, h("span", { text: "Coucou" }), h("span", { class: "version", text: version })),
-    claudeSection(status),
-    agentsSection(),
-    chatFolderSection(),
-    vaultSection(),
-    generalSection(),
-    integrationsSection(present),
-    h("div", {
-      class: "hint",
-      text: "No telemetry. Network requests only go to the services you configure yourself.",
-    }),
-  );
+  render();
 
   void onEvent<Settings>("settings-changed", (s) => {
+    const languageChanged = s.language !== settings.language;
     settings = { ...settings, ...s };
+    // Any other field already shows up correctly next time its own section is
+    // interacted with; only the language changes what every section reads to
+    // render itself in the first place, so only it earns a full re-render.
+    if (languageChanged) renderForLocaleChange();
   });
 }
 

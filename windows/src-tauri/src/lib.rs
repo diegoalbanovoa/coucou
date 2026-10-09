@@ -5,6 +5,7 @@ mod agents;
 mod consoles;
 mod files;
 mod hooks;
+mod i18n;
 mod integrations;
 mod island;
 mod log;
@@ -101,6 +102,7 @@ fn save_settings(app: AppHandle, shared: State<Shared>, settings: Settings) {
         let collapsed = shared.gate.collapsed.load(Ordering::Relaxed);
         island::apply_geometry(&app, &settings.screen, collapsed);
     }
+    tray::rebuild(&app, i18n::Locale::resolve(&settings.language));
     // Keep the other window in step (island ⇄ settings window).
     let _ = app.emit("settings-changed", settings);
 }
@@ -874,7 +876,7 @@ pub fn run() {
         ])
         .setup(move |app| {
             let handle = app.handle().clone();
-            tray::build(&handle)?;
+            tray::build(&handle, i18n::Locale::resolve(&loaded.language))?;
             // Before the island: see create_settings_window.
             create_settings_window(&handle);
 

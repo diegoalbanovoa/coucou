@@ -86,6 +86,20 @@ pub fn local_time() -> LocalTime {
     }
 }
 
+/// The Windows UI language, as a BCP-47 tag like "es-CO" or "en-US" — enough
+/// for `i18n::Locale::resolve` to read the first two letters off of. `None`
+/// on the (essentially theoretical) chance the call fails.
+pub fn system_locale() -> Option<String> {
+    use ::windows::Win32::Globalization::GetUserDefaultLocaleName;
+
+    let mut buf = [0u16; 85]; // LOCALE_NAME_MAX_LENGTH
+    let len = unsafe { GetUserDefaultLocaleName(&mut buf) };
+    if len <= 0 {
+        return None;
+    }
+    Some(String::from_utf16_lossy(&buf[..(len as usize - 1)]))
+}
+
 // ── Processes ─────────────────────────────────────────────────────────────────
 
 /// Spawned helpers must never flash a console window.

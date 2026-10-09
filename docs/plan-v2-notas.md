@@ -62,4 +62,33 @@ Pendiente de esta fase: modo mock (`src/dev/mock-bridge.ts` + fixtures), captura
 - `cargo test --workspace` / `cargo clippy`: sin cambios (89 tests, limpio) — esta fase no tocó Rust.
 - `npm run test`: **128 tests** (123 + 5 nuevos).
 - `npx tsc --noEmit`: limpio.
+
+## Fase 2: Idiomas (inglés y español)
+
+**Alcance real, mucho mayor que el diccionario del plan:** la sección 2.5 del plan da unas 90 claves, pensadas para la UI que las fases 3-7 todavía van a construir. La UI que **ya existe hoy** tiene su propio conjunto de ~150 cadenas (settings/main.ts solo ya tenía ~60), con texto que no coincide literalmente con lo que el plan anticipaba — p. ej. el tooltip real de la pestaña "Inicio" dice hoy "Overview", no "Home"; el de "Chat" dice "Ask", no "Chat". Se tradujo el texto **real** (sin renombrar nada que esta fase no pidió cambiar) y se amplió el diccionario con todas las claves que hicieron falta además de las del plan — quedó documentado en los propios comentarios de `en.ts` cuándo una clave no coincide con el texto "final" que el plan sugiere.
+
+**El reto real de esta fase no fue traducir — fue hacer que la traducción se vea sin reiniciar.** La mayoría de las vistas (`views.ts`, `chat.ts`, `system.ts`) construyen sus botones y etiquetas **una sola vez**, al crear la vista, y el patrón de la app ya existente para evitar trabajo de más es un `if (key === cached) return;` al principio de `sync()`. Ninguna de esas claves de caché incluía el idioma, así que cambiar el idioma con el chat ya abierto no habría movido ni una letra hasta que algo *más* cambiara. Se resolvió añadiendo `getLocale()` a cada una de esas claves de caché (`consoles.ts`, `views.ts`'s `cardKey`, `chat.ts`'s `shotKey`/`renderedCount`/`renderedDraft`), y en los tres sitios donde un conjunto de botones se construye una única vez de verdad fuera de `sync()` (los botones Allow/Deny de aprobación, Retry/"Open in n8n" de error, "Open terminal"/OK de turno terminado) se cambió el guard de "construido una vez" (`if (built) return`) por "construido para este idioma" (`if (builtFor === getLocale()) return`) — construir de nuevo solo pasa cuando cambia el idioma, nunca en un `sync()` normal, así que el riesgo original que ese guard evitaba (reconstruir el botón entre un mouse-down y un mouse-up) sigue evitado.
+
+**`system.ts` y `buildConfused`/`buildPlaceholder` tenían un `sync()` que literalmente no hacía nada** ("Nothing to do here: the numbers come from the poll"). Se les dio contenido real: comparan el idioma actual contra el último mostrado y, si cambió, vuelven a pintar.
+
+**Dos cadenas que mi primer barrido con grep no encontró:** `island/agent.ts`'s `providerLabel()` devuelve "No agent CLI found" / "Pick an agent" con un `return "..."` directo, sin pasar por `text:`/`title:`/`.textContent =` — el patrón que estaba usando para buscar. Encontrado al revisar `island/*.ts` con un patrón distinto (`return "[A-Za-z]`) antes de dar la Fase 2 por cerrada. `search.ts`'s `counter()` tenía lo mismo con `"none"`.
+
+**`fmtBytes` usa binario (1024), no decimal (1000), aunque el ejemplo del plan (`fmtBytes(9.8e9) → "9.8 GB"`) solo cuadra en decimal:** `views/system.ts`'s `size()` ya existente usa 1024 y tiene su propia suite de tests — introducir una segunda convención de "GB" en la misma app (una decimal, otra binaria) habría sido confuso de verdad, no un detalle. `fmtBytes` quedó en 1024 para que, cuando una fase futura junte ambas funciones, "GB" siga significando lo mismo en todas partes. El test de `i18n.test.mjs` usa `9.8 × 1024³` en vez del `9.8e9` literal del plan, documentado en el propio test.
+
+**`timeAgo()` (en `integrations.ts`) no se tradujo del todo a propósito:** el formato compacto `{n}m`/`{n}h`/`{n}d` se deja igual en los dos idiomas — es la abreviatura que ya usan apps en español para lo mismo, y traducirla no habría ganado nada. Solo "just now" (→ "ahora mismo") pasa por `t()`. Donde el código SÍ construye una frase completa ("{time} ago" → "hace {time}"), se corrigió el orden de palabras: el inglés pone "ago" al final, el español pone "hace" al principio — una concatenación ingenua de sufijo nunca iba a funcionar en español, así que la clave es una plantilla con `{time}` en el medio, no un sufijo.
+
+**Rust: nada de `sys-locale` ni ningún otro crate nuevo** (prohibido por la regla 1). `platform::system_locale()` se implementó con `GetUserDefaultLocaleName` (Windows, activando la *feature* `Win32_Globalization` ya permitida por la regla 1) y `$LC_ALL`/`$LC_MESSAGES`/`$LANG` (Linux) — ambas sin dependencias nuevas. `src-tauri/src/i18n.rs` es deliberadamente pequeño: solo las 4 etiquetas del menú de la bandeja, porque es lo único que Rust dibuja directamente hoy (ni el selector de carpetas ni el de archivos tienen un título propio que cambiar).
+
+**`scripts/shots.mjs` tenía su propio bug de i18n:** usaba los tooltips en inglés ("Ask", "System"...) como selector para hacer clic en cada pestaña — escrito en la Fase 0, antes de que esos tooltips fueran texto traducible. En las corridas `?lang=es` el clic fallaba (`TimeoutError` esperando `button[title="Ask"]`, que ahora dice "Preguntar"). `TABS` pasó a ser un mapa por idioma (`TABS[lang][view]`). Verificado sin procesos huérfanos tras el *crash* — el bloque `finally` de `killTree()` corrió igual aunque el script terminara con una excepción sin capturar.
+
+**Verificado visualmente (mock, `?lang=es`):** overview ("4 CONSOLAS", "transmite", "se aprueba aquí"), Sistema ("9.0 GB libres", "Memoria", "LO QUE MÁS MEMORIA USA"), chat ("Continuar…"), y Ajustes completo incluido el propio selector de idioma funcionando ("Se encontraron 4" — plural correcto). Capturas en `shots/` vía `npm run shots`, que ya corría en/es desde la Fase 0.
+
+**Resultado final de la Fase 2, en verde:**
+- `tests/i18n.test.mjs` (nuevo, 7 tests): paridad de claves en/es, sin cadenas vacías, `{placeholders}` coinciden, `fmtBytes`/`fmtPercent`/`tn()`.
+- `tests/no-hardcoded-strings.test.mjs` (nuevo): cero cadenas literales fuera de la lista blanca de nombres propios en `src/views`, `src/settings`, `src/island` — verificado que de verdad detecta algo inyectando una cadena de prueba antes de confirmar en verde.
+- `cargo test --workspace`: **91 tests** (89 + 2 de `i18n.rs`).
+- `cargo clippy --workspace --all-targets`: limpio.
+- `npm run test`: **136 tests** (128 + 8).
+- `npx tsc --noEmit`: limpio.
+- `npm run shots`: regenerado completo tras esta fase.
 - `npm run shots`: regenerado completo tras esta fase, sin errores.

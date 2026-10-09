@@ -25,7 +25,13 @@ const BASE = "http://127.0.0.1:1420";
  *  on purpose: a flaky wait here would make every shot after it flaky too. */
 const GREETING_MS = 7000;
 
-const TABS = { home: "Overview", chat: "Ask", system: "System" };
+// Tab tooltips are real UI strings since Fase 2 (src/i18n/) — they read
+// differently per locale, so the selector that clicks a tab has to match
+// whichever language this particular shot is being taken in.
+const TABS = {
+  en: { home: "Overview", chat: "Ask", system: "System" },
+  es: { home: "Resumen", chat: "Preguntar", system: "Sistema" },
+};
 
 /** One shot: where to go, what to click to get there, and the label used in
  *  the saved filename. `ready` is a known gap, not a bug — see the file note. */
@@ -110,7 +116,7 @@ async function captureIslandShot(browser, { view, label, url, ready }, lang, sca
     const sep = url.includes("?") ? "&" : "?";
     await page.goto(`${BASE}/${url}${sep}lang=${lang}`);
     await expandIsland(page);
-    if (view !== "home") await page.click(`button[title="${TABS[view]}"]`);
+    if (view !== "home") await page.click(`button[title="${TABS[lang][view]}"]`);
     await page.waitForTimeout(500);
     await page.screenshot({ path: join(OUT, `${name}.png`) });
     console.log(`shot  ${name}`);
