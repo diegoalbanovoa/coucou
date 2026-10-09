@@ -170,6 +170,10 @@ class AppState {
   chatDraft = "";
   /** What the turn in flight has done so far, newest last. */
   chatSteps: string[] = [];
+  /** Whether the chat is using all the height the display allows. */
+  chatExpanded = false;
+  /** The find bar's query. Null when it is closed. */
+  chatQuery: string | null = null;
 
   integrations: Record<string, IntegrationInfo> = {};
 

@@ -4,6 +4,7 @@
 import { h, clear, copyToClipboard } from "./dom";
 import { icon } from "./icons";
 import { render } from "./markdown";
+import { counter, findMatches, highlight, step, type Match } from "./search";
 import { Bridge, onEvent, type AgentTurn } from "../core/bridge";
 import { Sound } from "../core/sound";
 import { State, type ChatMessage } from "../core/state";
@@ -195,10 +196,49 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
   // ordinary question is not surrounded by machinery.
   const provider = h("button", {
     class: "chat-meta-btn",
-    title: "Switch between the installed agent CLIs and the Claude API",
+    title: "Switch between the installed agent consoles",
   });
   const projectBtn = h("button", { class: "chat-meta-btn" });
-  const header = h("div", { class: "chat-meta" }, provider, h("span", { class: "grow" }), projectBtn);
+  const findBtn = h("button", { class: "chat-icon-btn", title: "Find in the conversation (Ctrl+F)" });
+  findBtn.append(icon("search", { size: 11 }));
+  const growBtn = h("button", { class: "chat-icon-btn" });
+  const header = h(
+    "div",
+    { class: "chat-meta" },
+    provider,
+    h("span", { class: "grow" }),
+    projectBtn,
+    findBtn,
+    growBtn,
+  );
+
+  // ── The find bar ────────────────────────────────────────────────────────
+  //
+  // What it can reach is the island's own log — the last forty messages kept
+  // in chat.json — and not the CLI's full history. The counter counts what is
+  // there, which is the honest way to say so.
+  const findInput = h("input", {
+    type: "text",
+    class: "find-input",
+    placeholder: "Find in the conversation…",
+    spellcheck: "false",
+  }) as HTMLInputElement;
+  const findCount = h("span", { class: "find-count" });
+  const prevBtn = h("button", { class: "chat-icon-btn", title: "Previous (Shift+Enter)" });
+  prevBtn.append(icon("arrowUp", { size: 10 }));
+  const nextBtn = h("button", { class: "chat-icon-btn", title: "Next (Enter)" });
+  nextBtn.append(icon("arrowDown", { size: 10 }));
+  const closeFind = h("button", { class: "chat-icon-btn", title: "Close (Escape)" });
+  closeFind.append(icon("xmark", { size: 10 }));
+  const findBar = h(
+    "div",
+    { class: "find-bar" },
+    findInput,
+    findCount,
+    prevBtn,
+    nextBtn,
+    closeFind,
+  );
 
   // `/` autocomplete. Hidden unless the input starts with a slash.
   const palette = h("div", { class: "slash-palette" });
@@ -209,7 +249,7 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
     h(
       "div",
       { class: "card wash chat-card" },
-      h("div", { class: "chat-body" }, header, chipRow, log, jump, palette, bar),
+      h("div", { class: "chat-body" }, header, findBar, chipRow, log, jump, palette, bar),
     ),
   );
   (el.querySelector(".card") as HTMLElement).style.setProperty("--wash", "rgba(99,102,241,0.5)");
@@ -221,6 +261,64 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
   let highlighted = 0;
   /** Whether new text should scroll into view — false once the user reads back. */
   let stick = true;
+  /** Every hit for the current query, and which one is current. */
+  let matches: Match[] = [];
+  let current = 0;
+  /** Marks placed by the last highlight pass, in document order. */
+  let marks: HTMLElement[] = [];
+
+  function openFind(open: boolean) {
+    State.chatQuery = open ? (State.chatQuery ?? "") : null;
+    findBar.classList.toggle("open", open);
+    if (open) {
+      findInput.focus();
+      findInput.select();
+    } else {
+      findInput.value = "";
+      runFind("");
+      input.focus();
+    }
+    onHeightChange();
+  }
+
+  /** Re-runs the search and repaints the marks. */
+  function runFind(query: string) {
+    State.chatQuery = State.chatQuery === null ? null : query;
+    matches = findMatches(State.chatHistory, query);
+    current = 0;
+    findCount.textContent = query.trim() ? counter(matches, current) : "";
+    // The marks live in the rendered log, which is rebuilt from scratch on
+    // every repaint — so the pass runs after, from `sync`, not here.
+    renderedCount = -1;
+    State.notify();
+  }
+
+  function goToMatch(by: number) {
+    if (marks.length === 0) return;
+    current = step(matches, current, by);
+    findCount.textContent = counter(matches, current);
+    marks.forEach((mark, i) => mark.classList.toggle("on", i === current));
+    marks[Math.min(current, marks.length - 1)]?.scrollIntoView({ block: "center" });
+    stick = false;
+  }
+
+  findBtn.addEventListener("click", () => openFind(State.chatQuery === null));
+  closeFind.addEventListener("click", () => openFind(false));
+  prevBtn.addEventListener("click", () => goToMatch(-1));
+  nextBtn.addEventListener("click", () => goToMatch(1));
+  findInput.addEventListener("input", () => runFind(findInput.value));
+  findInput.addEventListener("keydown", (event) => {
+    const key = (event as KeyboardEvent).key;
+    event.stopPropagation();
+    if (key === "Escape") openFind(false);
+    else if (key === "Enter") goToMatch((event as KeyboardEvent).shiftKey ? -1 : 1);
+  });
+
+  growBtn.addEventListener("click", () => {
+    State.chatExpanded = !State.chatExpanded;
+    State.notify();
+    onHeightChange();
+  });
 
   log.addEventListener("scroll", () => {
     stick = log.scrollHeight - log.scrollTop - log.clientHeight < 24;
@@ -379,6 +477,12 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
   });
   input.addEventListener("keydown", (e) => {
     const key = (e as KeyboardEvent).key;
+    if ((e as KeyboardEvent).ctrlKey && key.toLowerCase() === "f") {
+      e.preventDefault();
+      e.stopPropagation();
+      openFind(true);
+      return;
+    }
     const matches = currentMatches();
     if (matches.length > 0) {
       if (key === "ArrowDown" || key === "ArrowUp") {
@@ -420,6 +524,14 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
         renderedCount = State.chatHistory.length;
         clear(historyBox);
         for (const message of State.chatHistory) historyBox.append(bubble(message));
+        // After drawing, never before: the marks go into the rendered output,
+        // so a repaint would throw them away. Searching the markup instead
+        // would make a query for "code" hit every code tag.
+        marks = State.chatQuery ? highlight(historyBox, State.chatQuery) : [];
+        if (marks.length > 0) {
+          current = Math.min(current, marks.length - 1);
+          marks.forEach((mark, i) => mark.classList.toggle("on", i === current));
+        }
       }
 
       // The draft is keyed by how much of it there is: enough to notice every
@@ -438,6 +550,12 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
       projectBtn.textContent = attached ? lastPathComponent(attached) : "Attach project…";
       projectBtn.title = attached ? `${attached} — click to detach` : "Choose the folder the agent works in";
       projectBtn.classList.toggle("on", attached != null);
+
+      findBtn.classList.toggle("on", State.chatQuery !== null);
+      clear(growBtn);
+      growBtn.append(icon(State.chatExpanded ? "chevronLeft" : "chevronRight", { size: 11 }));
+      growBtn.title = State.chatExpanded ? "Make the chat smaller" : "Use the whole height";
+      growBtn.classList.toggle("on", State.chatExpanded);
 
       clear(send);
       send.append(icon(sending ? "stop" : "arrowUp", { size: sending ? 9 : 11 }));

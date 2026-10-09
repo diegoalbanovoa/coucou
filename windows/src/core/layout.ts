@@ -92,15 +92,39 @@ export const VIEW_LAYOUTS: Record<IslandViewName, ViewLayout> = {
 // dropped the whole sequence — Mochi included — is drawn by src/upload, which
 // owns its own constants (USC) straight from UploadSequenceEngine.swift.
 
-/** Chat view grows with the conversation — IslandContainer.chatPromptHeight. */
-export function chatPromptHeight(messageCount: number): number {
-  return Math.min(300, 240 + messageCount * 40);
+/** The chat never gets less than this, whatever is in it. */
+export const CHAT_MIN_H = 300;
+/** Nor more than this share of the display it is on… */
+const CHAT_SCREEN_SHARE = 0.62;
+/** …nor more than this outright, however large the display. */
+const CHAT_MAX_H = 620;
+
+/**
+ * How tall the chat panel is.
+ *
+ * This used to be `Math.min(300, 240 + count * 40)`: it grew to 300 px and
+ * stopped there, on every display, whatever the conversation. Inside those
+ * 300 px live a header, a chip row, the message log, the `/` palette and the
+ * composer — which is why there was nowhere to put a search bar, and why the
+ * log was a few lines tall on a 4K screen.
+ *
+ * The ceiling comes from the display rather than a constant, read straight off
+ * `window.screen` so a second monitor or a resolution change needs no state
+ * kept anywhere. `CHAT_MAX_H` is still there because a chat taller than that
+ * stops being an island and becomes a window.
+ */
+export function chatPromptHeight(messageCount: number, expanded = false): number {
+  const display = globalThis.screen?.availHeight ?? 1080;
+  const ceiling = Math.min(CHAT_MAX_H, Math.max(CHAT_MIN_H, Math.round(display * CHAT_SCREEN_SHARE)));
+  if (expanded) return ceiling;
+  return Math.min(ceiling, Math.max(CHAT_MIN_H, 300 + messageCount * 44));
 }
 
 export function islandSize(
   mode: IslandMode,
   view: IslandViewName,
   chatCount = 0,
+  chatExpanded = false,
 ): { w: number; h: number } {
   switch (mode) {
     case "hidden":
@@ -110,7 +134,8 @@ export function islandSize(
     case "compact":
       return { w: COMPACT_W, h: NOTCH_H };
     case "expanded": {
-      const h = view === "prompt" ? chatPromptHeight(chatCount) : VIEW_LAYOUTS[view].height;
+      const h =
+        view === "prompt" ? chatPromptHeight(chatCount, chatExpanded) : VIEW_LAYOUTS[view].height;
       return { w: EXPANDED_W, h };
     }
   }

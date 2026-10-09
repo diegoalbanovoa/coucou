@@ -1175,6 +1175,84 @@ button:focus-visible {
   flex: 0 0 auto;
 }
 
+/* ── The chat header, and finding things in it ────────────────────────────── */
+
+.chat-icon-btn {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border: 0;
+  border-radius: 5px;
+  background: none;
+  color: var(--dim-3);
+  cursor: pointer;
+  flex: 0 0 20px;
+}
+
+.chat-icon-btn:hover {
+  background: rgba(255, 255, 255, 0.09);
+  color: var(--ink-2);
+}
+
+.chat-icon-btn.on {
+  background: rgba(99, 102, 241, 0.18);
+  color: #a5b4fc;
+}
+
+/*
+ * The find bar. Closed it is not in the layout at all rather than merely
+ * invisible, so the message log keeps the height instead of leaving a gap.
+ */
+.find-bar {
+  display: none;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 4px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.055);
+}
+
+.find-bar.open {
+  display: flex;
+}
+
+.find-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: 0;
+  background: none;
+  outline: none;
+  font: 400 12px var(--font);
+  color: var(--ink-2);
+}
+
+.find-input::placeholder {
+  color: var(--dim-3);
+}
+
+.find-count {
+  font: 400 10.5px var(--mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--dim-3);
+  white-space: nowrap;
+  flex: 0 0 auto;
+  padding: 0 2px;
+}
+
+/* A hit, and the one the arrows are on. */
+mark.hit {
+  background: rgba(245, 165, 36, 0.28);
+  color: inherit;
+  border-radius: 2px;
+  padding: 0 1px;
+}
+
+mark.hit.on {
+  background: #f5a524;
+  color: #1b1c1f;
+}
+
 /* ── The reply: steps, markdown, and what you can do to it ───────────────── */
 
 .chat-stack {
