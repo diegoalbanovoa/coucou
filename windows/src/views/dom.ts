@@ -26,27 +26,6 @@ export function h<K extends keyof HTMLElementTagNameMap>(
   return el;
 }
 
-export function svg(path: string, size = 14, opts: { fill?: string; stroke?: number } = {}): SVGSVGElement {
-  const el = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-  el.setAttribute("viewBox", "0 0 24 24");
-  el.setAttribute("width", String(size));
-  el.setAttribute("height", String(size));
-  el.setAttribute("aria-hidden", "true");
-  const p = document.createElementNS("http://www.w3.org/2000/svg", "path");
-  p.setAttribute("d", path);
-  if (opts.stroke) {
-    p.setAttribute("fill", "none");
-    p.setAttribute("stroke", "currentColor");
-    p.setAttribute("stroke-width", String(opts.stroke));
-    p.setAttribute("stroke-linecap", "round");
-    p.setAttribute("stroke-linejoin", "round");
-  } else {
-    p.setAttribute("fill", opts.fill ?? "currentColor");
-  }
-  el.append(p);
-  return el;
-}
-
 export function clear(el: Element) {
   while (el.firstChild) el.removeChild(el.firstChild);
 }

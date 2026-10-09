@@ -2,8 +2,8 @@
 // colours and wording are copied from the Swift views so both platforms read
 // identically.
 
-import { h, svg, clear, dot } from "./dom";
-import { ICONS } from "./icons";
+import { h, clear, dot } from "./dom";
+import { icon } from "./icons";
 import { Ticker } from "./ticker";
 import { State, type AgentTask } from "../core/state";
 import { washRGBA, type IslandViewName, type Wash } from "../core/layout";
@@ -85,12 +85,12 @@ function stack(padLeft: number, padRight: number, ...children: Node[]): HTMLElem
 // ── Header ────────────────────────────────────────────────────────────────────
 
 export function buildHeader(actions: ViewActions): ViewHost {
-  const tabHome = h("button", { class: "tab", title: "Overview", onclick: () => go("overview") }, svg(ICONS.house, 13));
-  const tabChat = h("button", { class: "tab", title: "Ask", onclick: () => go("prompt") }, svg(ICONS.bubble, 13));
-  const tabDrop = h("button", { class: "tab", title: "Drop", onclick: () => go("upload") }, svg(ICONS.plus, 13));
+  const tabHome = h("button", { class: "tab", title: "Overview", onclick: () => go("overview") }, icon("house", { size: 13 }));
+  const tabChat = h("button", { class: "tab", title: "Ask", onclick: () => go("prompt") }, icon("bubble", { size: 13 }));
+  const tabDrop = h("button", { class: "tab", title: "Drop", onclick: () => go("upload") }, icon("plus", { size: 13 }));
 
-  const gearBtn = h("button", { title: "Settings", onclick: () => go("settings") }, svg(ICONS.gear, 14));
-  const soundBtn = h("button", { title: "Mute", onclick: () => actions.toggleSound() }, svg(ICONS.speakerOn, 14));
+  const gearBtn = h("button", { title: "Settings", onclick: () => go("settings") }, icon("gear", { size: 14 }));
+  const soundBtn = h("button", { title: "Mute", onclick: () => actions.toggleSound() }, icon("speakerOn", { size: 14 }));
 
   function go(v: IslandViewName) {
     actions.blip();
@@ -113,9 +113,9 @@ export function buildHeader(actions: ViewActions): ViewHost {
       tabDrop.classList.toggle("on", v === "upload");
       gearBtn.classList.toggle("on", v === "settings");
       clear(gearBtn);
-      gearBtn.append(svg(v === "settings" ? ICONS.gearFill : ICONS.gear, 14));
+      gearBtn.append(icon("gear", { size: 14 }));
       clear(soundBtn);
-      soundBtn.append(svg(State.settings.soundEnabled ? ICONS.speakerOn : ICONS.speakerOff, 14));
+      soundBtn.append(icon(State.settings.soundEnabled ? "speakerOn" : "speakerOff", { size: 14 }));
       el.style.opacity = v === "confused" ? "0" : "1";
     },
   };
@@ -131,7 +131,7 @@ function buildOverview(actions: ViewActions): ViewHost {
   const jump = h(
     "button",
     { class: "icon-btn jump", title: "Open", onclick: () => actions.openTarget() },
-    svg(ICONS.arrowUpRight, 8),
+    icon("arrowUpRight", { size: 8 }),
   );
   const left = card(null, leftBody, jump);
   const pills = h("div", { class: "pills" });
@@ -267,8 +267,12 @@ function buildPill(task: AgentTask, actions: ViewActions): HTMLElement {
 
   if (task.pillBadge) {
     const colors = { approval: "#F5A524", finished: "#22C55E", error: "#F4505E" } as const;
-    const icons = { approval: ICONS.bang, finished: ICONS.check, error: ICONS.xmark } as const;
-    const inner = h("i", { style: `background:${colors[task.pillBadge]}` }, svg(icons[task.pillBadge], 6, { stroke: task.pillBadge === "finished" ? 3 : 0 }));
+    const marks = { approval: "bang", finished: "check", error: "xmark" } as const;
+    const inner = h(
+      "i",
+      { style: `background:${colors[task.pillBadge]}` },
+      icon(marks[task.pillBadge], { size: 6 }),
+    );
     const badge = h("div", { class: "pill-badge" }, inner);
     badge.style.boxShadow = `0 0 4px ${colors[task.pillBadge]}99`;
     pill.append(badge);
@@ -496,7 +500,7 @@ function buildSettings(actions: ViewActions): ViewHost {
     h(
       "div",
       { class: "settings-row" },
-      svg(ICONS.timer, 12),
+      icon("timer", { size: 12 }),
       autoLabel,
       h("div", { class: "seg" }, ...segButtons),
     ),

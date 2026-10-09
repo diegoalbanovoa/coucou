@@ -1,8 +1,8 @@
 // Chat view — DOM port of PromptView / ChatBubble / TypingDotsView from
 // IslandViewContent.swift.
 
-import { h, svg, clear, copyToClipboard } from "./dom";
-import { ICONS } from "./icons";
+import { h, clear, copyToClipboard } from "./dom";
+import { icon } from "./icons";
 import { render } from "./markdown";
 import { Bridge, onEvent, type AgentTurn } from "../core/bridge";
 import { Sound } from "../core/sound";
@@ -69,15 +69,15 @@ function stepsRow(steps: string[], live: boolean): HTMLElement | null {
 
 /** Copy — the one thing worth doing to a reply that is already on screen. */
 function replyActions(content: string): HTMLElement {
-  const copy = h("button", { class: "msg-btn", title: "Copy the reply" }, svg(ICONS.copy, 10));
+  const copy = h("button", { class: "msg-btn", title: "Copy the reply" }, icon("copy", { size: 10 }));
   copy.addEventListener("click", () => {
     void copyToClipboard(content).then((done) => {
       clear(copy);
-      copy.append(svg(done ? ICONS.check : ICONS.bang, 10));
+      copy.append(icon(done ? "check" : "bang", { size: 10 }));
       copy.title = done ? "Copied" : "Could not copy";
       window.setTimeout(() => {
         clear(copy);
-        copy.append(svg(ICONS.copy, 10));
+        copy.append(icon("copy", { size: 10 }));
         copy.title = "Copy the reply";
       }, 1400);
     });
@@ -113,7 +113,7 @@ function bubble(message: ChatMessage): HTMLElement {
     const card = h(
       "div",
       { class: "reply-error", title: clockOf(message.at) },
-      h("div", { class: "reply-error-head" }, svg(ICONS.bang, 10), h("span", { text: "The turn stopped" })),
+      h("div", { class: "reply-error-head" }, icon("bang", { size: 10 }), h("span", { text: "The turn stopped" })),
       h("div", { class: "reply-error-detail", text: message.content }),
     );
     const row = h("div", { class: "chat-row" });
@@ -180,14 +180,14 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
   const historyBox = h("div", { class: "chat-stack" });
   const draftBox = h("div", { class: "chat-stack" });
   log.append(historyBox, draftBox);
-  const jump = h("button", { class: "jump-btn", title: "Jump to the latest" }, svg(ICONS.arrowDown, 10));
+  const jump = h("button", { class: "jump-btn", title: "Jump to the latest" }, icon("arrowDown", { size: 10 }));
   const input = h("input", {
     type: "text",
     class: "chat-input",
     placeholder: "Ask me anything…",
     spellcheck: "false",
   }) as HTMLInputElement;
-  const send = h("button", { class: "send-btn", title: "Send" }, svg(ICONS.arrowUp, 11));
+  const send = h("button", { class: "send-btn", title: "Send" }, icon("arrowUp", { size: 11 }));
   const bar = h("div", { class: "chat-bar" }, input, send);
 
   // The header carries the two things that decide what a message does: which
@@ -440,7 +440,7 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
       projectBtn.classList.toggle("on", attached != null);
 
       clear(send);
-      send.append(svg(sending ? ICONS.stop : ICONS.arrowUp, sending ? 9 : 11));
+      send.append(icon(sending ? "stop" : "arrowUp", { size: sending ? 9 : 11 }));
       send.title = sending ? "Stop this turn" : "Send";
       send.classList.toggle("stopping", sending);
 

@@ -940,6 +940,42 @@ input[type="range"]::-webkit-slider-thumb {
   50% { transform: scale(1.2); }
 }
 
+/* ── Icons ───────────────────────────────────────────────────────────────── */
+/*
+ * Every icon is a 24×24 SVG with no colour of its own (see views/icons.ts), so
+ * everything about how one looks is settled here rather than at the call site.
+ * `width: 1em` is what makes an icon follow the type beside it, and follow the
+ * Windows display scale, without a single call site knowing a pixel size.
+ */
+svg {
+  flex: 0 0 auto;
+  /* Lines stay crisp at any scale rather than being hinted to a pixel grid. */
+  shape-rendering: geometricPrecision;
+}
+
+/* A button holding nothing but an icon centres it and inherits the colour. */
+button > svg {
+  display: block;
+  pointer-events: none;
+}
+
+/* The four states, in one place. `currentColor` does the rest. */
+button:disabled {
+  opacity: 0.38;
+  cursor: default;
+}
+
+button:focus-visible {
+  outline: 2px solid var(--indigo);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  button > svg {
+    transition: opacity 0.12s ease;
+  }
+}
+
 /* ── The start screen: the agents this machine has ───────────────────────── */
 
 .agent-list {

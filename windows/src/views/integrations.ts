@@ -4,8 +4,8 @@
 // Cal.com is the one simplification: macOS shows a three-level calendar
 // (month → day → booking); here it is the list of upcoming bookings.
 
-import { h, svg, clear, dot } from "./dom";
-import { ICONS } from "./icons";
+import { h, clear, dot } from "./dom";
+import { icon, type IconName } from "./icons";
 import { State, type AgentTask } from "../core/state";
 import { Bridge } from "../core/bridge";
 
@@ -133,7 +133,7 @@ function vercelCard(onDetail: () => void): HTMLElement {
       const more = h(
         "button",
         { class: "int-more", title: "Details", onclick: onDetail },
-        svg(ICONS.ellipsis, 8),
+        icon("ellipsis", { size: 8 }),
       );
       rows.append(listRow(accent, true, name, ago, more));
     } else {
@@ -169,7 +169,7 @@ function vercelDetail(onBack: () => void): HTMLElement {
     h(
       "div",
       { class: "int-detail-head" },
-      h("button", { class: "int-back", onclick: onBack }, svg(ICONS.chevronLeft, 10, { stroke: 2.4 })),
+      h("button", { class: "int-back", onclick: onBack }, icon("chevronLeft", { size: 10 })),
       dot(accent, 6),
       h("b", { text: String(d.projectName ?? "Deployment") }),
       h("span", { class: "int-badge", style: `color:${accent};background:${accent}24`, text: status }),
@@ -205,11 +205,11 @@ function resendCard(): HTMLElement {
 
 // ── GitHub ────────────────────────────────────────────────────────────────────
 
-function statRow(icon: string, color: string, label: string, value: string): HTMLElement {
+function statRow(name: IconName, color: string, label: string, value: string): HTMLElement {
   return h(
     "div",
     { class: "int-stat" },
-    h("i", { class: "int-stat-icon", style: `color:${color}` }, svg(icon, 10)),
+    h("i", { class: "int-stat-icon", style: `color:${color}` }, icon(name, { size: 10 })),
     h("span", { class: "int-stat-label", text: label }),
     h("span", { class: "int-stat-value", text: value }),
   );
@@ -227,8 +227,8 @@ function githubCard(): HTMLElement {
     h(
       "div",
       { class: "int-stats" },
-      statRow(ICONS.star, "#F5A524", "Total stars", fmt(stars)),
-      statRow(ICONS.stack, "#6B7079", "Repositories", String(repos)),
+      statRow("star", "#F5A524", "Total stars", fmt(stars)),
+      statRow("stack", "#6B7079", "Repositories", String(repos)),
     ),
   );
 }
@@ -283,7 +283,7 @@ function notionCard(): HTMLElement {
         },
         p.emoji
           ? h("span", { class: "int-emoji", text: String(p.emoji) })
-          : h("i", { class: "int-emoji" }, svg(ICONS.doc, 9)),
+          : h("i", { class: "int-emoji" }, icon("doc", { size: 9 })),
         h("span", { class: "int-name", text: String(p.title ?? "Untitled") }),
         h("span", { class: "int-ago", text: timeAgo(p.lastEditedAt) }),
       ),
@@ -342,7 +342,7 @@ function n8nCard(task: AgentTask, onDetail: () => void, openSettings: () => void
         },
         dot(accent, 5),
         h("span", { class: "int-name", text: task.steps[0] ?? "Workflow" }),
-        svg(ICONS.ellipsis, 8),
+        icon("ellipsis", { size: 8 }),
       ),
     ),
   );
@@ -358,7 +358,7 @@ function n8nDetail(task: AgentTask, onBack: () => void): HTMLElement {
     h(
       "div",
       { class: "int-detail-head" },
-      h("button", { class: "int-back", onclick: onBack }, svg(ICONS.chevronLeft, 10, { stroke: 2.4 })),
+      h("button", { class: "int-back", onclick: onBack }, icon("chevronLeft", { size: 10 })),
       dot(accent, 6),
       h("b", { text: task.steps[0] ?? "Workflow" }),
       h("span", {

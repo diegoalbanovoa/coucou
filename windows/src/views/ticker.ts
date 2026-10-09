@@ -7,8 +7,8 @@
 // and any step that arrived mid-animation was dropped outright. Steps are now
 // queued instead, so a burst scrolls past rather than vanishing.
 
-import { h, svg } from "./dom";
-import { ICONS } from "./icons";
+import { h } from "./dom";
+import { icon } from "./icons";
 import { cubicBezier, clamp, lerp } from "../core/anim";
 import type { AgentTask } from "../core/state";
 
@@ -30,8 +30,8 @@ interface Row {
 }
 
 function makeRow(): Row {
-  const chevron = svg(ICONS.chevronRight, 9, { stroke: 2.4 });
-  const check = svg(ICONS.check, 8, { stroke: 2.2 });
+  const chevron = icon("chevronRight", { size: 9 });
+  const check = icon("check", { size: 8 });
   check.style.color = "#454850"; // the completed tick is dimmer than the chevron
   check.style.position = "absolute";
   chevron.style.position = "absolute";
