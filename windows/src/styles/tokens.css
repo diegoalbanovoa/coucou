@@ -1,0 +1,101 @@
+/* Coucou HIG — the design system (see docs/plan-v2.md § 1.1).
+ *
+ * Inspired by the Apple HIG (clarity, deference, depth; a 4pt grid; semantic
+ * colour; translucent materials; spring motion) and adapted to a dark desktop
+ * island on Windows rather than a light, safe-area-bound phone screen.
+ *
+ * Imported first, by every CSS entry point (style.css, settings/settings.css)
+ * — see the `@import` at the top of each. The existing variables in those
+ * files (--card, --ink, --indigo, …) become aliases of the tokens below right
+ * after this import, so every rule written before this phase keeps working
+ * unchanged; nothing here replaces them by itself.
+ */
+
+:root {
+  /* Surfaces (the isla is always dark, like a Dynamic Island) */
+  --c-island: #000000;
+  --c-surface-1: #141518; /* = --card today */
+  --c-surface-2: #1c1d21;
+  --c-surface-3: #26272c;
+  --c-fill: rgba(120, 120, 128, 0.24);
+  --c-fill-2: rgba(120, 120, 128, 0.14);
+  --c-separator: rgba(255, 255, 255, 0.08);
+
+  /* Text */
+  --c-label: #f5f6f8; /* = --ink today */
+  --c-label-2: rgba(235, 235, 245, 0.62);
+  --c-label-3: rgba(235, 235, 245, 0.32);
+
+  /* Accent and system colours (iOS's dark variants) */
+  --c-accent: #6366f1; /* = --indigo today */
+  --c-accent-press: #4f46e5;
+  --c-on-accent: #ffffff;
+  --c-green: #30d158;
+  --c-orange: #ff9f0a;
+  --c-red: #ff453a;
+  --c-blue: #0a84ff;
+  --c-yellow: #ffd60a;
+  --c-purple: #bf5af2;
+  --c-teal: #40c8e0;
+
+  /* "Glass" material (overlays, sheets, the composer, the find bar) */
+  --c-glass: rgba(28, 29, 33, 0.72);
+  --c-glass-border: rgba(255, 255, 255, 0.1);
+  --c-glass-highlight: rgba(255, 255, 255, 0.06);
+  --glass-blur: blur(20px) saturate(160%);
+
+  /* Type: Segoe UI Variable on Windows — never SF Pro, which SF Symbols'
+   * licence (and this one) keeps to Apple platforms. */
+  --font-ui: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  --font-display: "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "Cascadia Code", "Cascadia Mono", Consolas, ui-monospace, monospace;
+  --t-caption2: 500 10px/13px var(--font-ui);
+  --t-caption: 600 11px/14px var(--font-ui); /* UPPERCASE section labels, 0.06em tracking */
+  --t-footnote: 400 12px/16px var(--font-ui);
+  --t-subhead: 500 13px/18px var(--font-ui);
+  --t-body: 400 14px/21px var(--font-ui);
+  --t-headline: 600 14px/20px var(--font-ui);
+  --t-title3: 600 16px/22px var(--font-display);
+  --t-title2: 700 20px/24px var(--font-display); /* gauge figures, tabular-nums */
+  --t-code: 400 12.5px/19px var(--font-mono);
+
+  /* Space (4pt grid) */
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-5: 20px;
+  --s-6: 24px;
+  --s-8: 32px;
+
+  /* Radii (concentric rule: inner radius = outer radius − padding) */
+  --r-xs: 6px;
+  --r-sm: 8px;
+  --r-md: 12px;
+  --r-lg: 16px;
+  --r-xl: 20px;
+  --r-pill: 999px;
+
+  /* Motion */
+  --d-fast: 120ms;
+  --d-base: 220ms;
+  --d-slow: 360ms;
+  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+
+  /* Elevation */
+  --shadow-pop: 0 8px 24px rgba(0, 0, 0, 0.45);
+
+  /* Interaction */
+  --hit-min: 32px; /* minimum pointer target */
+  --hit-primary: 40px; /* primary actions */
+  --focus-ring: 0 0 0 2px var(--c-island), 0 0 0 4px var(--c-accent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --d-fast: 0ms;
+    --d-base: 0ms;
+    --d-slow: 0ms;
+  }
+}

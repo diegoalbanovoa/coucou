@@ -36,3 +36,30 @@ Pendiente de esta fase: modo mock (`src/dev/mock-bridge.ts` + fixtures), captura
 - `cargo clippy --workspace --all-targets`: limpio.
 - `npm run test`: **123 tests** (121 + 2 nuevos de esta fase).
 - `npx tsc --noEmit`: limpio.
+
+## Fase 1: Sistema de diseño "Coucou HIG"
+
+**`tokens.css` — dónde se importa:** el plan no especifica el mecanismo. Se resolvió con `@import url(...)` como primera línea de `style.css` y de `settings/settings.css` (cada uno con su ruta relativa correcta), en vez de un `import` JS en `main.ts`/`settings/main.ts` — más simple y symmétrico con cómo esos dos archivos ya cargan su propio CSS.
+
+**Ajustes NO es una ventana clara** (el plan pedía **VERIFICAR**): `settings.css` ya tenía `color-scheme: dark` y `--bg:#0b0c0e` antes de este plan. No existe variante `[data-surface="settings"]` porque no hace falta — ambas ventanas son oscuras.
+
+**Alias de variables — más conservador de lo que el plan sugiere:** "Las variables actuales (--card, --ink, --indigo, …) pasan a ser alias de las nuevas" se leyó primero como "alias todo lo que se pueda", incluidos `--red→--c-red`, `--green→--c-green`, `--amber→--c-orange`. Se revirtió: esos tokens iOS tienen un hex **distinto** del valor actual (p. ej. `--c-red:#ff453a` vs `--red:#f4505e` de hoy), así que aliasearlos habría cambiado el color de cada botón/badge existente sin que ninguna fase lo haya pedido todavía. Solo se aliasearon `--card`, `--ink` e `--indigo`, los tres que **sí** tienen el mismo hex en ambos lados (confirmado dígito por dígito). El resto migra cuando la fase que rediseña esa vista llegue.
+
+**`tile()` — extraído de `views/views.ts`, no de `views/integrations.ts`:** el plan dice "extraído de integrations.ts" en el párrafo 3.1, pero la ficha de servicios (`.pill`, con la carita y el badge) vive en `buildPill()` dentro de `views/views.ts` — `integrations.ts` es la tarjeta de detalle (emails, deployments…), un componente totalmente distinto. Extraído a `src/ui/tile.ts` sin cambiar el DOM ni el CSS; `views.ts` ahora llama a `tile()`. Verificado con una captura `?pane=services` antes/después, pixel a pixel por inspección visual — idéntica.
+
+**Lint de "sin hex fuera de tokens.css" — acotado a lo que Fase 1 construyó, no a todo el código:** al escribir el test se descubrió que `core/layout.ts`, `core/state.ts`, `island/hooks.ts`, `settings/main.ts`, `upload/canvas.ts`, `views/integrations.ts`, `views/ticker.ts` y `views/views.ts` tienen decenas de colores hex literales preexistentes (colores de marca de integraciones, outfits de Mochi, badges) — nada de esto lo tocó esta fase. Un test que exigiera cero hex en *todo* `src/` habría fallado el primer día contra código que nadie ha tocado todavía, lo cual lo vuelve ruido en vez de una puerta útil. `tests/design-tokens.test.mjs` solo vigila `src/ui/` y `src/styles/` — la superficie que esta fase sí construyó — con una única excepción documentada: los 3 colores de badge en `ui/tile.ts`, copiados tal cual de `buildPill()` para no romper el pixel-parity. El resto del código se irá acotando archivo por archivo en cada fase que lo rediseñe.
+
+**Dos variables CSS huérfanas encontradas, preexistentes y ajenas a este plan:** `--ink-1` y `--ink-3` se usan en `style.css` (líneas ~793-856) pero nunca se declaran en ningún `:root` — parece un typo de antes de este plan (¿por `--ink`/`--ink-2`?) que deja esas reglas de `color` silenciosamente sin efecto. No se tocó: arreglarlo sería meterse en código que ninguna fase ha pedido rediseñar todavía. Documentado como excepción conocida en `tests/design-tokens.test.mjs` en vez de ignorado en silencio.
+
+**Iconos añadidos (1.3):** `chevronDown`, `paperclip`, `globe`, `lock`, `thermometer`, `heartPulse`, `code`, `pdf`. `arrow-up` (enviar), `stop` y `chevron-left`, que el plan también pedía, ya existían de la Fase 2 del plan anterior.
+
+**Componentes base construidos, ninguno usado todavía:** `button`, `iconButton`, `chip`, `listRow`, `segmented`, `gauge`, `inlineConfirm`, `sheet`, `toast`, `pushNav` en `src/ui/`. Nada los llama todavía — eso empieza en las Fases 3-7. `inlineConfirm` con confirmación destructiva enfoca por defecto el botón "No" (Never mind), no el de confirmar, para que un Enter perdido nunca sea el que borra algo — el plan no lo especifica, pero es la lectura obvia de "nunca alert/confirm" aplicada a quién recibe el foco inicial.
+
+**Resultado final de la Fase 1, en verde:**
+- Captura `?pane=services` antes/después: idéntica (inspección visual, no hay diff automatizado de píxeles en el repo todavía).
+- `tests/design-tokens.test.mjs` (nuevo): toda variable CSS usada está declarada en algún lado; `src/ui/` y `src/styles/` sin hex fuera de la excepción documentada.
+- `tests/gauge.test.mjs` (nuevo): umbrales de color de `toneFor()` — carga (CPU/memoria) ámbar a 70%, rojo a 85%; disco ámbar a 90%, rojo a 95%.
+- `cargo test --workspace` / `cargo clippy`: sin cambios (89 tests, limpio) — esta fase no tocó Rust.
+- `npm run test`: **128 tests** (123 + 5 nuevos).
+- `npx tsc --noEmit`: limpio.
+- `npm run shots`: regenerado completo tras esta fase, sin errores.

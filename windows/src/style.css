@@ -1,20 +1,31 @@
 /* Coucou for Windows — same palette, sizes and type scale as the macOS island.
    Every colour below is copied from the Swift views. */
 
+@import url("./styles/tokens.css");
+@import url("./ui/ui.css");
+
 :root {
   color-scheme: dark;
 
   --font: system-ui, "Segoe UI Variable Text", "Segoe UI", "Segoe UI Emoji", sans-serif;
   --mono: "Cascadia Mono", "Consolas", ui-monospace, monospace;
 
-  --ink: #f5f6f8;        /* primary text */
+  /* Aliases onto Coucou HIG (styles/tokens.css), for the three names that are
+   * the *same colour* under a new name (see the "= --x today" comments in
+   * tokens.css) — every rule using them keeps rendering identically. --red,
+   * --green and --amber are NOT aliased to --c-red/--c-green/--c-orange: the
+   * iOS tones tokens.css defines for those are a visibly different hex, and
+   * swapping them in now would shift every button and badge that uses them
+   * before any phase has actually asked for that redesign. They migrate to
+   * the new tokens individually, in whichever phase redesigns each view. */
+  --ink: var(--c-label); /* primary text */
   --ink-2: #f1f2f4;
   --dim: #9398a1;
   --dim-2: #8e939c;
   --dim-3: #6b7079;
   --dim-4: #5f646d;
   --dim-5: #4b5563;
-  --card: #141518;
+  --card: var(--c-surface-1);
   --card-flat: #0e0f11;
   --tab-on: #1d1f23;
   --hairline: rgba(255, 255, 255, 0.035);
@@ -24,7 +35,7 @@
   --green-2: #34d399;
   --amber: #f5a524;
   --cyan: #22d3ee;
-  --indigo: #6366f1;
+  --indigo: var(--c-accent);
   --pink: #f472b6;
 }
 

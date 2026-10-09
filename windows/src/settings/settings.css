@@ -1,4 +1,14 @@
-/* Settings window — same palette as the island, laid out as a normal window. */
+/* Settings window — same palette as the island, laid out as a normal window.
+ *
+ * Dark, like the island itself — not the light surface Coucou HIG § 1.1 asks
+ * to verify, so no `[data-surface="settings"]` light variant exists (noted
+ * in docs/plan-v2-notas.md). Tokens apply here too, aliased the same
+ * conservative way as style.css: only names that are the identical colour
+ * under both names, so nothing already shipped shifts without a phase
+ * actually asking for it. */
+
+@import url("../styles/tokens.css");
+@import url("../ui/ui.css");
 
 :root {
   /* Makes Windows render the native dropdown and scrollbars dark — without it
@@ -7,11 +17,11 @@
 
   --font: system-ui, "Segoe UI Variable Text", "Segoe UI", sans-serif;
   --mono: "Cascadia Mono", "Consolas", ui-monospace, monospace;
-  --ink: #f5f6f8;
+  --ink: var(--c-label);
   --dim: #9398a1;
   --dim-2: #6b7079;
   --bg: #0b0c0e;
-  --card: #141518;
+  --card: var(--c-surface-1);
   --hairline: rgba(255, 255, 255, 0.07);
   --green: #22c55e;
   --red: #f4505e;

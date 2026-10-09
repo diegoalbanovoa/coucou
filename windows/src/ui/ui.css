@@ -1,0 +1,484 @@
+/* Coucou HIG components (src/ui/*.ts) — see docs/plan-v2.md § 1.2.
+ *
+ * Every colour here is a token from styles/tokens.css; every space is one of
+ * --s-*; every radius is one of --r-*. Nothing in this file is used yet —
+ * these are the pieces later phases wire into real views — so there is no
+ * existing pixel output to preserve the way style.css's current rules have.
+ */
+
+/* ── Button ──────────────────────────────────────────────────────────────── */
+
+.ui-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s-1);
+  border: 0;
+  border-radius: var(--r-sm);
+  padding: 0 var(--s-3);
+  font: var(--t-subhead);
+  cursor: pointer;
+  background: var(--c-fill);
+  color: var(--c-label);
+  transition: background var(--d-fast) var(--ease-out), opacity var(--d-fast) var(--ease-out),
+    transform var(--d-fast) var(--ease-out);
+}
+
+.ui-btn-md {
+  height: var(--hit-min);
+}
+
+.ui-btn-sm {
+  height: 24px;
+  padding: 0 var(--s-2);
+  font: var(--t-footnote);
+}
+
+.ui-btn:hover {
+  background: var(--c-fill-2);
+  filter: brightness(1.12);
+}
+
+.ui-btn:active {
+  transform: scale(0.97);
+}
+
+.ui-btn:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.ui-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+  pointer-events: none;
+}
+
+.ui-btn-primary {
+  background: var(--c-accent);
+  color: var(--c-on-accent);
+  height: var(--hit-primary);
+}
+
+.ui-btn-primary:hover {
+  background: var(--c-accent-press);
+  filter: none;
+}
+
+.ui-btn-secondary {
+  background: var(--c-fill);
+}
+
+.ui-btn-plain {
+  background: none;
+  color: var(--c-label-2);
+}
+
+.ui-btn-plain:hover {
+  background: var(--c-fill-2);
+}
+
+.ui-btn-destructive {
+  background: var(--c-red);
+  color: var(--c-on-accent);
+}
+
+.ui-btn-destructive:hover {
+  filter: brightness(1.1);
+}
+
+/* ── Icon button ─────────────────────────────────────────────────────────── */
+
+.ui-icon-btn {
+  display: grid;
+  place-items: center;
+  width: var(--hit-min);
+  height: var(--hit-min);
+  border: 0;
+  border-radius: var(--r-sm);
+  background: none;
+  color: var(--c-label-2);
+  cursor: pointer;
+  transition: background var(--d-fast) var(--ease-out), color var(--d-fast) var(--ease-out);
+}
+
+.ui-icon-btn:hover {
+  background: var(--c-fill);
+  color: var(--c-label);
+}
+
+.ui-icon-btn:active {
+  transform: scale(0.94);
+}
+
+.ui-icon-btn:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.ui-icon-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+  pointer-events: none;
+}
+
+/* ── Chip ────────────────────────────────────────────────────────────────── */
+
+.ui-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  height: 20px;
+  padding: 0 var(--s-2);
+  border-radius: var(--r-pill);
+  font: var(--t-caption2);
+  background: var(--c-fill);
+  color: var(--c-label-2);
+  white-space: nowrap;
+}
+
+.ui-chip-accent {
+  background: color-mix(in srgb, var(--c-accent) 20%, transparent);
+  color: var(--c-accent);
+}
+
+.ui-chip-green {
+  background: color-mix(in srgb, var(--c-green) 20%, transparent);
+  color: var(--c-green);
+}
+
+.ui-chip-red {
+  background: color-mix(in srgb, var(--c-red) 20%, transparent);
+  color: var(--c-red);
+}
+
+.ui-chip-orange {
+  background: color-mix(in srgb, var(--c-orange) 20%, transparent);
+  color: var(--c-orange);
+}
+
+/* ── List row ────────────────────────────────────────────────────────────── */
+
+.ui-row {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  min-height: var(--hit-primary);
+  padding: 0 var(--s-2);
+  border-radius: var(--r-sm);
+  border: 0;
+  background: none;
+  width: 100%;
+  text-align: left;
+  color: inherit;
+  font: inherit;
+}
+
+.ui-row-clickable {
+  cursor: pointer;
+}
+
+.ui-row-clickable:hover {
+  background: var(--c-fill-2);
+}
+
+.ui-row-clickable:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.ui-row-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.ui-row-title {
+  font: var(--t-subhead);
+  color: var(--c-label);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ui-row-subtitle {
+  font: var(--t-footnote);
+  color: var(--c-label-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ── Segmented control ───────────────────────────────────────────────────── */
+
+.ui-segmented {
+  display: inline-flex;
+  padding: 2px;
+  border-radius: var(--r-sm);
+  background: var(--c-fill);
+  gap: 2px;
+}
+
+.ui-segmented:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.ui-segment {
+  border: 0;
+  border-radius: var(--r-xs);
+  background: none;
+  color: var(--c-label-2);
+  cursor: pointer;
+  font: var(--t-caption2);
+  padding: 0 var(--s-2);
+  transition: background var(--d-base) var(--ease-out), color var(--d-base) var(--ease-out),
+    box-shadow var(--d-base) var(--ease-out);
+}
+
+.ui-segmented-sm .ui-segment {
+  height: 20px;
+}
+
+.ui-segmented-md .ui-segment {
+  height: 28px;
+  font: var(--t-subhead);
+}
+
+.ui-segment.on {
+  background: var(--c-surface-3);
+  color: var(--c-label);
+  box-shadow: var(--shadow-pop);
+}
+
+/* ── Inline confirm ──────────────────────────────────────────────────────── */
+
+.ui-inline-confirm {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  width: 100%;
+  min-height: var(--hit-primary);
+}
+
+.ui-inline-confirm-msg {
+  flex: 1 1 auto;
+  min-width: 0;
+  font: var(--t-footnote);
+  color: var(--c-label-2);
+}
+
+/* ── Toast ───────────────────────────────────────────────────────────────── */
+
+.ui-toast {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  align-self: center;
+  padding: var(--s-1) var(--s-3);
+  border-radius: var(--r-pill);
+  background: var(--c-glass);
+  backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--c-glass-border);
+  box-shadow: var(--shadow-pop);
+  font: var(--t-footnote);
+  color: var(--c-label);
+  animation: ui-toast-in var(--d-base) var(--ease-out);
+}
+
+@keyframes ui-toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+
+.ui-toast-success {
+  color: var(--c-green);
+}
+
+.ui-toast-error {
+  color: var(--c-red);
+}
+
+.ui-toast-action {
+  border: 0;
+  background: none;
+  color: var(--c-accent);
+  font: var(--t-footnote);
+  cursor: pointer;
+}
+
+/* ── Sheet ───────────────────────────────────────────────────────────────── */
+
+.ui-sheet {
+  position: absolute;
+  inset: var(--s-3) var(--s-3) 0 var(--s-3);
+  display: flex;
+  flex-direction: column;
+  background: var(--c-glass);
+  backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--c-glass-border);
+  border-radius: var(--r-lg) var(--r-lg) 0 0;
+  box-shadow: var(--shadow-pop);
+  animation: ui-sheet-in var(--d-base) var(--ease-out);
+  min-height: 0;
+}
+
+.ui-sheet:focus-visible {
+  outline: none;
+}
+
+@keyframes ui-sheet-in {
+  from {
+    transform: translateY(16px);
+    opacity: 0;
+  }
+}
+
+.ui-sheet-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--s-3) var(--s-3) 0;
+}
+
+.ui-sheet-title {
+  font: var(--t-title3);
+  color: var(--c-label);
+}
+
+.ui-sheet-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--s-2) var(--s-3);
+}
+
+.ui-sheet-footer {
+  padding: var(--s-2) var(--s-3) var(--s-3);
+  border-top: 1px solid var(--c-glass-border);
+}
+
+/* ── Push nav ────────────────────────────────────────────────────────────── */
+
+.ui-push-nav {
+  position: relative;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.ui-push-frame {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  transition: transform var(--d-base) var(--ease-in-out), opacity var(--d-base) var(--ease-in-out);
+}
+
+.ui-push-hidden {
+  visibility: hidden;
+}
+
+.ui-push-enter {
+  transform: translateX(var(--s-6));
+  opacity: 0;
+}
+
+.ui-push-leave {
+  transform: translateX(var(--s-6));
+  opacity: 0;
+}
+
+.ui-push-head {
+  padding: var(--s-2) var(--s-2) var(--s-1);
+}
+
+.ui-push-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  border: 0;
+  background: none;
+  color: var(--c-label-2);
+  font: var(--t-subhead);
+  cursor: pointer;
+  padding: var(--s-1);
+}
+
+.ui-push-back:hover {
+  color: var(--c-label);
+}
+
+/* ── Gauge ───────────────────────────────────────────────────────────────── */
+
+.ui-gauge {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+.ui-gauge-ring-wrap {
+  position: relative;
+}
+
+.ui-gauge-svg {
+  position: absolute;
+  inset: 0;
+}
+
+.ui-gauge-arc {
+  transition: stroke-dashoffset var(--d-slow) var(--ease-out), stroke var(--d-base) var(--ease-out);
+}
+
+.ui-gauge-center {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+}
+
+.ui-gauge-value {
+  font: var(--t-title2);
+  font-variant-numeric: tabular-nums;
+  color: var(--c-label);
+}
+
+.ui-gauge-orange .ui-gauge-value,
+.ui-gauge-red .ui-gauge-value {
+  color: var(--c-label);
+}
+
+.ui-gauge-orange svg.ui-gauge-svg {
+  color: var(--c-orange);
+}
+
+.ui-gauge-label {
+  font: var(--t-caption);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--c-label-2);
+}
+
+.ui-gauge-detail {
+  font: var(--t-footnote);
+  color: var(--c-label-3);
+  font-variant-numeric: tabular-nums;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ui-toast,
+  .ui-sheet,
+  .ui-push-frame,
+  .ui-gauge-arc {
+    animation: none;
+    transition: none;
+  }
+}

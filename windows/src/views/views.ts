@@ -13,6 +13,7 @@ import { buildConsolePanel } from "./consoles";
 import { buildSystem } from "./system";
 import { buildChoose, buildUpload, buildUploading } from "./upload";
 import { renderIntegrationCard, type IntegrationCardHooks } from "./integrations";
+import { tile } from "../ui/tile";
 
 export interface ViewActions {
   setView(v: IslandViewName): void;
@@ -261,49 +262,13 @@ function buildPill(task: AgentTask, actions: ViewActions): HTMLElement {
   // No override: `task.name` is the project while a session runs and the agent
   // between sessions, and both are more use than the name of an editor that
   // may not be involved at all.
-  const label = task.name;
-  const canvas = createMiniBot(task, 24);
-  const pill = h(
-    "div",
-    { class: "pill", onclick: () => actions.setFocus(task.id) },
-    canvas,
-    h("span", { class: "lbl", text: label }),
-  );
-  pill.style.borderColor = `${task.color}24`;
-  pill.addEventListener("mouseenter", () => {
-    pill.style.background = `${task.color}2e`;
-    pill.style.borderColor = `${task.color}8c`;
-    pill.style.boxShadow = `0 2px 10px ${task.color}59`;
-    (pill.querySelector(".lbl") as HTMLElement).style.color = lighten(task.color, 0.3);
+  return tile({
+    face: createMiniBot(task, 24),
+    name: task.name,
+    color: task.color,
+    badge: task.pillBadge,
+    onSelect: () => actions.setFocus(task.id),
   });
-  pill.addEventListener("mouseleave", () => {
-    pill.style.background = "";
-    pill.style.borderColor = `${task.color}24`;
-    pill.style.boxShadow = "";
-    (pill.querySelector(".lbl") as HTMLElement).style.color = "";
-  });
-
-  if (task.pillBadge) {
-    const colors = { approval: "#F5A524", finished: "#22C55E", error: "#F4505E" } as const;
-    const marks = { approval: "bang", finished: "check", error: "xmark" } as const;
-    const inner = h(
-      "i",
-      { style: `background:${colors[task.pillBadge]}` },
-      icon(marks[task.pillBadge], { size: 6 }),
-    );
-    const badge = h("div", { class: "pill-badge" }, inner);
-    badge.style.boxShadow = `0 0 4px ${colors[task.pillBadge]}99`;
-    pill.append(badge);
-  }
-  return pill;
-}
-
-function lighten(hex: string, amount: number): string {
-  const v = parseInt(hex.replace("#", ""), 16);
-  const c = [(v >> 16) & 255, (v >> 8) & 255, v & 255].map((x) =>
-    Math.min(255, Math.round(x + amount * 255)),
-  );
-  return `rgb(${c[0]},${c[1]},${c[2]})`;
 }
 
 // ── Empty ─────────────────────────────────────────────────────────────────────
