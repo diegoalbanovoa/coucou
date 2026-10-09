@@ -2,6 +2,7 @@
 
 import type { BotEmoteName, BotStateName, IslandMode, IslandViewName } from "./layout";
 import type { EyeShape } from "../mochi/engine";
+import type { DroppedFile } from "./bridge";
 
 export type AgentSource = "claudeCode" | "n8n" | "agent";
 export type PillBadge = "approval" | "finished" | "error";
@@ -174,6 +175,8 @@ class AppState {
   chatExpanded = false;
   /** The find bar's query. Null when it is closed. */
   chatQuery: string | null = null;
+  /** Images attached to the message being written. */
+  chatImages: DroppedFile[] = [];
 
   integrations: Record<string, IntegrationInfo> = {};
 

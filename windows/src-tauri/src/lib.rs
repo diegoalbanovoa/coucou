@@ -631,6 +631,19 @@ fn agent_reset(app: AppHandle) {
     remember(&app, |s| s.agent_session = None);
 }
 
+/// One image from the inbox, as a data URI. Refused for anything outside it.
+#[tauri::command]
+fn image_preview(path: String) -> Result<String, String> {
+    files::preview(&path)
+}
+
+/// An image pasted from the clipboard, which is the one case where the webview
+/// hands over bytes rather than naming a file it was given.
+#[tauri::command]
+fn paste_image(media: String, bytes: Vec<u8>) -> Result<DroppedFile, String> {
+    files::ingest_bytes(&media, &bytes)
+}
+
 /// Copies a dropped file into the inbox and reports its name back.
 #[tauri::command]
 fn ingest_file(path: String) -> Result<DroppedFile, String> {
@@ -794,6 +807,8 @@ pub fn run() {
             forget_chat_folder,
             agent_reset,
             ingest_file,
+            image_preview,
+            paste_image,
             secret_present,
             secret_set,
             secret_clear,

@@ -20,6 +20,7 @@ import { buildHeader, buildViews, type ViewActions, type ViewHost } from "../vie
 import { h } from "../views/dom";
 import { IslandStateMachine } from "./fsm";
 import { startFreshConversation } from "./agent";
+import { takeChatImages } from "../views/chat";
 
 const BOT_OVERHANG = 40;
 /** Same margin as the Rust hit test (src-tauri/src/island.rs). */
@@ -379,6 +380,12 @@ export class Island {
         break;
       }
       case "drop": {
+        // The chat takes its own drops: one or more images for the message
+        // being written, rather than one file replacing the conversation.
+        if (this.dropGoesToChat() && (e.paths?.length ?? 0) > 0) {
+          takeChatImages(e.paths ?? []);
+          return;
+        }
         State.fileDragOver = false;
         const path = e.paths?.[0];
         if (!path) {
@@ -397,6 +404,16 @@ export class Island {
    * the inbox runs in the background and swaps the path in when it lands, so a
    * slow disk can never stall the animation — same as FileDropHandler on macOS.
    */
+  /**
+   * Whether a dropped file belongs to the chat rather than to the island's own
+   * upload animation. The chat is the only view with somewhere to put one, and
+   * an image dropped there is meant for the question being written — not for
+   * the gulp-and-swallow sequence, which replaces the conversation.
+   */
+  private dropGoesToChat(): boolean {
+    return State.mode === "expanded" && State.view === "prompt";
+  }
+
   private swallow(path: string) {
     const name = path.split(/[\\/]/).pop() || "file";
     State.droppedFile = { name, path };

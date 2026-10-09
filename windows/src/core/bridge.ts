@@ -124,6 +124,11 @@ export const Bridge = {
   chatForget: () => call<void>("chat_forget"),
   /** Copies a dropped file into the inbox. */
   ingestFile: (path: string) => callOrThrow<DroppedFile>("ingest_file", { path }),
+  /** One inbox image as a data URI. Refused for anything outside the inbox. */
+  imagePreview: (path: string) => callOrThrow<string>("image_preview", { path }),
+  /** An image pasted from the clipboard, which arrives as bytes not a path. */
+  pasteImage: (media: string, bytes: number[]) =>
+    callOrThrow<DroppedFile>("paste_image", { media, bytes }),
   /** Only ever tells you whether a key exists — never its value. */
   secretPresent: (key: string) => call<boolean>("secret_present", { key }),
   secretSet: (key: string, value: string) => callOrThrow<void>("secret_set", { key, value }),

@@ -5,7 +5,7 @@ import { h, clear, copyToClipboard } from "./dom";
 import { icon } from "./icons";
 import { render } from "./markdown";
 import { counter, findMatches, highlight, step, type Match } from "./search";
-import { Bridge, onEvent, type AgentTurn } from "../core/bridge";
+import { Bridge, onEvent, type AgentTurn, type DroppedFile } from "../core/bridge";
 import { Sound } from "../core/sound";
 import { State, type ChatMessage } from "../core/state";
 import {
@@ -157,6 +157,60 @@ function contextChip(label: string): HTMLElement {
   return chip;
 }
 
+/**
+ * The chat's way in for dropped images, set when the view is built.
+ *
+ * The island owns the drop event — Tauri delivers it to the window, not to an
+ * element — so it has to be able to hand the paths to whichever view wants
+ * them. One function rather than an event, because there is exactly one chat.
+ */
+let intoChat: ((paths: string[]) => void) | null = null;
+
+/** Called by the island when a drop lands while the chat is open. */
+export function takeChatImages(paths: string[]) {
+  intoChat?.(paths);
+}
+
+/** How many images may ride on one message, and how large each may be. */
+const MAX_IMAGES = 5;
+const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+
+/**
+ * One attached image.
+ *
+ * The thumbnail is asked for by path and arrives as a data URI, because the
+ * webview never holds file bytes: Tauri intercepts the drop and hands over
+ * paths only, so `URL.createObjectURL` has nothing to work with here. A file
+ * too large to inline keeps its chip and loses only the picture.
+ */
+function imageChip(file: DroppedFile, onRemove: () => void): HTMLElement {
+  const thumb = h("span", { class: "shot-thumb" });
+  const drop = h("button", { class: "shot-drop", title: `Remove ${file.name}` });
+  drop.append(icon("xmark", { size: 9 }));
+  drop.addEventListener("click", onRemove);
+
+  const chip = h(
+    "div",
+    { class: "shot", title: file.path },
+    thumb,
+    h("span", { class: "shot-name", text: file.name }),
+    drop,
+  );
+
+  void Bridge.imagePreview(file.path)
+    .then((url) => {
+      const img = h("img", { src: url, alt: "" });
+      thumb.append(img);
+    })
+    .catch(() => {
+      // Too large to inline, or not an image Coucou shows. The chip stays:
+      // the agent still gets the path, which is the part that matters.
+      thumb.append(icon("image", { size: 11 }));
+    });
+
+  return chip;
+}
+
 function lastPathComponent(path: string): string {
   const parts = path.split(/[\\/]/).filter(Boolean);
   return parts[parts.length - 1] ?? path;
@@ -175,6 +229,7 @@ function placeholder(): string {
 
 export function buildPrompt(onHeightChange: () => void): ViewHost {
   const chipRow = h("div", { class: "chip-row" });
+  const shotRow = h("div", { class: "shot-row" });
   const log = h("div", { class: "chat-log" });
   // Rebuilt on their own schedules: the history only when a message lands, the
   // draft on every frame a token arrives in.
@@ -249,7 +304,18 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
     h(
       "div",
       { class: "card wash chat-card" },
-      h("div", { class: "chat-body" }, header, findBar, chipRow, log, jump, palette, bar),
+      h(
+        "div",
+        { class: "chat-body" },
+        header,
+        findBar,
+        chipRow,
+        log,
+        jump,
+        palette,
+        shotRow,
+        bar,
+      ),
     ),
   );
   (el.querySelector(".card") as HTMLElement).style.setProperty("--wash", "rgba(99,102,241,0.5)");
@@ -257,6 +323,7 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
   let sending = false;
   let renderedCount = -1;
   let renderedDraft = "";
+  let renderedShots = "";
   let paletteKey = "";
   let highlighted = 0;
   /** Whether new text should scroll into view — false once the user reads back. */
@@ -343,6 +410,74 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
     });
   }
 
+  /**
+   * Takes images into the tray, refusing what cannot ride along and saying why.
+   *
+   * Every file goes through `ingest_file` first, which copies it into the inbox
+   * without ever overwriting — so the original is untouched and the copy
+   * survives the folder it came from going away mid-conversation.
+   */
+  async function attach(paths: string[]) {
+    for (const path of paths) {
+      if (State.chatImages.length >= MAX_IMAGES) {
+        State.noteMessage = `Up to ${MAX_IMAGES} images on one message.`;
+        break;
+      }
+      if (!/\.(png|jpe?g|webp|gif)$/i.test(path)) continue;
+      try {
+        const file = await Bridge.ingestFile(path);
+        if (file.size > MAX_IMAGE_BYTES) {
+          State.noteMessage = `${file.name} is larger than 10 MB.`;
+          continue;
+        }
+        State.chatImages.push(file);
+      } catch (err) {
+        void Bridge.log(`attach failed: ${String(err)}`);
+      }
+    }
+    renderedShots = "";
+    State.notify();
+    onHeightChange();
+  }
+
+  /** The chat's own drop target, used while the chat is the open view. */
+  const dropZone = el;
+  for (const kind of ["dragenter", "dragover"]) {
+    dropZone.addEventListener(kind, (event) => {
+      event.preventDefault();
+      dropZone.classList.add("dropping");
+    });
+  }
+  for (const kind of ["dragleave", "drop"]) {
+    dropZone.addEventListener(kind, () => dropZone.classList.remove("dropping"));
+  }
+
+  /** Pasting is the one way an image arrives with no path to copy from. */
+  input.addEventListener("paste", (event) => {
+    const items = (event as ClipboardEvent).clipboardData?.items ?? [];
+    for (const item of items) {
+      if (!item.type.startsWith("image/")) continue;
+      const blob = item.getAsFile();
+      if (!blob) continue;
+      event.preventDefault();
+      void blob.arrayBuffer().then(async (buffer) => {
+        try {
+          const file = await Bridge.pasteImage(item.type, [...new Uint8Array(buffer)]);
+          State.chatImages.push(file);
+          renderedShots = "";
+          State.notify();
+          onHeightChange();
+        } catch (err) {
+          State.noteMessage = String(err).replace(/^Error:\s*/, "");
+          State.notify();
+        }
+      });
+      return;
+    }
+  });
+
+  intoChat = (paths) => void attach(paths);
+
   void onEvent<AgentTurn>("agent-turn", (turn) => {
     if (turn.kind === "text") State.chatDraft += turn.text;
     else State.chatSteps.push(turn.label);
@@ -414,14 +549,25 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
     State.notify();
     onHeightChange();
 
-    // A dropped file is only context for the first question about it, and the
-    // agent is told where it is rather than handed its bytes: it can open the
-    // file itself, which is the whole point of running the real CLI.
+    // The agent is told where things are rather than handed their bytes: it
+    // can open a file itself, which is the whole point of running the real
+    // CLI. Images attached to this message go the same way, by path.
+    const shots = State.chatImages.slice();
+    State.chatImages = [];
+    renderedShots = "";
+
     const file = State.droppedFile;
-    const prompt =
-      State.chatHistory.length === 1 && file?.path
-        ? `${query}\n\nThe file this is about: ${file.path}`
-        : query;
+    const parts = [query];
+    if (shots.length > 0) {
+      parts.push(
+        shots.length === 1
+          ? `The image this is about: ${shots[0].path}`
+          : `The images this is about:\n${shots.map((s) => `- ${s.path}`).join("\n")}`,
+      );
+    } else if (State.chatHistory.length === 1 && file?.path) {
+      parts.push(`The file this is about: ${file.path}`);
+    }
+    const prompt = parts.join("\n\n");
 
     try {
       // The CLI runs the real agent — its own tools, skills and CLAUDE.md — and
@@ -518,6 +664,22 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
         chipRow.dataset.label = wantChip;
         clear(chipRow);
         if (wantChip) chipRow.append(contextChip(wantChip));
+      }
+
+      const shotKey = State.chatImages.map((i) => i.path).join("|");
+      if (shotKey !== renderedShots) {
+        renderedShots = shotKey;
+        clear(shotRow);
+        for (const file of State.chatImages) {
+          shotRow.append(
+            imageChip(file, () => {
+              State.chatImages = State.chatImages.filter((i) => i.path !== file.path);
+              renderedShots = "";
+              State.notify();
+              onHeightChange();
+            }),
+          );
+        }
       }
 
       if (State.chatHistory.length !== renderedCount) {
