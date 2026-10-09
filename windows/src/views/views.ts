@@ -10,6 +10,7 @@ import { washRGBA, type IslandViewName, type Wash } from "../core/layout";
 import { createMiniBot, pruneMiniBots } from "../mochi/minibots";
 import { buildPrompt } from "./chat";
 import { buildConsolePanel } from "./consoles";
+import { buildSystem } from "./system";
 import { buildChoose, buildUpload, buildUploading } from "./upload";
 import { renderIntegrationCard, type IntegrationCardHooks } from "./integrations";
 
@@ -42,6 +43,12 @@ export interface ViewHost {
    * it freezes part-way through.
    */
   animating?(): boolean;
+  /**
+   * Called when this view stops being the one on screen. A view that started
+   * anything — a timer, a subscription — stops it here, which is what keeps a
+   * tab nobody has open from costing anything.
+   */
+  blur?(): void;
 }
 
 // ── Shared pieces ─────────────────────────────────────────────────────────────
@@ -88,6 +95,7 @@ export function buildHeader(actions: ViewActions): ViewHost {
   const tabHome = h("button", { class: "tab", title: "Overview", onclick: () => go("overview") }, icon("house", { size: 13 }));
   const tabChat = h("button", { class: "tab", title: "Ask", onclick: () => go("prompt") }, icon("bubble", { size: 13 }));
   const tabDrop = h("button", { class: "tab", title: "Drop", onclick: () => go("upload") }, icon("plus", { size: 13 }));
+  const tabSystem = h("button", { class: "tab", title: "System", onclick: () => go("system") }, icon("disk", { size: 13 }));
 
   const gearBtn = h("button", { title: "Settings", onclick: () => go("settings") }, icon("gear", { size: 14 }));
   const soundBtn = h("button", { title: "Mute", onclick: () => actions.toggleSound() }, icon("speakerOn", { size: 14 }));
@@ -100,7 +108,7 @@ export function buildHeader(actions: ViewActions): ViewHost {
   const el = h(
     "div",
     { id: "header" },
-    h("div", { class: "tabs" }, tabHome, tabChat, tabDrop),
+    h("div", { class: "tabs" }, tabHome, tabChat, tabDrop, tabSystem),
     h("div", { class: "header-actions" }, gearBtn, soundBtn),
   );
 
@@ -111,6 +119,7 @@ export function buildHeader(actions: ViewActions): ViewHost {
       tabHome.classList.toggle("on", v === "overview" || v === "empty");
       tabChat.classList.toggle("on", v === "prompt");
       tabDrop.classList.toggle("on", v === "upload");
+      tabSystem.classList.toggle("on", v === "system");
       gearBtn.classList.toggle("on", v === "settings");
       clear(gearBtn);
       gearBtn.append(icon("gear", { size: 14 }));
@@ -535,6 +544,7 @@ export function buildViews(
   map.set("note", buildNote());
   map.set("settings", buildSettings(actions));
   map.set("prompt", buildPrompt(onChatHeightChange));
+  map.set("system", buildSystem());
   map.set("upload", buildUpload());
   map.set("uploading", buildUploading());
   map.set("choose", buildChoose(actions));

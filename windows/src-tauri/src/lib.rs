@@ -12,6 +12,7 @@ mod pipe;
 mod platform;
 mod secrets;
 mod settings;
+mod system;
 mod transcript;
 mod tray;
 mod vault;
@@ -557,6 +558,30 @@ fn chat_forget(app: AppHandle) {
     remember(&app, |s| s.agent_session = None);
 }
 
+// ── Disk, memory and the broom ────────────────────────────────────────────────
+
+/// What the System tab shows. Asked for on a timer while the tab is open and
+/// never otherwise, so a tab nobody has open costs nothing.
+#[tauri::command]
+fn system_stats() -> system::Stats {
+    system::stats()
+}
+
+/// What cleaning the named targets would remove. Reads nothing, deletes
+/// nothing: this is the preview the user is shown before anything happens.
+#[tauri::command]
+fn system_scan(ids: Vec<String>) -> Vec<system::Found> {
+    system::scan(&ids)
+}
+
+/// Deletes what the preview said it would, and nothing else. Reached only from
+/// a confirm button, and every removal is re-checked against the guard — a
+/// file may have become a link to somewhere else since the scan.
+#[tauri::command]
+fn system_clean(ids: Vec<String>) -> Vec<system::Swept> {
+    system::clean(&ids)
+}
+
 // ── The knowledge base ────────────────────────────────────────────────────────
 
 /// The Obsidian vault the agent may read and write, and where it came from.
@@ -796,6 +821,9 @@ pub fn run() {
             pick_project,
             agent_send,
             agent_cancel,
+            system_stats,
+            system_scan,
+            system_clean,
             chat_load,
             chat_keep,
             chat_forget,

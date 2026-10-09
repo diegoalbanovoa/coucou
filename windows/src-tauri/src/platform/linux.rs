@@ -403,3 +403,69 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
+
+// ── Disk, memory and the trash ───────────────────────────────────────────────
+
+pub fn temp_dir() -> Option<PathBuf> {
+    let dir = std::env::temp_dir();
+    dir.is_dir().then_some(dir)
+}
+
+pub fn npm_cache_dir() -> PathBuf {
+    super::home_dir().join(".npm")
+}
+
+pub fn pip_cache_dir() -> PathBuf {
+    super::home_dir().join(".cache").join("pip")
+}
+
+/// Room left where it matters: the filesystem holding the home directory.
+///
+/// Reported by running `df`, because the alternative is `statvfs` through libc
+/// and the one dependency this file already has is libc for `getuid` — but a
+/// struct layout per architecture is a worse trade than one short process for
+/// a tab the user has to open.
+pub fn drives() -> Vec<super::Drive> {
+    let home = super::home_dir();
+    let out = match std::process::Command::new("df").arg("-kP").arg(&home).output() {
+        Ok(out) if out.status.success() => out.stdout,
+        _ => return Vec::new(),
+    };
+    let text = String::from_utf8_lossy(&out);
+    // "Filesystem 1024-blocks Used Available Capacity Mounted on"
+    let Some(row) = text.lines().nth(1) else { return Vec::new() };
+    let cols: Vec<&str> = row.split_whitespace().collect();
+    if cols.len() < 6 {
+        return Vec::new();
+    }
+    let blocks = |i: usize| cols[i].parse::<u64>().unwrap_or(0) * 1024;
+    vec![super::Drive { name: cols[5].to_string(), free: blocks(3), total: blocks(1) }]
+}
+
+/// Memory in use and installed, from /proc/meminfo.
+///
+/// "Used" is total minus available rather than total minus free: free excludes
+/// the page cache, which would report a healthy machine as nearly full.
+pub fn memory() -> (u64, u64) {
+    let Ok(text) = std::fs::read_to_string("/proc/meminfo") else { return (0, 0) };
+    let field = |name: &str| -> u64 {
+        text.lines()
+            .find(|l| l.starts_with(name))
+            .and_then(|l| l.split_whitespace().nth(1))
+            .and_then(|kb| kb.parse::<u64>().ok())
+            .map(|kb| kb * 1024)
+            .unwrap_or(0)
+    };
+    let total = field("MemTotal:");
+    (total.saturating_sub(field("MemAvailable:")), total)
+}
+
+/// The freedesktop trash is a folder, so the generic walk handles it and this
+/// has nothing to report.
+pub fn recycle_bin_size() -> Option<(u64, u64)> {
+    None
+}
+
+pub fn empty_recycle_bin() -> bool {
+    false
+}

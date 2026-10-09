@@ -15,6 +15,13 @@ mod linux;
 #[cfg(target_os = "linux")]
 pub use self::linux::*;
 
+/// One drive and the room left on it. Filled in per platform; see `drives`.
+pub struct Drive {
+    pub name: String,
+    pub free: u64,
+    pub total: u64,
+}
+
 /// Wall-clock time in the user's time zone, for log lines and backup names.
 pub struct LocalTime {
     pub year: u32,

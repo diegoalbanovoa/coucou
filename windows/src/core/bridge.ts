@@ -108,6 +108,12 @@ export const Bridge = {
   pickVault: () => call<string | null>("pick_vault"),
   /** Goes back to whatever vault Obsidian itself has open. */
   forgetVault: () => call<void>("forget_vault"),
+  /** Free space per drive and memory in use. Asked on a timer while the tab is open. */
+  systemStats: () => call<Stats>("system_stats"),
+  /** What cleaning these would remove. Deletes nothing — this is the preview. */
+  systemScan: (ids: string[]) => call<Found[]>("system_scan", { ids }),
+  /** Deletes what the preview said, re-checking every file against the guard. */
+  systemClean: (ids: string[]) => call<Swept[]>("system_clean", { ids }),
   /** Where the chat runs with nothing attached, and whether it is still there. */
   chatFolderState: () => call<FolderState>("chat_folder_state"),
   /** Chooses that folder. Null when the user cancelled the picker. */
@@ -155,6 +161,43 @@ export interface KeptMessage {
   content: string;
   at: number;
   steps: string[];
+}
+
+/** One drive and the room left on it. */
+export interface Drive {
+  /** "C:" on Windows, the mount point on Linux. */
+  name: string;
+  free: number;
+  total: number;
+}
+
+/** What the System tab reads. */
+export interface Stats {
+  drives: Drive[];
+  memoryUsed: number;
+  memoryTotal: number;
+}
+
+/** What one cleanable thing holds, as the preview reports it. */
+export interface Found {
+  id: string;
+  label: string;
+  about: string;
+  /** Empty when it is not on this machine. */
+  path: string;
+  files: number;
+  bytes: number;
+  /** Why there is nothing to do, when there is nothing to do. */
+  note: string;
+}
+
+/** What one of them actually gave up. */
+export interface Swept {
+  id: string;
+  files: number;
+  bytes: number;
+  /** Skipped because something else had them open. */
+  inUse: number;
 }
 
 /** A folder setting, and whether what it points at is still there. */

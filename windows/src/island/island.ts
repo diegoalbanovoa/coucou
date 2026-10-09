@@ -302,6 +302,13 @@ export class Island {
 
   setView(view: IslandViewName) {
     this.stopSequenceIfLeaving(view);
+    // One funnel for every view change, so a view that started a timer or a
+    // poll gets told when it stops being the one on screen — and the one
+    // arriving gets a chance to start.
+    if (view !== State.view) {
+      this.views.get(State.view)?.blur?.();
+      this.views.get(view)?.focus?.();
+    }
     if (State.mode !== "expanded") {
       this.fsm.forceHome();
       State.view = view;

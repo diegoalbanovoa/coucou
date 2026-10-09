@@ -368,6 +368,117 @@ unsafe fn open_folder_dialog(owner: Option<HWND>) -> ::windows::core::Result<Opt
     Ok(path)
 }
 
+// ── Disk, memory and the recycle bin ─────────────────────────────────────────
+
+/// Where this user's temp files are. `GetTempPath` is the same answer, but
+/// `std` already read the environment for us.
+pub fn temp_dir() -> Option<PathBuf> {
+    let dir = std::env::temp_dir();
+    dir.is_dir().then_some(dir)
+}
+
+pub fn npm_cache_dir() -> PathBuf {
+    std::env::var_os("LOCALAPPDATA")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| super::home_dir().join("AppData").join("Local"))
+        .join("npm-cache")
+}
+
+pub fn pip_cache_dir() -> PathBuf {
+    std::env::var_os("LOCALAPPDATA")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| super::home_dir().join("AppData").join("Local"))
+        .join("pip")
+        .join("Cache")
+}
+
+/// Every fixed drive, with the room left on it.
+///
+/// Removable and network drives are left out: a card reader with nothing in it
+/// answers slowly or not at all, and a disconnected share answers after a
+/// timeout nobody opening a tab wants to wait through.
+pub fn drives() -> Vec<super::Drive> {
+    use ::windows::core::PCWSTR;
+    use ::windows::Win32::Storage::FileSystem::{
+        GetDiskFreeSpaceExW, GetDriveTypeW, GetLogicalDrives,
+    };
+
+    /// What `GetDriveTypeW` answers for a real disk. Written out rather than
+    /// imported: the constant has moved between modules across versions of the
+    /// windows crate, and the number has not moved since Windows 95.
+    const DRIVE_FIXED: u32 = 3;
+
+    let mask = unsafe { GetLogicalDrives() };
+    let mut out = Vec::new();
+
+    for bit in 0..26u32 {
+        if mask & (1 << bit) == 0 {
+            continue;
+        }
+        let letter = (b'A' + bit as u8) as char;
+        let root: Vec<u16> =
+            format!("{letter}:\\").encode_utf16().chain(std::iter::once(0)).collect();
+        let kind = unsafe { GetDriveTypeW(PCWSTR(root.as_ptr())) };
+        if kind != DRIVE_FIXED {
+            continue;
+        }
+
+        let mut free = 0u64;
+        let mut total = 0u64;
+        let ok = unsafe {
+            GetDiskFreeSpaceExW(PCWSTR(root.as_ptr()), None, Some(&mut total), Some(&mut free))
+        };
+        if ok.is_ok() && total > 0 {
+            out.push(super::Drive { name: format!("{letter}:"), free, total });
+        }
+    }
+    out
+}
+
+/// Memory in use and installed, in bytes.
+pub fn memory() -> (u64, u64) {
+    use ::windows::Win32::System::SystemInformation::{GlobalMemoryStatusEx, MEMORYSTATUSEX};
+
+    let mut status = MEMORYSTATUSEX {
+        dwLength: std::mem::size_of::<MEMORYSTATUSEX>() as u32,
+        ..Default::default()
+    };
+    if unsafe { GlobalMemoryStatusEx(&mut status) }.is_err() {
+        return (0, 0);
+    }
+    let total = status.ullTotalPhys;
+    (total.saturating_sub(status.ullAvailPhys), total)
+}
+
+/// How much the recycle bin holds, as (items, bytes).
+pub fn recycle_bin_size() -> Option<(u64, u64)> {
+    use ::windows::core::PCWSTR;
+    use ::windows::Win32::UI::Shell::{SHQueryRecycleBinW, SHQUERYRBINFO};
+
+    let mut info =
+        SHQUERYRBINFO { cbSize: std::mem::size_of::<SHQUERYRBINFO>() as u32, ..Default::default() };
+    // A null path means every drive's bin at once, which is what the tab says.
+    unsafe { SHQueryRecycleBinW(PCWSTR::null(), &mut info) }.ok()?;
+    Some((info.i64NumItems as u64, info.i64Size as u64))
+}
+
+/// Empties it, with no confirmation of its own — the island already asked.
+pub fn empty_recycle_bin() -> bool {
+    use ::windows::core::PCWSTR;
+    use ::windows::Win32::UI::Shell::{
+        SHEmptyRecycleBinW, SHERB_NOCONFIRMATION, SHERB_NOPROGRESSUI, SHERB_NOSOUND,
+    };
+
+    unsafe {
+        SHEmptyRecycleBinW(
+            None,
+            PCWSTR::null(),
+            SHERB_NOCONFIRMATION | SHERB_NOPROGRESSUI | SHERB_NOSOUND,
+        )
+    }
+    .is_ok()
+}
+
 // ── Folder picker, end to end ─────────────────────────────────────────────────
 
 /// Tests that put a real dialog on screen.
