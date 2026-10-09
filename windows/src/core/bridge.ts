@@ -114,6 +114,12 @@ export const Bridge = {
   systemScan: (ids: string[]) => call<Found[]>("system_scan", { ids }),
   /** Deletes what the preview said, re-checking every file against the guard. */
   systemClean: (ids: string[]) => call<Swept[]>("system_clean", { ids }),
+  /** The heaviest processes right now. Coucou and the system's own are left out. */
+  systemProcesses: () => call<ProcInfo[]>("system_processes"),
+  /** Ends one. Refused in Rust, not only hidden here, for anything protected. */
+  systemKillProcess: (pid: number) => callOrThrow<void>("system_kill_process", { pid }),
+  /** Windows' own Disk Cleanup. False on Linux, or if it would not start. */
+  systemOpenDiskCleanup: () => call<boolean>("system_open_disk_cleanup"),
   /** Where the chat runs with nothing attached, and whether it is still there. */
   chatFolderState: () => call<FolderState>("chat_folder_state"),
   /** Chooses that folder. Null when the user cancelled the picker. */
@@ -176,6 +182,15 @@ export interface Stats {
   drives: Drive[];
   memoryUsed: number;
   memoryTotal: number;
+  /** Whether "Open Disk Cleanup" does anything on this machine. */
+  diskCleanupAvailable: boolean;
+}
+
+/** One running process, heaviest first in the list the tab is given. */
+export interface ProcInfo {
+  pid: number;
+  name: string;
+  memory: number;
 }
 
 /** What one cleanable thing holds, as the preview reports it. */

@@ -11,7 +11,7 @@
 
 import { h, clear } from "./dom";
 import { icon } from "./icons";
-import { Bridge, type Found, type Stats, type Swept } from "../core/bridge";
+import { Bridge, type Found, type ProcInfo, type Stats, type Swept } from "../core/bridge";
 
 /** How often the numbers refresh while the tab is open. */
 const POLL_MS = 3_000;
@@ -58,9 +58,20 @@ function meter(used: number, total: number): HTMLElement {
 
 export function buildSystem() {
   const stats = h("div", { class: "sys-stats" });
+  const cleanup = h("div", { class: "sys-cleanup" });
+  const procs = h("div", { class: "sys-procs" });
   const list = h("div", { class: "sys-list" });
   const actions = h("div", { class: "sys-actions" });
   const result = h("div", { class: "sys-result" });
+
+  const diskCleanupBtn = h("button", { class: "sys-btn quiet", text: "Open Windows Disk Cleanup" });
+  cleanup.append(diskCleanupBtn);
+  diskCleanupBtn.addEventListener("click", async () => {
+    diskCleanupBtn.disabled = true;
+    const started = await Bridge.systemOpenDiskCleanup();
+    diskCleanupBtn.disabled = false;
+    if (!started) diskCleanupBtn.textContent = "Could not start it";
+  });
 
   const scanBtn = h("button", { class: "sys-btn", text: "Look for what can go" });
   const cleanBtn = h("button", { class: "sys-btn danger" });
@@ -70,7 +81,11 @@ export function buildSystem() {
   const el = h(
     "div",
     { class: "view" },
-    h("div", { class: "card wash sys-card" }, h("div", { class: "sys-body" }, stats, list, actions, result)),
+    h(
+      "div",
+      { class: "card wash sys-card" },
+      h("div", { class: "sys-body" }, stats, cleanup, procs, list, actions, result),
+    ),
   );
 
   /** What the last scan found. Empty until the first scan. */
@@ -79,6 +94,9 @@ export function buildSystem() {
   const chosen = new Set(TARGETS);
   let timer: number | null = null;
   let shown = "";
+  let shownProcs = "";
+  /** The pid waiting on a second click, if any. Never more than one at once. */
+  let endPid: number | null = null;
 
   function drawStats(s: Stats) {
     const key = JSON.stringify(s);
@@ -113,6 +131,57 @@ export function buildSystem() {
           }),
         ),
       );
+    }
+    cleanup.style.display = s.diskCleanupAvailable ? "" : "none";
+  }
+
+  /** The heaviest processes, each with a button that asks before it ends one. */
+  function drawProcs(list: ProcInfo[]) {
+    const key = JSON.stringify(list) + endPid;
+    if (key === shownProcs) return;
+    shownProcs = key;
+
+    clear(procs);
+    if (list.length === 0) return;
+    procs.append(h("div", { class: "sys-procs-title", text: "using the most memory" }));
+
+    for (const p of list) {
+      const row = h(
+        "div",
+        { class: "sys-proc" },
+        h("span", { class: "sys-proc-name", text: p.name }),
+        h("span", { class: "sys-proc-mem", text: size(p.memory) }),
+      );
+
+      if (endPid === p.pid) {
+        const yes = h("button", { class: "sys-proc-yes", text: "End it" });
+        const no = h("button", { class: "sys-proc-no", text: "Never mind" });
+        yes.addEventListener("click", async () => {
+          yes.disabled = true;
+          try {
+            await Bridge.systemKillProcess(p.pid);
+            clear(result);
+          } catch (err) {
+            result.textContent = String(err);
+          }
+          endPid = null;
+          void refreshProcs();
+        });
+        no.addEventListener("click", () => {
+          endPid = null;
+          drawProcs(list);
+        });
+        row.append(h("span", { class: "sys-proc-confirm" }, yes, no));
+      } else {
+        const end = h("button", { class: "sys-proc-end", title: `End ${p.name}` });
+        end.append(icon("xmark", { size: 10 }));
+        end.addEventListener("click", () => {
+          endPid = p.pid;
+          drawProcs(list);
+        });
+        row.append(end);
+      }
+      procs.append(row);
     }
   }
 
@@ -208,6 +277,12 @@ export function buildSystem() {
   async function refresh() {
     const s = await Bridge.systemStats();
     if (s) drawStats(s);
+    void refreshProcs();
+  }
+
+  async function refreshProcs() {
+    const list = await Bridge.systemProcesses();
+    if (list) drawProcs(list);
   }
 
   drawList();

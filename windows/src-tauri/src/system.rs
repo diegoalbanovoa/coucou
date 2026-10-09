@@ -50,6 +50,10 @@ pub struct Stats {
     pub drives: Vec<Drive>,
     pub memory_used: u64,
     pub memory_total: u64,
+    /// Whether the tab's "Open Disk Cleanup" button does anything on this
+    /// machine. Windows only — there is no one-click equivalent to offer on
+    /// Linux across distributions.
+    pub disk_cleanup_available: bool,
 }
 
 pub fn stats() -> Stats {
@@ -58,7 +62,13 @@ pub fn stats() -> Stats {
         .into_iter()
         .map(|d| Drive { name: d.name, free: d.free, total: d.total })
         .collect();
-    Stats { drives, memory_used, memory_total }
+    Stats { drives, memory_used, memory_total, disk_cleanup_available: cfg!(windows) }
+}
+
+/// Opens Windows' own Disk Cleanup. `false` on Linux, or if it could not be
+/// started.
+pub fn open_disk_cleanup() -> bool {
+    platform::open_disk_cleanup()
 }
 
 // ── What may be cleaned ──────────────────────────────────────────────────────
@@ -348,6 +358,91 @@ pub fn clean(ids: &[String]) -> Vec<Swept> {
     out
 }
 
+// ── Processes ─────────────────────────────────────────────────────────────────
+//
+// Memory "cleaning" is not a real thing an application can do to a machine —
+// the only honest way to help with memory pressure is to show what is using
+// it and let the user end one, with the same care the file broom uses: never
+// the process asking, and never one the operating system needs to keep
+// running. The names below are deliberately broad rather than exhaustive —
+// a name this list does not recognise is not thereby safe to end, so the
+// guard also refuses anything that looks like a Windows session process by
+// where it would have to run, not only by matching a list.
+
+/// Lower-cased executable names `kill_process` refuses, whatever account asks.
+/// Not a claim that nothing else matters — it is the floor the list and the
+/// self-pid check both sit above.
+const PROTECTED_NAMES: &[&str] = &[
+    "system",
+    "system idle process",
+    "registry",
+    "smss.exe",
+    "csrss.exe",
+    "wininit.exe",
+    "winlogon.exe",
+    "services.exe",
+    "lsass.exe",
+    "svchost.exe",
+    "dwm.exe",
+    "fontdrvhost.exe",
+    "memory compression",
+    "explorer.exe",
+    "coucou.exe",
+    "coucou",
+    "systemd",
+    "init",
+];
+
+/// One running process, as the System tab lists it.
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct ProcInfo {
+    pub pid: u32,
+    pub name: String,
+    pub memory: u64,
+}
+
+fn protected(pid: u32, name: &str) -> bool {
+    pid == std::process::id() || PROTECTED_NAMES.contains(&name.to_lowercase().as_str())
+}
+
+/// The processes using the most memory, heaviest first — Coucou itself and
+/// anything on the protected list left out entirely, so there is nothing in
+/// the list `kill_process` would refuse anyway.
+pub fn top_processes(limit: usize) -> Vec<ProcInfo> {
+    let mut procs: Vec<ProcInfo> = platform::processes()
+        .into_iter()
+        .filter(|(pid, name, _)| !protected(*pid, name))
+        .map(|(pid, name, memory)| ProcInfo { pid, name, memory })
+        .collect();
+    procs.sort_by_key(|p| std::cmp::Reverse(p.memory));
+    procs.truncate(limit);
+    procs
+}
+
+/// Ends one process. Refuses anything on the protected list or Coucou's own
+/// pid even if the caller somehow asked for it — the list shown to the user
+/// already leaves these out, but the refusal lives here, not in the
+/// interface, the same way the file broom's guard does.
+pub fn kill_process(pid: u32) -> Result<(), String> {
+    let name = platform::processes()
+        .into_iter()
+        .find(|(p, _, _)| *p == pid)
+        .map(|(_, name, _)| name)
+        .ok_or_else(|| "that process is no longer running".to_string())?;
+
+    if protected(pid, &name) {
+        return Err(format!("{name} is not something Coucou will end"));
+    }
+
+    if platform::kill_process(pid) {
+        crate::log::line(format!("ended process {pid} ({name})"));
+        Ok(())
+    } else {
+        Err(format!("could not end {name}"))
+    }
+}
+
 fn platform_path(path: &Path) -> String {
     crate::agent::display_path(path)
 }
@@ -466,5 +561,50 @@ mod tests {
         assert!(target("c-drive").is_none());
         assert!(scan(&["c-drive".into()]).is_empty());
         assert!(clean(&["c-drive".into()]).is_empty());
+    }
+
+    #[test]
+    fn the_protected_list_is_already_lower_case() {
+        // `protected` lower-cases what it is given, not what is on the list —
+        // a name here with a capital in it would never match.
+        for name in PROTECTED_NAMES {
+            assert_eq!(*name, name.to_lowercase(), "{name} belongs in lower case");
+        }
+    }
+
+    #[test]
+    fn coucou_can_never_end_itself() {
+        assert!(protected(std::process::id(), "something-else.exe"), "its own pid is enough");
+        assert!(protected(999_999, "coucou.exe"), "and so is its own name");
+        assert!(protected(999_999, "COUCOU.EXE"), "whatever case it is reported in");
+    }
+
+    #[test]
+    fn a_name_the_system_needs_is_refused_by_name_alone() {
+        for name in ["lsass.exe", "wininit.exe", "systemd", "SYSTEM"] {
+            assert!(protected(123_456, name), "{name} should be refused");
+        }
+        assert!(!protected(123_456, "chrome.exe"), "an ordinary app is not");
+    }
+
+    #[test]
+    fn killing_a_protected_name_is_refused_before_the_platform_is_asked() {
+        // No real process has this pid, so a call that reaches `platform::kill_process`
+        // would fail for a different reason than the one this test checks for.
+        let err = kill_process(std::process::id()).unwrap_err();
+        assert!(err.contains("not something Coucou will end"), "{err}");
+    }
+
+    #[test]
+    fn the_top_processes_list_is_sorted_heaviest_first() {
+        let list = top_processes(5);
+        for pair in list.windows(2) {
+            assert!(pair[0].memory >= pair[1].memory, "not sorted: {:?} then {:?}", pair[0].memory, pair[1].memory);
+        }
+        assert!(list.len() <= 5, "the limit is honoured");
+        assert!(
+            list.iter().all(|p| !protected(p.pid, &p.name)),
+            "nothing protected is ever offered"
+        );
     }
 }

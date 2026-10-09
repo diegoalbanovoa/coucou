@@ -462,6 +462,93 @@ pub fn recycle_bin_size() -> Option<(u64, u64)> {
     Some((info.i64NumItems as u64, info.i64Size as u64))
 }
 
+// ── Processes ─────────────────────────────────────────────────────────────────
+//
+// What the System tab needs is not a full process manager: it is "what is
+// using the memory", which means a name and a working-set size per process,
+// and a way to end one the user picked. Both are read through a Toolhelp
+// snapshot rather than the newer `sysinfo`-style APIs, for the same reason
+// the drive and memory readers above call Win32 directly: one more crate
+// trades a known, small surface for one this file does not control.
+
+/// Every running process, as (pid, executable name, working-set bytes).
+///
+/// The memory figure is best-effort: a process this account cannot query —
+/// another user's, or one elevated above it — is still listed, with `0`
+/// rather than being dropped, so the list is not quietly missing the very
+/// processes most likely to be using the memory.
+pub fn processes() -> Vec<(u32, String, u64)> {
+    use ::windows::Win32::System::Diagnostics::ToolHelp::{
+        CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W,
+        TH32CS_SNAPPROCESS,
+    };
+    use ::windows::Win32::System::ProcessStatus::{GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS};
+    use ::windows::Win32::System::Threading::{
+        OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_VM_READ,
+    };
+
+    let Ok(snapshot) = (unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) }) else {
+        return Vec::new();
+    };
+
+    let mut entry =
+        PROCESSENTRY32W { dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32, ..Default::default() };
+    let mut out = Vec::new();
+
+    if unsafe { Process32FirstW(snapshot, &mut entry) }.is_ok() {
+        loop {
+            let end = entry.szExeFile.iter().position(|&c| c == 0).unwrap_or(entry.szExeFile.len());
+            let name = String::from_utf16_lossy(&entry.szExeFile[..end]);
+            let pid = entry.th32ProcessID;
+
+            if pid != 0 {
+                let memory = unsafe {
+                    OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_VM_READ, false, pid)
+                }
+                .map(|handle| {
+                    let mut counters = PROCESS_MEMORY_COUNTERS {
+                        cb: std::mem::size_of::<PROCESS_MEMORY_COUNTERS>() as u32,
+                        ..Default::default()
+                    };
+                    let got =
+                        unsafe { GetProcessMemoryInfo(handle, &mut counters, counters.cb) };
+                    unsafe { let _ = CloseHandle(handle); }
+                    if got.is_ok() { counters.WorkingSetSize as u64 } else { 0 }
+                })
+                .unwrap_or(0);
+                out.push((pid, name, memory));
+            }
+
+            if unsafe { Process32NextW(snapshot, &mut entry) }.is_err() {
+                break;
+            }
+        }
+    }
+    unsafe { let _ = CloseHandle(snapshot); }
+    out
+}
+
+/// Ends one process. `false` when it could not be opened for termination —
+/// most often because it belongs to another account or is elevated above
+/// this one, which this function treats as "no" rather than trying harder.
+pub fn kill_process(pid: u32) -> bool {
+    use ::windows::Win32::System::Threading::{OpenProcess, TerminateProcess, PROCESS_TERMINATE};
+
+    let Ok(handle) = (unsafe { OpenProcess(PROCESS_TERMINATE, false, pid) }) else { return false };
+    let ok = unsafe { TerminateProcess(handle, 1) }.is_ok();
+    unsafe { let _ = CloseHandle(handle); }
+    ok
+}
+
+/// Hands off to Windows' own Disk Cleanup rather than reimplementing it — the
+/// one path in the System tab that needs administrator rights for some of
+/// what it offers, which Coucou itself never asks for.
+pub fn open_disk_cleanup() -> bool {
+    let mut cmd = Command::new("cleanmgr.exe");
+    no_console(&mut cmd);
+    cmd.spawn().is_ok()
+}
+
 /// Empties it, with no confirmation of its own — the island already asked.
 pub fn empty_recycle_bin() -> bool {
     use ::windows::core::PCWSTR;

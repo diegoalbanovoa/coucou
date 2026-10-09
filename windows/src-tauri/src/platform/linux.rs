@@ -469,3 +469,51 @@ pub fn recycle_bin_size() -> Option<(u64, u64)> {
 pub fn empty_recycle_bin() -> bool {
     false
 }
+
+// ── Processes ─────────────────────────────────────────────────────────────────
+
+/// Every running process, as (pid, command name, resident set bytes), read
+/// straight from `/proc` rather than through a crate: the two files this
+/// needs are already the ones `memory()` above reads the same way.
+pub fn processes() -> Vec<(u32, String, u64)> {
+    let Ok(entries) = std::fs::read_dir("/proc") else { return Vec::new() };
+    let mut out = Vec::new();
+
+    for entry in entries.flatten() {
+        let Some(pid) = entry.file_name().to_str().and_then(|s| s.parse::<u32>().ok()) else {
+            continue;
+        };
+        let dir = entry.path();
+        let name = std::fs::read_to_string(dir.join("comm"))
+            .map(|s| s.trim().to_string())
+            .unwrap_or_default();
+        if name.is_empty() {
+            continue;
+        }
+        let rss = std::fs::read_to_string(dir.join("status"))
+            .ok()
+            .and_then(|status| {
+                status
+                    .lines()
+                    .find(|l| l.starts_with("VmRSS:"))
+                    .and_then(|l| l.split_whitespace().nth(1))
+                    .and_then(|kb| kb.parse::<u64>().ok())
+            })
+            .map(|kb| kb * 1024)
+            .unwrap_or(0);
+        out.push((pid, name, rss));
+    }
+    out
+}
+
+/// Ends one process with `SIGTERM`. `false` when it could not be signalled —
+/// most often because it belongs to another user.
+pub fn kill_process(pid: u32) -> bool {
+    unsafe { libc::kill(pid as libc::pid_t, libc::SIGTERM) == 0 }
+}
+
+/// There is no one-click Linux equivalent across distributions, so the tab
+/// does not offer one here — see the Windows platform file for the one it does.
+pub fn open_disk_cleanup() -> bool {
+    false
+}

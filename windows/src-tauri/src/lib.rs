@@ -582,6 +582,30 @@ fn system_clean(ids: Vec<String>) -> Vec<system::Swept> {
     system::clean(&ids)
 }
 
+/// The processes using the most memory right now. Coucou itself and anything
+/// the system needs are left out entirely — there is nothing in this list
+/// `system_kill_process` would refuse anyway.
+#[tauri::command]
+fn system_processes() -> Vec<system::ProcInfo> {
+    system::top_processes(8)
+}
+
+/// Ends one process. Refused in Rust, not only hidden in the interface, if it
+/// turns out to be Coucou itself or something the system needs — the pid a
+/// click sends is trusted no further than that.
+#[tauri::command]
+fn system_kill_process(pid: u32) -> Result<(), String> {
+    system::kill_process(pid)
+}
+
+/// Hands off to Windows' own Disk Cleanup. `false` on Linux, or if it could
+/// not be started — the tab's button says so rather than pretending to have
+/// done something.
+#[tauri::command]
+fn system_open_disk_cleanup() -> bool {
+    system::open_disk_cleanup()
+}
+
 // ── The knowledge base ────────────────────────────────────────────────────────
 
 /// The Obsidian vault the agent may read and write, and where it came from.
@@ -824,6 +848,9 @@ pub fn run() {
             system_stats,
             system_scan,
             system_clean,
+            system_processes,
+            system_kill_process,
+            system_open_disk_cleanup,
             chat_load,
             chat_keep,
             chat_forget,

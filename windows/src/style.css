@@ -987,6 +987,11 @@ input[type="range"]::-webkit-slider-thumb {
   text-align: right;
 }
 
+/* Windows only — hidden outright on Linux rather than shown disabled. */
+.sys-cleanup {
+  display: flex;
+}
+
 /*
  * The meter. Its colour is the warning and not decoration: green while there
  * is room, amber past three quarters, red past nine tenths.
@@ -1013,6 +1018,100 @@ input[type="range"]::-webkit-slider-thumb {
 
 .meter.tight i {
   background: var(--red);
+}
+
+.sys-procs {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.sys-procs-title {
+  font: 400 10px var(--font);
+  color: var(--dim-4);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 2px 8px;
+}
+
+.sys-proc {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 8px;
+  border-radius: 8px;
+  color: var(--dim-3);
+}
+
+.sys-proc-name {
+  font: 400 11px var(--font);
+  color: var(--ink-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.sys-proc-mem {
+  font: 400 10.5px var(--font);
+  font-variant-numeric: tabular-nums;
+  color: var(--dim-3);
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+
+.sys-proc-end {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  flex: 0 0 18px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--dim-3);
+  cursor: pointer;
+}
+
+.sys-proc-end:hover {
+  background: var(--red);
+  color: #fff;
+}
+
+.sys-proc-confirm {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+}
+
+.sys-proc-yes,
+.sys-proc-no {
+  border: 0;
+  border-radius: 6px;
+  padding: 3px 8px;
+  font: 500 10.5px var(--font);
+  cursor: pointer;
+}
+
+.sys-proc-yes {
+  background: var(--red);
+  color: #fff;
+}
+
+.sys-proc-yes:hover {
+  background: #ff6572;
+}
+
+.sys-proc-no {
+  background: none;
+  color: var(--dim-3);
+}
+
+.sys-proc-no:hover {
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--ink-2);
 }
 
 .sys-list {
