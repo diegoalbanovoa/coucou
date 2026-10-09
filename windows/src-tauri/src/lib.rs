@@ -138,12 +138,19 @@ fn shared_settings(app: &AppHandle) -> Settings {
 /// app whose whole job is to be there when something needs answering cannot
 /// depend on the user having toggled a switch once.
 fn reconcile_autostart(app: &AppHandle, wanted: bool) {
-    // A debug build runs out of target/debug and takes its page from the Vite
-    // dev server, so a login entry pointing at it would start something that
-    // cannot draw — and would break the moment the tree is cleaned. The
-    // preference is left alone; it applies to the build that ships.
-    if cfg!(debug_assertions) {
-        log::line(format!("autostart left alone: a debug build must not own it (want {wanted})"));
+    // Nothing running out of the build tree may own the login entry. A debug
+    // build takes its page from the Vite dev server, so it would start
+    // something that cannot draw; a release build run from target/release is a
+    // real app but at a path `cargo clean` deletes. Either way the entry would
+    // outlive what it points at. The preference is left alone — it applies to
+    // the build that ships, from where the installer puts it.
+    let from_build_tree = std::env::current_exe()
+        .map(|exe| exe.components().any(|part| part.as_os_str() == "target"))
+        .unwrap_or(false);
+    if cfg!(debug_assertions) || from_build_tree {
+        log::line(format!(
+            "autostart left alone: a build-tree copy must not own it (want {wanted})"
+        ));
         return;
     }
 
