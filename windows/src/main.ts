@@ -6,6 +6,7 @@ import { Sound } from "./core/sound";
 import { State, type Settings } from "./core/state";
 import { Island } from "./island/island";
 import { loadAgentEnvironment, registerAgentHandlers } from "./island/agent";
+import { rescanOnFocus } from "./views/consoles";
 import { registerHookHandlers } from "./island/hooks";
 import { registerIntegrationHandlers, refreshConfigured } from "./island/integrations";
 
@@ -70,6 +71,11 @@ async function main() {
   // Which CLIs exist and what `/` can reach. Not awaited: the island should
   // come up at once, and the chat header fills in a moment later.
   void loadAgentEnvironment();
+
+  // Installing a CLI should show up without a restart, and the cheapest moment
+  // to notice is when the window comes back. `rescanOnFocus` throttles it,
+  // because focus fires every time the island is hovered.
+  window.addEventListener("focus", () => rescanOnFocus());
 
   island.launch();
 

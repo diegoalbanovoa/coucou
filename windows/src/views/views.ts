@@ -9,7 +9,7 @@ import { State, type AgentTask } from "../core/state";
 import { washRGBA, type IslandViewName, type Wash } from "../core/layout";
 import { createMiniBot, pruneMiniBots } from "../mochi/minibots";
 import { buildPrompt } from "./chat";
-import { availableClis, chooseProvider } from "../island/agent";
+import { buildConsolePanel } from "./consoles";
 import { buildChoose, buildUpload, buildUploading } from "./upload";
 import { renderIntegrationCard, type IntegrationCardHooks } from "./integrations";
 
@@ -135,7 +135,12 @@ function buildOverview(actions: ViewActions): ViewHost {
   );
   const left = card(null, leftBody, jump);
   const pills = h("div", { class: "pills" });
-  const right = card(null, pills);
+  // The right card was the integration pills and nothing else, so with no
+  // integration keys configured it was an empty half of the island. The
+  // consoles go there when there are no pills to show — without taking the
+  // pills away from anyone who does configure them.
+  const consoles = buildConsolePanel();
+  const right = card(null, pills, consoles.el);
 
   const el = h("div", { class: "view overview" },
     h("div", { class: "left" }, left),
@@ -235,6 +240,10 @@ function buildOverview(actions: ViewActions): ViewHost {
         for (const t of others) pills.append(buildPill(t, actions));
         pruneMiniBots();
       }
+      const anyPills = others.length > 0;
+      pills.style.display = anyPills ? "" : "none";
+      consoles.el.style.display = anyPills ? "none" : "";
+      if (!anyPills) consoles.sync();
     },
   };
 }
@@ -297,65 +306,20 @@ function lighten(hex: string, amount: number): string {
  * agents are the useful thing to show — which ones this machine has, which one
  * the chat will run, and where each was found.
  */
+/**
+ * The start screen: the consoles this machine has.
+ *
+ * The same panel the overview's right card shows, so there is one list to get
+ * right instead of two that drift apart. Picking one here goes straight to the
+ * chat, which is what someone on this screen was reaching for.
+ */
 function buildEmpty(actions: ViewActions): ViewHost {
-  const title = h("div", { class: "title" });
-  const sub = h("div", { class: "sub" });
-  const list = h("div", { class: "agent-list" });
-  const body = h(
-    "div",
-    { class: "stack", style: "padding:0 16px 0 104px;gap:6px" },
-    h("div", { style: "display:flex;align-items:baseline;gap:8px" }, title, h("div", { class: "grow" }), sub),
-    list,
-  );
-
-  let key = "";
+  const panel = buildConsolePanel({ onPick: () => actions.setView("prompt") });
+  const body = h("div", { class: "stack", style: "padding:0 16px 0 104px" }, panel.el);
   return {
     el: h("div", { class: "view" }, card(null, body)),
-    sync() {
-      const clis = availableClis;
-      const current = State.agentCli;
-      const shape = `${clis.map((c) => `${c.id}:${c.version}`).join("|")}~${current}`;
-      if (shape === key) return;
-      key = shape;
-
-      title.textContent = clis.length > 0 ? "Agents on this machine" : "No agent CLI found";
-      sub.textContent =
-        clis.length > 0
-          ? "click one to use it"
-          : "install Claude Code, Gemini, Codex…";
-      clear(list);
-
-      if (clis.length === 0) {
-        list.append(
-          h("div", {
-            class: "agent-empty",
-            text: "Coucou looks on PATH and in the folders npm, nvm, Volta, Bun, pnpm and the vendors' own installers use.",
-          }),
-        );
-        return;
-      }
-
-      for (const cli of clis) {
-        const on = cli.id === current;
-        const row = h(
-          "button",
-          { class: on ? "agent-row on" : "agent-row", title: cli.path },
-          dot(on ? "#22C55E" : "#5a5f69", 6),
-          h("span", { class: "agent-name", text: cli.label }),
-          h("span", { class: "agent-version", text: cli.version }),
-          h("div", { class: "grow" }),
-          h("span", {
-            class: "agent-tag",
-            text: cli.streams ? "streams · resumes" : "one shot",
-          }),
-        );
-        row.addEventListener("click", () => {
-          chooseProvider(cli.id);
-          actions.setView("prompt");
-        });
-        list.append(row);
-      }
-    },
+    sync: () => panel.sync(),
+    focus: () => panel.focus(),
   };
 }
 

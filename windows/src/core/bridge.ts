@@ -85,7 +85,7 @@ export const Bridge = {
 
   // ── Agent chat: the CLIs installed on this machine ────────────────────────
   /** Which agent CLIs are installed. Empty means API-only chat. */
-  agentClis: () => call<CliInfo[]>("agent_clis"),
+  agentClis: () => call<Console[]>("agent_clis"),
   /** What the chat comes up in: the project and CLI from the last run. */
   agentState: () => call<AgentState>("agent_state"),
   /** Remembers which CLI the chat runs. Null means none chosen yet. */
@@ -170,16 +170,29 @@ export interface VaultInfo {
   known: number;
 }
 
-/** An agent CLI found on this machine. */
-export interface CliInfo {
+/** What a console can do. Three separate claims, not one. */
+export interface Capabilities {
+  /** Its reply can be read as it is written. */
+  streaming: boolean;
+  /** A second message carries on the same conversation. */
+  resume: boolean;
+  /** Its tool calls reach the island, so they can be approved there. */
+  approvable: boolean;
+}
+
+/** One agent console installed on this machine. */
+export interface Console {
   id: string;
   label: string;
   /** Where it was found — which copy is being run is worth knowing. */
   path: string;
   /** What it answered to `--version`, or "" when it did not answer. */
   version: string;
-  /** Whether its reply streams and its conversation can be resumed. */
-  streams: boolean;
+  /** The colour its Mochi wears in the picker. */
+  color: string;
+  can: Capabilities;
+  /** Whether it has ever been run from Coucou, or only read about. */
+  verified: boolean;
   /** Its config file — extra flags, turn timeout, extra folders. */
   configPath: string;
 }

@@ -2,6 +2,7 @@
 
 mod agent;
 mod agents;
+mod consoles;
 mod files;
 mod hooks;
 mod integrations;
@@ -357,20 +358,20 @@ fn approval_decline(app: AppHandle, request_id: String) {
 /// Which agent CLIs are on this machine. The island shows these in the picker
 /// above the chat box, next to the API models.
 #[tauri::command]
-fn agent_clis(app: AppHandle) -> Vec<agent::CliInfo> {
+fn agent_clis(app: AppHandle) -> Vec<consoles::Console> {
     // Now is when Coucou knows where each CLI is, so now is when each one's
     // config file is written or brought up to date.
-    agent::map_configs();
+    consoles::map_configs();
     // The versions are filled in behind this and sent on when they land: a
     // CLI installed as an npm shim can take seconds to answer `--version`, and
     // the start screen lists the agents before any of them has spoken.
     let handle = app.clone();
     tauri::async_runtime::spawn(async move {
-        if let Some(full) = agent::versions().await {
+        if let Some(full) = consoles::versions().await {
             let _ = handle.emit("agent-clis", full);
         }
     });
-    agent::installed()
+    consoles::installed()
 }
 
 /// What the chat should come up in: the project and CLI that were in use when

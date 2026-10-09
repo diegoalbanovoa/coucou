@@ -7,12 +7,12 @@
 // Coucou spawns runs the same hooks any terminal session does. See agent.rs.
 
 import { Bridge, onEvent } from "../core/bridge";
-import type { CliInfo, KeptMessage, SlashCommand } from "../core/bridge";
+import type { Console, KeptMessage, SlashCommand } from "../core/bridge";
 import { State } from "../core/state";
 import type { Island } from "./island";
 
 /** CLIs found on this machine, loaded once at boot. */
-export let availableClis: CliInfo[] = [];
+export let availableClis: Console[] = [];
 
 /** `/` targets for the current project. Refreshed whenever one is attached. */
 export let slashCommands: SlashCommand[] = [];
@@ -25,7 +25,7 @@ export function registerAgentHandlers(host: Island) {
 
   // The versions are not known when the list first arrives — asking a CLI
   // costs a process start — so Rust sends the finished list on afterwards.
-  void onEvent<CliInfo[]>("agent-clis", (clis) => {
+  void onEvent<Console[]>("agent-clis", (clis) => {
     availableClis = clis;
     State.notify();
   });
@@ -95,6 +95,24 @@ export function startFreshConversation() {
   State.chatDraft = "";
   State.chatSteps = [];
   void Bridge.chatForget();
+  State.notify();
+}
+
+/**
+ * Looks for consoles again.
+ *
+ * The same command the boot path calls: it re-reads PATH and the install
+ * folders on every call by design, so installing a CLI shows up without a
+ * restart. Versions still arrive afterwards on `agent-clis`.
+ */
+export async function reloadConsoles() {
+  const found = (await Bridge.agentClis()) ?? [];
+  availableClis = found;
+  // A CLI that was uninstalled must not stay the chat's choice.
+  if (State.agentCli && !found.some((c) => c.id === State.agentCli)) {
+    chooseProvider(found.length > 0 ? found[0].id : null);
+    return;
+  }
   State.notify();
 }
 

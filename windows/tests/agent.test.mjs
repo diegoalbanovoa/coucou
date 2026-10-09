@@ -9,14 +9,31 @@ import {
   loadAgentEnvironment,
   nextProvider,
   registerAgentHandlers,
+  reloadConsoles,
   startFreshConversation,
 } from "../src/island/agent.ts";
 import { State } from "../src/core/state.ts";
 
-const CLAUDE =
-  { id: "claude", label: "Claude Code", path: "C:/bin/claude.exe", version: "2.0.1", streams: true };
-const GEMINI =
-  { id: "gemini", label: "Gemini CLI", path: "C:/bin/gemini.cmd", version: "0.4.2", streams: false };
+const CLAUDE = {
+  id: "claude",
+  label: "Claude Code",
+  path: "C:/bin/claude.exe",
+  version: "2.0.1",
+  color: "#F5F6F8",
+  can: { streaming: true, resume: true, approvable: true },
+  verified: true,
+  configPath: "C:/cfg/agents/claude.json",
+};
+const GEMINI = {
+  id: "gemini",
+  label: "Gemini CLI",
+  path: "C:/bin/gemini.cmd",
+  version: "0.4.2",
+  color: "#4285F4",
+  can: { streaming: false, resume: false, approvable: false },
+  verified: true,
+  configPath: "C:/cfg/agents/gemini.json",
+};
 
 /** What Rust answers: the CLIs it found, and the state it restored. */
 function machine({ clis = [CLAUDE, GEMINI], project = null, cli = null } = {}) {
@@ -201,4 +218,47 @@ test("a turn that fell back to the default folder tells the chip where it ran", 
   // And `/` is asked about again, or it would still offer the old project's
   // commands — or none at all.
   assert.equal(sent("agent_commands").length, 1);
+});
+
+// ── Looking again ───────────────────────────────────────────────────────────
+//
+// The console panel re-scans when the window comes back, so what matters is
+// what happens to a choice that is no longer installed.
+
+test("a re-scan picks up a console that was just installed", async () => {
+  machine({ clis: [CLAUDE], cli: "claude" });
+  await loadAgentEnvironment();
+
+  replies.set("agent_clis", [CLAUDE, GEMINI]);
+  await reloadConsoles();
+
+  // The new one is reachable now, and the choice did not move on its own.
+  assert.equal(State.agentCli, "claude");
+  nextProvider();
+  assert.equal(State.agentCli, "gemini");
+});
+
+test("a re-scan moves off a console that was uninstalled", async () => {
+  machine({ clis: [CLAUDE, GEMINI], cli: "gemini" });
+  await loadAgentEnvironment();
+  assert.equal(State.agentCli, "gemini");
+  calls.length = 0;
+
+  replies.set("agent_clis", [CLAUDE]);
+  await reloadConsoles();
+
+  assert.equal(State.agentCli, "claude", "the chat cannot stay on a CLI that is gone");
+  assert.deepEqual(sent("agent_set_cli"), [{ cli: "claude" }], "and the choice is remembered");
+});
+
+test("a re-scan that finds nothing leaves the chat with no console", async () => {
+  machine({ clis: [CLAUDE], cli: "claude" });
+  await loadAgentEnvironment();
+  calls.length = 0;
+
+  replies.set("agent_clis", []);
+  await reloadConsoles();
+
+  assert.equal(State.agentCli, null);
+  assert.deepEqual(sent("agent_set_cli"), [{ cli: null }]);
 });
