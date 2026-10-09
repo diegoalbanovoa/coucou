@@ -42,7 +42,7 @@ function sharedSounds(): Plugin {
   };
 }
 
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
   plugins: [sharedSounds()],
   clearScreen: false,
   server: {
@@ -52,6 +52,15 @@ export default defineConfig({
     watch: { ignored: ["**/target/**", "**/src-tauri/**"] },
   },
   envPrefix: ["VITE_", "TAURI_ENV_"],
+  // `--mode mock` (see the `dev:mock` script) points every `core/bridge`
+  // import at `src/dev/mock-bridge.ts` instead, so the whole app runs against
+  // fixtures with none of its own files aware mock mode exists. The regex
+  // matches the specifier regardless of how many `../` precede it; it must
+  // NOT also match `mock-bridge.ts`'s own imports, which is why that file
+  // never imports "../core/bridge" — see the comment at its top.
+  resolve: mode === "mock"
+    ? { alias: [{ find: /^(\.\.?\/)+core\/bridge$/, replacement: resolve(__dirname, "src/dev/mock-bridge.ts") }] }
+    : undefined,
   build: {
     target: "chrome110",
     minify: "esbuild",
@@ -64,4 +73,4 @@ export default defineConfig({
       },
     },
   },
-});
+}));

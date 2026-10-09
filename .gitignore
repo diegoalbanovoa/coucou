@@ -16,8 +16,12 @@ DerivedData/
 # iCloud stubs
 *.icloud
 
-# Local only (never published)
-.claude/
+# Local only (never published) — except the design-reviewer subagent, which
+# codifies Coucou's own design system (plan-v2.md § 0.4) rather than anything
+# personal, and is meant to live in the repo like any other project tool.
+.claude/*
+!.claude/agents/
+!.claude/agents/coucou-design-reviewer.md
 _prive/
 
 # Folder-picker E2E (windows/tests/e2e): screenshots and Python caches
