@@ -4,9 +4,9 @@
 // same way a person would — hover the wake strip's visible pill to expand it,
 // click a header tab to switch view — and saves one PNG per combination in
 // the plan's table to `shots/`. Not every state in that table exists yet:
-// console-detail (Fase 3), chat search/drop/attachments/streaming (Fase 4/5),
-// settings "salud" (Fase 7) and the Mochi gallery (Fase 7) all have real UI to
-// reach only once those phases land. Until then this script takes the shot of
+// console-detail (Fase 3), chat search/streaming (Fase 4/5), and the Mochi
+// gallery (Fase 7, deferred — see docs/plan-v2-notas.md) all have real UI to
+// reach only once those land. Until then this script takes the shot of
 // whatever the view defaults to and prints a note instead of failing, so
 // "sin errores" stays true and the gaps stay visible rather than silent.
 //
@@ -65,7 +65,12 @@ const SHOTS = [
   shot({ view: "system", label: "cleanup", url: "?scenario=ok&state=cleanup" }),
   // ── settings (own window, own navigation) ────────────────────────────────
   shot({ view: "settings", label: "general", url: "", settings: true }),
-  shot({ view: "settings", label: "health", url: "", settings: true, ready: false }),
+  // Same URL as "general": the settings window is one scrolling page, not
+  // separate views per section, and the capture is already `fullPage` — so
+  // this and "general" are the same screenshot. Kept as its own named shot
+  // anyway, since a future section-specific capture (scrolled to anchor)
+  // would want the label already in place.
+  shot({ view: "settings", label: "health", url: "", settings: true }),
 ];
 
 const LANGS = ["en", "es"];

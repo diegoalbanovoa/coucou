@@ -8,6 +8,14 @@ export const SOUND_NAMES = [
   "work", "finish", "error", "approval", "question", "approve", "gulp", "tick",
   "send", "love", "pop", "proud", "wink", "yawn", "attach", "think", "search",
   "rate", "sleep",
+  // plan-v2.md § 7.5 — entering `sick`. No cough.wav exists yet: the 28 WAVs
+  // above are NotchBuddy/Resources/sounds/'s own hand-made assets, not
+  // something this file can author one more of on its own. `preload()`'s
+  // `catch` already treats a missing file as silence rather than an error,
+  // so `Sound.play("cough")` is wired up and safe to ship now — the day a
+  // real cough.wav lands in that folder, it starts playing with no code
+  // change needed here.
+  "cough",
 ] as const;
 
 export type SoundName = (typeof SOUND_NAMES)[number];

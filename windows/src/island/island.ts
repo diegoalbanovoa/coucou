@@ -298,6 +298,19 @@ export class Island {
     this.fsm.reveal();
   }
 
+  /** Drives Mochi's mood (plan-v2.md § 7.3/7.4) — the same engine draws the
+   *  island's own Mochi and the System tab's (see `botPosition`'s `system`
+   *  entry), so one call covers both. */
+  setHealthLevel(level: "ok" | "strained" | "sick") {
+    this.engine.setMood(level);
+  }
+
+  /** The hover tooltip over Mochi, read from `State.health` by whoever just
+   *  changed it — this only applies it to the actual canvas element. */
+  setHealthTooltip(text: string) {
+    this.botCanvas.title = text;
+  }
+
   /**
    * Hold the island open while something off-island waits on the user.
    *

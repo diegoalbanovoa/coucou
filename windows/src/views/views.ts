@@ -12,6 +12,7 @@ import { buildHomeRightCard } from "./consoles";
 import { buildSystem } from "./system";
 import { renderIntegrationCard, type IntegrationCardHooks } from "./integrations";
 import { t, getLocale } from "../i18n/index";
+import { healthTooltip } from "../island/health";
 
 export interface ViewActions {
   setView(v: IslandViewName): void;
@@ -93,7 +94,13 @@ function stack(padLeft: number, padRight: number, ...children: Node[]): HTMLElem
 export function buildHeader(actions: ViewActions): ViewHost {
   const tabHome = h("button", { class: "tab", onclick: () => go("overview") }, icon("house", { size: 13 }));
   const tabChat = h("button", { class: "tab", onclick: () => go("prompt") }, icon("bubble", { size: 13 }));
-  const tabSystem = h("button", { class: "tab", onclick: () => go("system") }, icon("disk", { size: 13 }));
+  const healthBadge = h("i", { class: "tab-health-badge" });
+  const tabSystem = h(
+    "button",
+    { class: "tab", onclick: () => go("system") },
+    icon("disk", { size: 13 }),
+    healthBadge,
+  );
 
   const gearBtn = h("button", { onclick: () => go("settings") }, icon("gear", { size: 14 }));
   const soundBtn = h("button", { onclick: () => actions.toggleSound() }, icon("speakerOn", { size: 14 }));
@@ -117,6 +124,21 @@ export function buildHeader(actions: ViewActions): ViewHost {
       tabHome.classList.toggle("on", v === "overview" || v === "empty");
       tabChat.classList.toggle("on", v === "prompt");
       tabSystem.classList.toggle("on", v === "system");
+      const health = State.health;
+      const healthLevel = health?.level ?? "ok";
+      healthBadge.classList.toggle("show", healthLevel !== "ok");
+      healthBadge.classList.toggle("sick", healthLevel === "sick");
+      // Colour is never the only signal this carries — a Narrador user (or
+      // anyone hovering before the tab is even open) gets the same words
+      // the tooltip over Mochi itself says once inside the tab.
+      if (health && healthLevel !== "ok") {
+        const label = healthTooltip(health);
+        healthBadge.setAttribute("aria-label", label);
+        healthBadge.title = label;
+      } else {
+        healthBadge.removeAttribute("aria-label");
+        healthBadge.title = "";
+      }
       gearBtn.classList.toggle("on", v === "settings");
       clear(gearBtn);
       gearBtn.append(icon("gear", { size: 14 }));

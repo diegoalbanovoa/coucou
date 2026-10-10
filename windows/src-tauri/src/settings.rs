@@ -45,6 +45,22 @@ pub struct Settings {
     /// `i18n/index.ts`-style union is where this value actually means
     /// something, not here.
     pub home_right_pane: String,
+
+    // ── Health (plan-v2.md § 7.2) — flattened with a `health_` prefix rather
+    // than a nested struct, to match every other field here; serde's own
+    // `camelCase` + `default` on the whole struct already gives old files
+    // these for free without a nested `#[serde(default)]` to remember too.
+    pub health_enabled: bool,
+    /// 50 to 95 — the load percent (max of CPU, memory) that, held for 10s,
+    /// takes Mochi from `ok` to `strained`. `sick`'s own threshold is never
+    /// configured directly; see health.rs's file note for why it is always
+    /// this plus 15.
+    pub health_threshold: f64,
+    pub health_include_disk: bool,
+    /// 70 to 98 — ignored unless `health_include_disk` is on.
+    pub health_disk_threshold: f64,
+    /// Whether worsening pops the collapsed island open for a few seconds.
+    pub health_notify: bool,
 }
 
 impl Default for Settings {
@@ -73,6 +89,11 @@ impl Default for Settings {
             default_chat_folder: None,
             language: "system".into(),
             home_right_pane: "consoles".into(),
+            health_enabled: true,
+            health_threshold: 70.0,
+            health_include_disk: false,
+            health_disk_threshold: 90.0,
+            health_notify: true,
         }
     }
 }
@@ -339,7 +360,12 @@ mod tests {
   "vaultPath": "C:/notes/vault",
   "defaultChatFolder": "C:/code",
   "language": "es",
-  "homeRightPane": "services"
+  "homeRightPane": "services",
+  "healthEnabled": false,
+  "healthThreshold": 60.0,
+  "healthIncludeDisk": true,
+  "healthDiskThreshold": 80.0,
+  "healthNotify": false
 }"#;
 
     fn custom() -> Value {
@@ -663,6 +689,11 @@ mod tests {
                 "defaultChatFolder",
                 "language",
                 "homeRightPane",
+                "healthEnabled",
+                "healthThreshold",
+                "healthIncludeDisk",
+                "healthDiskThreshold",
+                "healthNotify",
             ]
         );
         let _ = std::fs::remove_dir_all(&dir);

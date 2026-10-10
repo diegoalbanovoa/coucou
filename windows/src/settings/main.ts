@@ -6,7 +6,7 @@ import "./settings.css";
 import { Bridge, onEvent, type HookStatus } from "../core/bridge";
 import { DEFAULT_SETTINGS, type Settings } from "../core/state";
 import { h, clear } from "../views/dom";
-import { t, tn, setLocale, resolveLocale, type LocaleSetting } from "../i18n/index";
+import { t, tn, fmtPercent, setLocale, resolveLocale, type LocaleSetting } from "../i18n/index";
 import { segmented } from "../ui/segmented";
 
 let settings: Settings = { ...DEFAULT_SETTINGS };
@@ -536,6 +536,68 @@ function generalSection(): HTMLElement {
   );
 }
 
+// ── Team health section (plan-v2.md § 7.2) ──────────────────────────────────────
+
+function healthSection(): HTMLElement {
+  const threshold = h("input", {
+    type: "range", min: "50", max: "95", step: "5",
+    value: String(settings.healthThreshold),
+  }) as HTMLInputElement;
+  const thresholdValue = h("span", { class: "hint", text: fmtPercent(settings.healthThreshold) });
+  threshold.addEventListener("input", () => {
+    settings.healthThreshold = Number(threshold.value);
+    thresholdValue.textContent = fmtPercent(settings.healthThreshold);
+    void save();
+  });
+
+  const diskThreshold = h("input", {
+    type: "range", min: "70", max: "98", step: "2",
+    value: String(settings.healthDiskThreshold),
+  }) as HTMLInputElement;
+  const diskThresholdValue = h("span", { class: "hint", text: fmtPercent(settings.healthDiskThreshold) });
+  diskThreshold.addEventListener("input", () => {
+    settings.healthDiskThreshold = Number(diskThreshold.value);
+    diskThresholdValue.textContent = fmtPercent(settings.healthDiskThreshold);
+    void save();
+  });
+  const diskRow = h(
+    "div",
+    { class: "row", style: settings.healthIncludeDisk ? "" : "display:none" },
+    h("label", { text: t("settings.health.diskThreshold") }),
+    diskThreshold,
+    diskThresholdValue,
+  );
+
+  return h(
+    "section",
+    {},
+    h("h2", {}, h("span", { text: t("settings.health.title") })),
+    h("div", { class: "row" },
+      h("label", { text: t("settings.health.enabled") }),
+      toggle(settings.healthEnabled, (v) => { settings.healthEnabled = v; void save(); }),
+    ),
+    h("div", { class: "row" },
+      h("label", { text: t("settings.health.threshold") }),
+      threshold,
+      thresholdValue,
+    ),
+    h("div", { class: "row" },
+      h("label", { text: t("settings.health.includeDisk") }),
+      toggle(settings.healthIncludeDisk, (v) => {
+        settings.healthIncludeDisk = v;
+        diskRow.style.display = v ? "" : "none";
+        void save();
+      }),
+    ),
+    diskRow,
+    // `settings.healthNotify` itself already exists (plan-v2.md § 7.2) and
+    // defaults on, ready for the day the worsening banner (§ 7.3) is built —
+    // see docs/plan-v2-notas.md's Fase 7 section for why that banner was
+    // deferred. A toggle with no effect yet is worse than no toggle: this
+    // row returns the moment the banner does.
+  );
+}
+
 // ── Boot ──────────────────────────────────────────────────────────────────────
 
 /** Everything render() needs that is worth asking Rust for only once. */
@@ -551,6 +613,7 @@ function render() {
     chatFolderSection(),
     vaultSection(),
     generalSection(),
+    healthSection(),
     integrationsSection(secretsPresent),
     h("div", { class: "hint", text: t("settings.footer") }),
   );

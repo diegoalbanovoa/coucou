@@ -219,6 +219,7 @@ body {
 }
 
 .tab {
+  position: relative;
   width: 30px;
   height: 22px;
   display: grid;
@@ -228,6 +229,29 @@ body {
   border-radius: 11px;
   color: var(--dim-2);
   cursor: default;
+}
+
+/* The System tab's health dot (plan-v2.md § 7.3) — strained is orange, sick
+ * is red; color is never the mood's only signal (the tooltip and the tab's
+ * own headline carry the words), this is just the at-a-glance version. */
+.tab-health-badge {
+  display: none;
+  position: absolute;
+  top: 2px;
+  right: 3px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--c-orange);
+  box-shadow: 0 0 0 1.5px var(--c-island);
+}
+
+.tab-health-badge.show {
+  display: block;
+}
+
+.tab-health-badge.sick {
+  background: var(--c-red);
 }
 
 .tab:hover {

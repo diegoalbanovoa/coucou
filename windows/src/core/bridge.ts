@@ -144,6 +144,10 @@ export const Bridge = {
   systemEndProcess: (targets: EndTarget[]) => call<number[]>("system_end_process", { targets }),
   /** Windows' own Disk Cleanup. False on Linux, or if it would not start. */
   systemOpenDiskCleanup: () => call<boolean>("system_open_disk_cleanup"),
+  /** The health monitor's last reading, for a window that just opened rather
+   *  than wait out the next heartbeat. Null once settled at `ok` the first
+   *  time — there is nothing to say yet. */
+  healthState: () => call<HealthEvent | null>("health_state"),
   /** Where the chat runs with nothing attached, and whether it is still there. */
   chatFolderState: () => call<FolderState>("chat_folder_state"),
   /** Chooses that folder. Null when the user cancelled the picker. */
@@ -209,6 +213,19 @@ export interface Drive {
   name: string;
   free: number;
   total: number;
+}
+
+/** The health monitor's level — a mood for Mochi, not a system state. See
+ *  src-tauri/src/health.rs and mochi/moods.ts. */
+export type HealthLevel = "ok" | "strained" | "sick";
+export type HealthCause = "cpu" | "memory" | "disk";
+
+export interface HealthEvent {
+  level: HealthLevel;
+  cause: HealthCause;
+  cpu: number;
+  memory: number;
+  disk: number;
 }
 
 /** What the System tab reads. */

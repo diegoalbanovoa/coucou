@@ -34,6 +34,22 @@ const chatState = params.get("state") ?? "";
 
 console.info(`[mock] pane=${pane} scenario=${scenario} lang=${lang} state=${chatState || "(default)"}`);
 
+/** `health_state` would return in mock mode — the mood Fase 7 pairs with
+ *  this same `?scenario=` the System tab's own numbers already use, so one
+ *  URL param drives both Mochi's mood and the System tab shots consistently.
+ *  `null` at `ok`: a real run says nothing either, since nothing needs
+ *  saying — see health.rs's own file note. */
+const MOCK_HEALTH_EVENT =
+  scenario === "ok"
+    ? null
+    : {
+        level: scenario,
+        cause: "memory" as const,
+        cpu: MOCK_CPU[scenario],
+        memory: Math.round((MOCK_SCENARIOS[scenario].memoryUsed / MOCK_SCENARIOS[scenario].memoryTotal) * 100),
+        disk: 20,
+      };
+
 // Seeded once, at module load — before `main()` runs, since every first-party
 // module reaches `Bridge` through the aliased specifier and therefore imports
 // this file before it imports anything that calls into it.
@@ -215,6 +231,10 @@ async function systemStats() {
   return MOCK_SCENARIOS[scenario];
 }
 
+async function healthState() {
+  return MOCK_HEALTH_EVENT;
+}
+
 async function systemProcesses() {
   return MOCK_PROCESSES;
 }
@@ -354,6 +374,7 @@ export const Bridge = {
   systemProcesses,
   systemEndProcess,
   systemOpenDiskCleanup,
+  healthState,
   chatFolderState,
   pickChatFolder,
   forgetChatFolder,

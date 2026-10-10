@@ -293,6 +293,14 @@ export const es: Messages = {
       language: "Idioma",
       languageSystem: "Sistema",
     },
+    health: {
+      title: "Salud del equipo",
+      enabled: "Mochi reacciona a la carga del equipo",
+      threshold: "Enfermarse por encima de",
+      includeDisk: "Incluir uso del disco",
+      diskThreshold: "Umbral del disco",
+      notify: "Avisarme cuando empeore",
+    },
     footer: "Sin telemetría. Las peticiones de red solo van a los servicios que configures tú mismo.",
   },
 
@@ -307,5 +315,17 @@ export const es: Messages = {
     settings: "Ajustes…",
     pause: "Pausar",
     quit: "Salir",
+  },
+
+  health: {
+    mochiSays: {
+      strained: "Un poco mareado — {cause}",
+      sick: "No se siente bien — {cause}",
+    },
+    cause: {
+      cpu: "CPU al {value}",
+      memory: "memoria al {value}",
+      disk: "disco al {value}",
+    },
   },
 };

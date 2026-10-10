@@ -7,6 +7,17 @@
 import { Ease, lerp, type EaseFn } from "../core/anim";
 import { Sound } from "../core/sound";
 import type { BotEmoteName, BotStateName } from "../core/layout";
+import { lerpMood, MOOD_BLEND_MS, MOODS, MoodScheduler, type HealthLevel, type MoodParams } from "./moods";
+
+/** Set once from the window's own `matchMedia` (island.ts does this — a
+ *  canvas has no CSS to carry `prefers-reduced-motion` for it). Mood sway,
+ *  shiver, cough and the recovery sparkle all check this; tint, eyelids,
+ *  blush and the thermometer do not, since plan-v2.md § 7.4 keeps those
+ *  under reduced motion — they are a read of a static fact, not movement. */
+export let REDUCED_MOTION = false;
+export function setReducedMotion(on: boolean) {
+  REDUCED_MOTION = on;
+}
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -53,7 +64,7 @@ interface BotStateCfg {
 }
 
 interface Particle {
-  type: "heart" | "star" | "spark" | "sweat" | "z";
+  type: "heart" | "star" | "spark" | "sweat" | "z" | "vapor" | "sparkle";
   x: number; y: number; vx: number; vy: number;
   age: number; life: number; rot: number; size: number;
 }
@@ -220,6 +231,16 @@ export class BotEngine {
   /** Fired when three slaps land inside 1.7 s (→ dizzy + confused view). */
   onDizzy: (() => void) | null = null;
 
+  // ── Health mood (plan-v2.md § 7.4) — a layer on top of everything above,
+  // not a replacement for it. See moods.ts for why the blink/sweat/cough
+  // calendar lives in its own small class instead of here.
+  mood: MoodParams = MOODS.ok;
+  moodLevel: HealthLevel = "ok";
+  private moodFrom: MoodParams = MOODS.ok;
+  private moodBlendStart = 0;
+  private moodScheduler = new MoodScheduler();
+  private shiverUntil = 0;
+
   // ── Public API ──────────────────────────────────────────────────────────────
 
   setState(next: BotStateName, force = false) {
@@ -258,6 +279,45 @@ export class BotEngine {
       default:
         if (prev !== "idle" || next !== "idle") this.blink();
     }
+  }
+
+  /**
+   * The health monitor's level, blended in over `MOOD_BLEND_MS` rather than
+   * cut to instantly — plan-v2.md § 7.4's `lerpMood`. Worsening from `ok`
+   * gets nothing extra; recovering *to* `ok` from either worse level plays
+   * the recovery transient (a shake, four sparkles, the tint fading out —
+   * which happens for free, since `ok`'s own `tintAmount` is already 0).
+   */
+  setMood(level: HealthLevel) {
+    if (this.moodLevel === level) return;
+    const wasWorse = this.moodLevel !== "ok";
+    this.moodFrom = this.mood;
+    this.moodLevel = level;
+    this.moodBlendStart = now();
+    this.moodScheduler.reset(MOODS[level], performance.now());
+
+    if (level === "ok" && wasWorse) this.playRecovery();
+  }
+
+  private playRecovery() {
+    this.blink();
+    if (REDUCED_MOTION) return;
+    this.anim("tilt", [
+      [0.1, 90, Ease.out], [-0.08, 140, Ease.inOut], [0.05, 140, Ease.inOut], [0, 160, Ease.out],
+    ]);
+    this.emit("sparkle", 4);
+  }
+
+  private cough() {
+    if (this.state === "approval") return;
+    Sound.play("cough");
+    // The sound is not movement and plays either way; the squash-and-release
+    // and its vapor puffs are, and plan-v2.md § 7.4 lists "tos" by name among
+    // what reduced motion drops.
+    if (REDUCED_MOTION) return;
+    this.anim("sy", [[0.9, 60, Ease.out], [1.03, 110, Ease.out], [1, 180, Ease.back]]);
+    this.anim("sx", [[1.06, 60, Ease.out], [0.98, 110, Ease.out], [1, 180, Ease.back]]);
+    this.emit("vapor", 3);
   }
 
   setBadge(b: Badge | null) {
@@ -459,6 +519,7 @@ export class BotEngine {
       this.particles.length > 0 ||
       this.cfg.bounces || this.cfg.scans || this.cfg.breathes || this.cfg.zz || this.cfg.sweat ||
       this.isMini ||
+      this.moodLevel !== "ok" ||
       Math.abs(this.tgYaw - this.yaw) > 0.002 ||
       Math.abs(this.tgPitch - this.pitch) > 0.002 ||
       Math.abs(this.tgTilt - this.tilt) > 0.002 ||
@@ -503,6 +564,8 @@ export class BotEngine {
       }
     }
 
+    this.updateMood(nowMs);
+
     const t = n - this.t0;
     let ty = this.lookX * 0.62;
     let tp = this.lookY * 0.5;
@@ -532,8 +595,23 @@ export class BotEngine {
     }
 
     this.tgYaw = ty;
-    this.tgPitch = tp;
+    this.tgPitch = tp + this.mood.eyeLookY * 0.02;
     this.tgTilt = this.cfg.tilt;
+
+    // Sway, shiver and the ambient breathing a mood adds are all movement,
+    // and none of the three run under reduced motion — only the static
+    // reads (tint, eyelids, blush, thermometer) do.
+    if (!REDUCED_MOTION && this.state !== "approval") {
+      if (this.mood.swayAmpPx > 0) {
+        this.tgTilt += Math.sin(t * this.mood.swayHz * 2 * Math.PI) * (this.mood.tiltDeg * Math.PI) / 180;
+      }
+      if (n < this.shiverUntil && this.mood.shiver) {
+        const sh = this.mood.shiver;
+        if (!this.locks.has("ox")) {
+          this.ox = Math.sin(t * sh.hz * 2 * Math.PI) * (sh.ampPx / 40);
+        }
+      }
+    }
 
     if (n > this.waveStart && n < this.waveUntil) {
       const wt = n - this.waveStart;
@@ -551,6 +629,15 @@ export class BotEngine {
     } else if (this.isMini) {
       this.tgSy = 1 + Math.sin(t * 2.2) * 0.04;
       this.tgSx = 1 - Math.sin(t * 2.2) * 0.02;
+    } else if (!REDUCED_MOTION && this.state !== "approval" && this.mood.breathPeriodScale !== 1) {
+      // Ordinary states (idle, working, …) have no ambient breathing of their
+      // own — this is new, not a scaled version of something that already
+      // ran, which is why it is its own branch rather than a tweak to the
+      // `cfg.breathes` one above.
+      const amp = 0.03;
+      const speed = 1.8 / this.mood.breathPeriodScale;
+      this.tgSy = 1 + Math.sin(t * speed) * amp;
+      this.tgSx = 1 - Math.sin(t * speed) * amp * 0.57;
     } else {
       this.tgSy = 1;
       this.tgSx = 1;
@@ -598,6 +685,26 @@ export class BotEngine {
     this.slotH = Math.max(0, this.slotH + this.slotHVel * dt);
 
     this.lastTime = n;
+  }
+
+  /** Blends toward the current mood target and runs its ambient calendar —
+   *  blink, sweat, cough. Mini bots (console pills) never carry a mood: they
+   *  are not Mochi, and `isMini`'s flat-colour, no-gradient draw path has
+   *  nothing a mood tint would show against. */
+  private updateMood(nowMs: number) {
+    if (this.isMini) return;
+    const target = MOODS[this.moodLevel];
+    const t = Math.min(1, (nowMs - this.moodBlendStart) / MOOD_BLEND_MS);
+    this.mood = lerpMood(this.moodFrom, target, t);
+
+    if (this.moodLevel === "ok" || this.state === "approval") return;
+    const due = this.moodScheduler.tick(this.mood, nowMs);
+    if (due.blink && !this.eyeOverride) this.blink();
+    if (due.sweat && !REDUCED_MOTION) this.emit("sweat", this.mood.sweatDrops);
+    if (due.cough) this.cough();
+    if (due.shiver && this.mood.shiver && !REDUCED_MOTION) {
+      this.shiverUntil = now() + this.mood.shiver.durationMs / 1000;
+    }
   }
 
   private doMiniBehaviorLoop() {
@@ -657,7 +764,7 @@ export class BotEngine {
     const body = this.bodyPath(rx, ry, R);
     this.drawBody(x, body, R, rx, ry);
 
-    const blushVal = Math.max(this.blush, this.tint * 0.5) * (1 - this.morph);
+    const blushVal = Math.max(this.blush, this.tint * 0.5, this.mood.blush) * (1 - this.morph);
     if (blushVal > 0.01) {
       x.save();
       x.clip(body);
@@ -673,6 +780,7 @@ export class BotEngine {
 
     this.drawEyes(x, body, R, rx, ry);
     if (this.morph > 0.05) this.drawMouth(x, body, R);
+    if (this.mood.thermometer && this.morph < 0.3) this.drawThermometer(x, R, rx, ry);
 
     x.restore();
 
@@ -732,6 +840,18 @@ export class BotEngine {
       x.fill(body);
     }
 
+    // The health mood's own tint — additive on top of the state's, per
+    // plan-v2.md § 7.4's "el ánimo se suma a los estados existentes" rather
+    // than competing with it for the same gradient.
+    const moodTintAmount = this.mood.tintAmount * (1 - this.morph);
+    if (moodTintAmount > 0.01) {
+      const mg = x.createLinearGradient(0, ry, 0, -ry);
+      mg.addColorStop(0, `${this.mood.tint}${Math.round(0.72 * moodTintAmount * 255).toString(16).padStart(2, "0")}`);
+      mg.addColorStop(1, `${this.mood.tint}00`);
+      x.fillStyle = mg;
+      x.fill(body);
+    }
+
     const sh = x.createRadialGradient(0, 0, R * 0.15, 0, 0, R * 1.25);
     sh.addColorStop(0, "rgba(0,0,0,0)");
     sh.addColorStop(0.6, "rgba(0,0,0,0)");
@@ -746,8 +866,18 @@ export class BotEngine {
     x.fill(body);
   }
 
+  /** `tired`/`closedArc` already exist as eye shapes the engine knows how to
+   *  draw (sleepy, half-moon) — a mood borrows one of those directly rather
+   *  than a separate continuous eyelid overlay geometry would have to be
+   *  drawn correctly over every existing eye shape it might land on top of. */
+  private moodEyeShape(): EyeShape | null {
+    if (this.mood.eyeStyle === "tired") return "tired";
+    if (this.mood.eyeStyle === "closedArc") return "closed";
+    return null;
+  }
+
   private drawEyes(x: CanvasRenderingContext2D, body: Path2D, R: number, rx: number, ry: number) {
-    let shape: EyeShape = this.eyeOverride ?? this.cfg.eye;
+    let shape: EyeShape = this.eyeOverride ?? this.moodEyeShape() ?? this.cfg.eye;
     if (this.morph > 0.5) {
       if (this.isChewing) shape = "happy";
       else if (this.slotHTarget > 0.05 || this.slotH > 0.1) shape = "cup";
@@ -928,6 +1058,40 @@ export class BotEngine {
         x.stroke();
       }
     }
+    x.restore();
+  }
+
+  /** A thermometer sticking out of the lower-right of the face, tilted 20°,
+   *  oscillating gently with the breath — plan-v2.md § 7.4's one explicit
+   *  "sick means sick" prop. Drawn outside the body's own clip, since it
+   *  sticks past the body edge rather than sitting on its surface. */
+  private drawThermometer(x: CanvasRenderingContext2D, R: number, rx: number, ry: number) {
+    const n = now();
+    const wobble = REDUCED_MOTION ? 0 : Math.sin(n * 1.8) * (3 * Math.PI) / 180;
+    const baseX = rx * 0.6;
+    const baseY = ry * 0.55;
+    const len = R * 0.42;
+    const angle = (20 * Math.PI) / 180 + wobble;
+
+    x.save();
+    x.translate(baseX, baseY);
+    x.rotate(angle);
+    // A near-white body on Mochi's own near-white body read as one shape in
+    // the design review's own screenshots — a thin dark outline is what
+    // separates them instead of asking for a less legible fill colour.
+    roundRectPath(x, 0, -R * 0.05, len, R * 0.1, R * 0.05);
+    x.fillStyle = "rgba(255,255,255,0.92)";
+    x.fill();
+    x.lineWidth = 1;
+    x.strokeStyle = "rgba(26,20,18,0.35)";
+    x.stroke();
+    x.fillStyle = "#ff453a";
+    x.beginPath();
+    x.arc(len, 0, R * 0.07, 0, Math.PI * 2);
+    x.fill();
+    x.lineWidth = 1;
+    x.strokeStyle = "rgba(26,20,18,0.35)";
+    x.stroke();
     x.restore();
   }
 
@@ -1113,6 +1277,28 @@ export class BotEngine {
           x.textAlign = "center";
           x.textBaseline = "middle";
           x.fillText("z", 0, 0);
+          break;
+        case "vapor":
+          // A cough's three puffs of breath — plain fading circles, the
+          // palest label colour so they read as air, not as anything solid.
+          x.fillStyle = "rgba(235,235,245,0.4)";
+          x.beginPath();
+          x.arc(0, 0, sz * 0.6, 0, Math.PI * 2);
+          x.fill();
+          break;
+        case "sparkle":
+          // The recovery transient's four ✦ — a 4-point star, not the
+          // 5-point one "star" already draws, so recovering never looks like
+          // the "proud" emote's own sparkle happened to replay.
+          x.rotate(p.rot);
+          x.fillStyle = "#ffd60a";
+          x.beginPath();
+          x.moveTo(0, -sz);
+          x.quadraticCurveTo(sz * 0.15, -sz * 0.15, sz, 0);
+          x.quadraticCurveTo(sz * 0.15, sz * 0.15, 0, sz);
+          x.quadraticCurveTo(-sz * 0.15, sz * 0.15, -sz, 0);
+          x.quadraticCurveTo(-sz * 0.15, -sz * 0.15, 0, -sz);
+          x.fill();
           break;
       }
       x.restore();

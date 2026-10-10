@@ -311,6 +311,14 @@ export const en = {
       language: "Language",
       languageSystem: "System",
     },
+    health: {
+      title: "Team health",
+      enabled: "Mochi reacts to the machine's load",
+      threshold: "Get strained above",
+      includeDisk: "Include disk usage",
+      diskThreshold: "Disk threshold",
+      notify: "Notify me when it gets worse",
+    },
     footer: "No telemetry. Network requests only go to the services you configure yourself.",
   },
 
@@ -325,6 +333,20 @@ export const en = {
     settings: "Settings…",
     pause: "Pause",
     quit: "Quit",
+  },
+
+  // Fase 7 (plan-v2.md § 7) — Mochi's mood, not a machine state. `strained`
+  // has no "ok" entry: ok is silent, nothing to say.
+  health: {
+    mochiSays: {
+      strained: "Feeling a little dizzy — {cause}",
+      sick: "Not feeling well — {cause}",
+    },
+    cause: {
+      cpu: "CPU at {value}",
+      memory: "memory at {value}",
+      disk: "disk at {value}",
+    },
   },
 } as const;
 

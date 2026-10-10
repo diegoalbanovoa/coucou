@@ -4,6 +4,7 @@ mod agent;
 mod agents;
 mod consoles;
 mod files;
+mod health;
 mod hooks;
 mod i18n;
 mod integrations;
@@ -640,6 +641,25 @@ fn system_open_disk_cleanup() -> bool {
     system::open_disk_cleanup()
 }
 
+// ── Health (plan-v2.md § 7) ──────────────────────────────────────────────────
+
+/// The last reading the monitor emitted, for a window that just opened rather
+/// than make it wait out the next heartbeat.
+#[tauri::command]
+fn health_state() -> Option<health::HealthEvent> {
+    health::state()
+}
+
+/// Debug builds only — forces the next sample to read as `level`, to exercise
+/// Mochi's mood animations without actually loading the machine. Absent from
+/// `invoke_handler` in release, so a release build has no such command to call
+/// at all, not merely one that declines.
+#[cfg(debug_assertions)]
+#[tauri::command]
+fn health_simulate(level: Option<health::Level>) {
+    health::simulate(level);
+}
+
 // ── The knowledge base ────────────────────────────────────────────────────────
 
 /// The Obsidian vault the agent may read and write, and where it came from.
@@ -887,6 +907,9 @@ pub fn run() {
             system_processes,
             system_end_process,
             system_open_disk_cleanup,
+            health_state,
+            #[cfg(debug_assertions)]
+            health_simulate,
             chat_load,
             chat_keep,
             chat_forget,
@@ -934,6 +957,7 @@ pub fn run() {
             hooks::ensure_hook_exe(&handle);
             pipe::start(handle.clone());
             integrations::start(handle.clone());
+            health::start(handle.clone());
             Ok(())
         })
         .run(tauri::generate_context!())

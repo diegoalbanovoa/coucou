@@ -8,6 +8,7 @@ import { Island } from "./island/island";
 import { loadAgentEnvironment, registerAgentHandlers } from "./island/agent";
 import { rescanOnFocus } from "./views/consoles";
 import { registerHookHandlers } from "./island/hooks";
+import { registerHealthHandlers } from "./island/health";
 import { registerIntegrationHandlers, refreshConfigured } from "./island/integrations";
 import { setLocale, resolveLocale } from "./i18n/index";
 
@@ -77,6 +78,7 @@ async function main() {
   });
 
   registerHookHandlers(island);
+  registerHealthHandlers(island);
   registerIntegrationHandlers(island);
 
   registerAgentHandlers(island);

@@ -2,7 +2,7 @@
 
 import type { BotEmoteName, BotStateName, IslandMode, IslandViewName } from "./layout";
 import type { EyeShape } from "../mochi/engine";
-import type { ChatAttachment, DroppedFile } from "./bridge";
+import type { ChatAttachment, DroppedFile, HealthEvent } from "./bridge";
 
 export type AgentSource = "claudeCode" | "n8n" | "agent";
 export type PillBadge = "approval" | "finished" | "error";
@@ -116,6 +116,18 @@ export interface Settings {
   language: "system" | "en" | "es";
   /** Which pane the overview's right card opens on — see docs/plan-v2.md § 3.3. */
   homeRightPane: "consoles" | "services";
+
+  /** Whether Mochi reacts to the machine's load at all. */
+  healthEnabled: boolean;
+  /** 50 to 95 — the load percent that, held, takes Mochi from `ok` to
+   *  `strained`. `sick`'s own threshold is not configured directly; see
+   *  src-tauri/src/health.rs's file note for why it is always this + 15. */
+  healthThreshold: number;
+  healthIncludeDisk: boolean;
+  /** 70 to 98 — ignored unless `healthIncludeDisk` is on. */
+  healthDiskThreshold: number;
+  /** Whether worsening briefly reveals the collapsed island. */
+  healthNotify: boolean;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -138,6 +150,12 @@ export const DEFAULT_SETTINGS: Settings = {
   defaultChatFolder: null,
   language: "system",
   homeRightPane: "consoles",
+  // Mirrors Settings::default() in settings.rs.
+  healthEnabled: true,
+  healthThreshold: 70,
+  healthIncludeDisk: false,
+  healthDiskThreshold: 90,
+  healthNotify: true,
 };
 
 type Listener = () => void;
@@ -170,6 +188,11 @@ class AppState {
    *  Almacenamiento pane instead of the Procesos default, so shots.mjs can
    *  capture the drive list without scripting a segmented-control click. */
   systemInitialPane: "processes" | "storage" | null = null;
+
+  /** The health monitor's last reading — null until the first one arrives
+   *  (or the user has it switched off). A mood, not a machine state: see
+   *  mochi/moods.ts and plan-v2.md § 7.3. */
+  health: HealthEvent | null = null;
 
   noteMessage: string | null = null;
   searchResult: SearchResult | null = null;
