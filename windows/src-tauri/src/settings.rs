@@ -40,6 +40,11 @@ pub struct Settings {
     /// it meaning — a Rust enum here would just be one more place a new value
     /// has to be taught about.
     pub language: String,
+    /// "consoles" or "services" — which pane the overview's right card opens
+    /// on. Plain `String` for the same reason `language` is: TypeScript's
+    /// `i18n/index.ts`-style union is where this value actually means
+    /// something, not here.
+    pub home_right_pane: String,
 }
 
 impl Default for Settings {
@@ -67,6 +72,7 @@ impl Default for Settings {
             vault_path: None,
             default_chat_folder: None,
             language: "system".into(),
+            home_right_pane: "consoles".into(),
         }
     }
 }
@@ -332,7 +338,8 @@ mod tests {
   "agentSession": "7f3c9a10-0000-4000-8000-000000000000",
   "vaultPath": "C:/notes/vault",
   "defaultChatFolder": "C:/code",
-  "language": "es"
+  "language": "es",
+  "homeRightPane": "services"
 }"#;
 
     fn custom() -> Value {
@@ -655,6 +662,7 @@ mod tests {
                 "vaultPath",
                 "defaultChatFolder",
                 "language",
+                "homeRightPane",
             ]
         );
         let _ = std::fs::remove_dir_all(&dir);

@@ -38,6 +38,10 @@ console.info(`[mock] pane=${pane} scenario=${scenario} lang=${lang} state=${chat
 // module reaches `Bridge` through the aliased specifier and therefore imports
 // this file before it imports anything that calls into it.
 State.settings.activeIntegrations = pane === "services" ? [...MOCK_ACTIVE_INTEGRATIONS] : [];
+// Fase 3's home card opens on `settings.homeRightPane`, not on "whichever
+// pane has data" — `?pane=` has to set both, or `?pane=services` would
+// populate the services fixtures but the card would still open on Consoles.
+State.settings.homeRightPane = pane;
 for (const [id, data] of Object.entries(MOCK_INTEGRATION_DATA)) {
   State.integrations[id] = { data, error: null, loaded: true, configured: true };
 }

@@ -30,6 +30,7 @@ export const es: Messages = {
     cap: {
       streams: "transmite",
       oneShot: "de una vez",
+      resume: "retoma",
       approvableHere: "se aprueba aquí",
       asksInTerminal: "pregunta en su terminal",
       unverified: "sin verificar",
@@ -38,6 +39,9 @@ export const es: Messages = {
     inUse: "En uso",
     rescan: "Volver a buscar",
     sessions: { one: "{n} sesión", other: "{n} sesiones" },
+    notFound: "No se encontró",
+    foundNew: { one: "Se encontró {n} consola nueva", other: "Se encontraron {n} consolas nuevas" },
+    noneNew: "No se encontraron consolas nuevas",
   },
 
   chat: {

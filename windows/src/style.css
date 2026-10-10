@@ -567,6 +567,19 @@ body {
   filter: brightness(1.06);
 }
 
+.pill:active {
+  transform: scale(0.97);
+}
+
+/* Console fichas are keyboard-interactive (tabIndex, Shift+Enter, right-click
+   — see attachHoldAndDetail in views/consoles.ts), so they need a visible
+   focus state, same ring as the rest of the UI kit (see --focus-ring in
+   styles/tokens.css). */
+.pill:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
 .pill-badge {
   position: absolute;
   top: -3px;
@@ -591,6 +604,30 @@ body {
 .pill-badge svg {
   width: 6px;
   height: 6px;
+}
+
+/* The "live" badge is a plain pulsing dot, not an icon-in-a-circle — same
+   mark as .live-dot in the session rows below the grid. */
+.pill-badge-live-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  animation: pill-badge-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes pill-badge-pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.4;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pill-badge-live-dot {
+    animation: none;
+  }
 }
 
 /* ── Generic text blocks ────────────────────────────────────────────────── */
@@ -1300,120 +1337,159 @@ button:focus-visible {
   }
 }
 
-/* ── The console panel ───────────────────────────────────────────────────── */
+/* ── The home card: consoles and services behind a segmented switch ───────── */
 /*
- * Shown in the overview's right card and as the start screen's body. One
- * stylesheet for both, because it is one component.
+ * Fase 3 (docs/plan-v2.md § 3.3-3.5). Shown in the overview's right card and
+ * as the start screen's body — one component for both, so there is one grid
+ * to get right instead of two that drift. Tiles in both panes are `.pill`
+ * (src/ui/tile.ts); this file only adds what is specific to this card:
+ * the head (segmented + page dots + rescan), the grid wrapper, and the
+ * detail frame a long-press/right-click/Shift+Enter opens.
  */
-.console-panel {
+.home-card-root {
   position: relative;
   z-index: 1;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: var(--s-2);
   height: 100%;
-  padding: 10px 10px 8px;
+  padding: 10px 12px 8px;
   min-width: 0;
   outline: none;
 }
 
-.console-title {
-  font: 400 10.5px var(--font);
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--dim-3);
-  padding: 0 2px;
-}
-
-.console-list {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  overflow-y: auto;
-  min-height: 0;
-  scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
-}
-
-.console-row {
+.home-card-head {
   display: flex;
   align-items: center;
-  gap: 8px;
-  width: 100%;
-  border: 0;
-  border-radius: 9px;
-  padding: 5px 8px;
-  background: rgba(255, 255, 255, 0.05);
-  color: var(--dim-2);
-  cursor: pointer;
-  text-align: left;
-  min-width: 0;
+  gap: var(--s-2);
+  height: 20px;
 }
 
-.console-row:hover,
-.console-row.cursor {
-  background: rgba(255, 255, 255, 0.1);
-}
-
-.console-row.cursor {
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.18);
-}
-
-.console-row.on {
-  background: rgba(34, 197, 94, 0.1);
-  box-shadow: inset 0 0 0 1px rgba(34, 197, 94, 0.28);
-  color: var(--green);
-}
-
-/* The still Mochi sits in here; minibots.ts sizes the canvas itself. */
-.console-face {
+.home-card-grid {
   display: grid;
-  place-items: center;
+  grid-template-columns: 1fr 1fr;
+  grid-auto-rows: 28px;
+  gap: 4px;
+  align-content: start;
+  min-height: 0;
+}
+
+.home-card-grid.empty {
+  grid-template-columns: 1fr;
+}
+
+.page-dots {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.page-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  border: 0;
+  padding: 0;
+  background: var(--c-label-3);
+  cursor: pointer;
+}
+
+.page-dot.on {
+  background: var(--c-label);
+}
+
+/* The rescan icon spins while a scan is in flight. */
+.spinning svg {
+  animation: home-card-spin 0.8s linear infinite;
+}
+
+@keyframes home-card-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spinning svg {
+    animation: none;
+  }
+}
+
+/* A console ficha layers its state onto the shared `.pill` look. Its accent
+   is the console's own color (--tile-accent, set inline from consoleColor()
+   in consoles.ts), not a fixed hue. */
+.console-tile-selected {
+  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--tile-accent, #22c55e) 50%, transparent);
+  background: color-mix(in srgb, var(--tile-accent, #22c55e) 10%, transparent);
+}
+
+.console-tile-unverified {
+  opacity: 0.55;
+}
+
+.console-empty-wide {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  padding: var(--s-2);
+  border-radius: var(--r-pill);
+  background: var(--card-flat);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+}
+
+.console-empty-wide span {
+  flex: 1 1 auto;
+  font: 400 11px var(--font);
+  color: var(--dim-3);
+  line-height: 1.4;
+}
+
+/* The ghost ficha for a selection that has since vanished (uninstalled). */
+.pill-ghost {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.ghost-face {
+  margin-left: 7px;
   width: 20px;
   height: 20px;
-  flex: 0 0 20px;
-  overflow: hidden;
 }
 
-.console-text {
+/* ── Console detail (pushed in over the card by src/ui/push-nav.ts, which
+   supplies its own back button — see .ui-push-back in ui/ui.css) ─────────── */
+
+.console-detail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  height: 100%;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.console-detail-head {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+}
+
+.console-detail-head b {
+  font: 600 13px var(--font);
+  color: var(--ink-2);
+}
+
+.console-detail-sessions {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  min-width: 0;
-  flex: 1 1 auto;
+  padding-top: 4px;
+  border-top: 1px solid var(--hairline);
 }
 
-.console-head {
-  display: flex;
-  align-items: baseline;
-  gap: 6px;
-  min-width: 0;
-}
-
-.console-head b {
-  font: 500 12px var(--font);
-  color: var(--ink-2);
-  white-space: nowrap;
-}
-
-.console-version {
-  font: 400 10px var(--font);
-  color: var(--dim-3);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.console-pick {
-  width: 11px;
-  flex: 0 0 11px;
-}
-
-.console-empty {
-  font: 400 11px var(--font);
-  color: var(--dim-3);
-  line-height: 1.45;
-  padding: 2px;
+.home-card-detail-actions {
+  margin-top: auto;
 }
 
 /* Capability badges: three separate claims, so three separate marks. */

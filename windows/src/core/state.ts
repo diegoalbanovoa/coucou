@@ -114,6 +114,8 @@ export interface Settings {
   defaultChatFolder: string | null;
   /** "system" follows `navigator.languages`; see i18n/index.ts's resolveLocale. */
   language: "system" | "en" | "es";
+  /** Which pane the overview's right card opens on — see docs/plan-v2.md § 3.3. */
+  homeRightPane: "consoles" | "services";
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -135,6 +137,7 @@ export const DEFAULT_SETTINGS: Settings = {
   vaultPath: null,
   defaultChatFolder: null,
   language: "system",
+  homeRightPane: "consoles",
 };
 
 type Listener = () => void;

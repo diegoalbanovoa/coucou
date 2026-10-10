@@ -1,27 +1,34 @@
-// The console panel: which agent consoles this machine has, which one the
-// chat will run, and which sessions are live right now.
+// The overview's right card: two pages in one — consoles and services —
+// behind a segmented switch, each shown as a grid of fichas built from the
+// same `tile()` component. See docs/plan-v2.md § 3.3, § 3.4 and § 3.5.
 //
-// It fills the overview's right card whenever there are no integration pills to
-// show there — which, with no integration keys configured, is always. The same
-// component is the start screen's body, so there is one list to get right
-// rather than two that drift.
-//
-// A console here is an agent CLI Coucou can drive. Not a shell and not a
-// terminal window: PowerShell has no turns to take, and a Windows Terminal tab
-// cannot be driven from outside. Live sessions are the other half of the
-// picture and need no detection at all — they arrive as hook events, which is
-// how the island already knows the terminal and folder each one is in.
+// Replaces the old "3 CONSOLES" list view and the separate pills/consoles
+// toggle `views.ts` used to drive by "does this task have pills configured".
+// That toggle is now a user choice (`settings.homeRightPane`), not an
+// auto-detection — someone who configures integrations should still be able
+// to look at their consoles without unconfiguring them first.
 
 import { h, clear } from "./dom";
-import { icon } from "./icons";
 import type { Console } from "../core/bridge";
-import { State } from "../core/state";
-import { stillMiniBot } from "../mochi/minibots";
+import { Bridge } from "../core/bridge";
+import { State, type AgentTask } from "../core/state";
+import { stillMiniBot, createMiniBot, pruneMiniBots } from "../mochi/minibots";
 import { availableClis, chooseProvider, reloadConsoles } from "../island/agent";
 import { t, tn, getLocale } from "../i18n/index";
+import { tile } from "../ui/tile";
+import { segmented } from "../ui/segmented";
+import { iconButton } from "../ui/icon-button";
+import { button } from "../ui/button";
+import { toast } from "../ui/toast";
+import { pushNav } from "../ui/push-nav";
+import { orderConsoles, pages, selectedConsoleMissing, tileStateFor } from "../consoles/order";
+import { consoleColor } from "../consoles/palette";
 
+const PER_PAGE = 4;
 /** How long after a focus a re-scan is worth doing. */
 const RESCAN_AFTER_MS = 5_000;
+/** How long a press has to hold before it counts as "hold to open detail". */
+const HOLD_MS = 500;
 
 let lastScan = 0;
 
@@ -39,27 +46,8 @@ export function rescanOnFocus() {
   void reloadConsoles();
 }
 
-function badge(text: string, kind: "can" | "cannot" | "warn"): HTMLElement {
-  return h("span", { class: `cap cap-${kind}`, text });
-}
-
-/** What this console can do, as three separate answers. */
-function capabilities(c: Console): HTMLElement {
-  const row = h("div", { class: "cap-row" });
-  row.append(
-    c.can.streaming ? badge(t("consoles.cap.streams"), "can") : badge(t("consoles.cap.oneShot"), "cannot"),
-    c.can.approvable
-      ? badge(t("consoles.cap.approvableHere"), "can")
-      : badge(t("consoles.cap.asksInTerminal"), "cannot"),
-  );
-  // Said plainly rather than left for the user to discover: four of the seven
-  // are driven the way their own documentation says and have never run here.
-  if (!c.verified) row.append(badge(t("consoles.cap.unverified"), "warn"));
-  return row;
-}
-
-/** The sessions running right now, whatever started them. */
-function liveSessions(): HTMLElement[] {
+/** The sessions running right now, as rows inside the detail push-nav. */
+function liveSessionRows(): HTMLElement[] {
   return State.tasks
     .filter((t) => t.source === "claudeCode" && (t.state !== "idle" || t.steps.length > 0))
     .map((t) =>
@@ -73,98 +61,290 @@ function liveSessions(): HTMLElement[] {
     );
 }
 
-export function buildConsolePanel(opts: { onPick?: () => void } = {}) {
-  const list = h("div", { class: "console-list" });
-  const live = h("div", { class: "live-list" });
-  const title = h("div", { class: "console-title" });
-  const el = h("div", { class: "console-panel" }, title, list, live);
+/** A service pill — the same ficha the overview used to build inline, now
+ *  owned here so both panes of this card go through one `tile()` call site. */
+function servicePill(task: AgentTask, setFocus: (id: string) => void): HTMLElement {
+  return tile({
+    face: createMiniBot(task, 24),
+    name: task.name,
+    color: task.color,
+    badge: task.pillBadge,
+    onSelect: () => setFocus(task.id),
+  });
+}
 
-  let rendered = "";
-  /** Which row the keyboard is on. -1 until a key is pressed. */
-  let cursor = -1;
+export interface HomeCardOptions {
+  setFocus: (id: string) => void;
+  onPick?: () => void;
+}
 
-  function rows(): HTMLElement[] {
-    return Array.from(list.querySelectorAll<HTMLElement>(".console-row"));
-  }
+export function buildHomeRightCard(opts: HomeCardOptions) {
+  let pane: "consoles" | "services" = State.settings.homeRightPane;
+  let consolePage = 0;
+  /** Set while a detail frame is open, so sync() does not fight the push-nav
+   *  over what the card shows. */
+  let detailId: string | null = null;
 
-  function moveCursor(step: number) {
-    const all = rows();
-    if (all.length === 0) return;
-    cursor = cursor < 0 ? 0 : (cursor + step + all.length) % all.length;
-    all.forEach((row, i) => row.classList.toggle("cursor", i === cursor));
-    all[cursor].scrollIntoView({ block: "nearest" });
-  }
+  const dots = h("div", { class: "page-dots" });
+  const rescanBtn = iconButton({ icon: "refresh", label: t("consoles.rescan"), onClick: () => void rescan() });
 
-  el.addEventListener("keydown", (event) => {
-    const key = (event as KeyboardEvent).key;
-    if (key === "ArrowDown" || key === "ArrowUp") {
-      event.preventDefault();
-      event.stopPropagation();
-      moveCursor(key === "ArrowDown" ? 1 : -1);
-    } else if (key === "Enter" && cursor >= 0) {
-      event.preventDefault();
-      event.stopPropagation();
-      rows()[cursor]?.click();
-    }
+  const seg = segmented<"consoles" | "services">({
+    items: [
+      { value: "consoles", label: t("home.pane.consoles") },
+      { value: "services", label: t("home.pane.services") },
+    ],
+    value: pane,
+    size: "sm",
+    onChange: (value) => {
+      pane = value;
+      consolePage = 0;
+      State.settings.homeRightPane = value;
+      void Bridge.saveSettings(State.settings);
+      draw();
+    },
   });
 
-  return {
-    el,
-    sync() {
-      const sessions = liveSessions();
-      const shape = [
-        availableClis.map((c) => `${c.id}:${c.version}`).join("|"),
-        State.agentCli,
-        sessions.length,
-        State.tasks.map((t) => `${t.id}:${t.name}:${t.host ?? ""}:${t.state}`).join("|"),
-        getLocale(),
-      ].join("~");
-      if (shape === rendered) return;
-      rendered = shape;
+  const head = h("div", { class: "home-card-head" }, seg.el, h("div", { class: "grow" }), dots, rescanBtn);
+  const grid = h("div", { class: "home-card-grid" });
+  const live = h("div", { class: "live-list" });
+  const root = h("div", { class: "home-card-root" }, head, grid, live);
+  const nav = pushNav(root);
 
-      title.textContent =
-        availableClis.length > 0 ? tn("consoles.count", availableClis.length) : t("consoles.found");
+  // ── Detail (push-nav) ──────────────────────────────────────────────────────
 
-      clear(list);
-      if (availableClis.length === 0) {
-        list.append(h("div", { class: "console-empty", text: t("consoles.searchHint") }));
+  function closeDetail() {
+    detailId = null;
+    nav.pop();
+    draw();
+  }
+
+  function openDetail(console: Console) {
+    detailId = console.id;
+    const sessions = liveSessionRows();
+    const chips = h("div", { class: "cap-row" });
+    if (console.can.streaming) chips.append(h("span", { class: "cap cap-can", text: t("consoles.cap.streams") }));
+    if (console.can.resume) chips.append(h("span", { class: "cap cap-can", text: t("consoles.cap.resume") }));
+    if (console.can.approvable) {
+      chips.append(h("span", { class: "cap cap-can", text: t("consoles.cap.approvableHere") }));
+    }
+
+    const useBtn = button({
+      label: console.id === State.agentCli ? t("consoles.inUse") : t("consoles.use"),
+      variant: "primary",
+      disabled: console.id === State.agentCli,
+      onClick: () => {
+        chooseProvider(console.id);
+        opts.onPick?.();
+        closeDetail();
+      },
+    });
+
+    const body = h(
+      "div",
+      { class: "console-detail" },
+      h(
+        "div",
+        { class: "console-detail-head" },
+        stillMiniBot(consoleColor(console.id), 28),
+        h("b", { text: console.label }),
+        h("span", { class: "console-version", text: console.version }),
+      ),
+      chips,
+      sessions.length > 0
+        ? h("div", { class: "console-detail-sessions" }, h("div", { class: "live-title", text: t("consoles.runningNow") }), ...sessions)
+        : null,
+      h("div", { class: "home-card-detail-actions" }, useBtn),
+    );
+
+    nav.push(t("home.pane.consoles"), body);
+  }
+
+  // ── Rescan ────────────────────────────────────────────────────────────────
+
+  async function rescan() {
+    const before = new Set(availableClis.map((c) => c.id));
+    rescanBtn.classList.add("spinning");
+    await reloadConsoles();
+    rescanBtn.classList.remove("spinning");
+    const added = availableClis.filter((c) => !before.has(c.id)).length;
+    toast(root, {
+      message: added > 0 ? tn("consoles.foundNew", added) : t("consoles.noneNew"),
+      tone: added > 0 ? "success" : "neutral",
+    });
+  }
+
+  // ── Grid (either pane) ────────────────────────────────────────────────────
+
+  function attachHoldAndDetail(el: HTMLElement, open: () => void) {
+    el.tabIndex = 0;
+    let holdTimer: number | null = null;
+    let held = false;
+    el.addEventListener("pointerdown", () => {
+      held = false;
+      holdTimer = window.setTimeout(() => {
+        held = true;
+        open();
+      }, HOLD_MS);
+    });
+    const cancelHold = () => {
+      if (holdTimer != null) window.clearTimeout(holdTimer);
+      holdTimer = null;
+    };
+    el.addEventListener("pointerup", cancelHold);
+    el.addEventListener("pointerleave", cancelHold);
+    el.addEventListener("click", (e) => {
+      if (held) {
+        // The hold already opened the detail; the click that follows the
+        // pointerup must not also select the console.
+        e.stopImmediatePropagation();
+        e.preventDefault();
       }
+    });
+    el.addEventListener("contextmenu", (e) => {
+      e.preventDefault();
+      open();
+    });
+    el.addEventListener("keydown", (e) => {
+      const ke = e as KeyboardEvent;
+      if (ke.key === "Enter" && ke.shiftKey) {
+        e.preventDefault();
+        open();
+      }
+    });
+  }
 
-      for (const console of availableClis) {
-        const on = console.id === State.agentCli;
-        const row = h(
-          "button",
-          { class: on ? "console-row on" : "console-row", title: console.path },
-          h("span", { class: "console-face" }, stillMiniBot(console.color, 20)),
-          h(
-            "span",
-            { class: "console-text" },
-            h(
-              "span",
-              { class: "console-head" },
-              h("b", { text: console.label }),
-              h("span", { class: "console-version", text: console.version }),
-            ),
-            capabilities(console),
-          ),
-          on ? icon("check", { size: 11 }) : h("span", { class: "console-pick" }),
-        );
-        row.addEventListener("click", () => {
+  function drawConsolesGrid() {
+    clear(grid);
+    grid.classList.toggle("empty", availableClis.length === 0);
+
+    if (availableClis.length === 0) {
+      grid.append(
+        h(
+          "div",
+          { class: "console-empty-wide" },
+          stillMiniBot("#8e939c", 20),
+          h("span", { text: t("consoles.found") }),
+          button({ label: t("consoles.rescan"), size: "md", onClick: () => void rescan() }),
+        ),
+      );
+      dots.style.display = "none";
+      return;
+    }
+
+    // `State.tasks` only ever carries one Claude Code session's metadata, and
+    // only once it has been picked (see mock-bridge.ts's note on the same
+    // gap) — so "is this console live" can only be known for the selected
+    // one today. `liveIds` stays a set, not a bool, because orderConsoles()
+    // is written for the general case; it is just never more than one
+    // element until a live session can be tied to a console that isn't the
+    // selection.
+    const hasLiveSession = liveSessionRows().length > 0;
+    const liveIds = new Set(hasLiveSession && State.agentCli ? [State.agentCli] : []);
+    const ordered = orderConsoles(availableClis, State.agentCli, liveIds);
+    const grouped = pages(ordered, PER_PAGE);
+    consolePage = Math.min(consolePage, grouped.length - 1);
+    const shown = grouped[consolePage] ?? [];
+
+    clear(dots);
+    dots.style.display = grouped.length > 1 ? "" : "none";
+    grouped.forEach((_, i) => {
+      const d = h("button", { class: i === consolePage ? "page-dot on" : "page-dot" });
+      d.addEventListener("click", () => {
+        consolePage = i;
+        draw();
+      });
+      dots.append(d);
+    });
+
+    // The selection can vanish from under the list (uninstalled since it was
+    // picked) — shown once, pinned to the grid rather than lost in a page.
+    if (selectedConsoleMissing(State.agentCli, availableClis)) {
+      const ghost = h(
+        "div",
+        { class: "pill pill-ghost", title: t("consoles.notFound") },
+        h("span", { class: "mini ghost-face" }),
+        h("span", { class: "lbl", text: "– –" }),
+      );
+      grid.append(ghost);
+    }
+
+    for (const console of shown) {
+      const state = tileStateFor(console, State.agentCli);
+      const el = tile({
+        face: stillMiniBot(consoleColor(console.id), 20),
+        name: console.label,
+        color: consoleColor(console.id),
+        badge: state === "selected" ? (hasLiveSession ? "live" : "finished") : null,
+        onSelect: () => {
           chooseProvider(console.id);
           opts.onPick?.();
-        });
-        list.append(row);
-      }
+        },
+      });
+      el.classList.add(`console-tile-${state}`);
+      if (state === "selected") el.style.setProperty("--tile-accent", consoleColor(console.id));
+      el.title = `${console.version || t("settings.agents.versionUnknown")}`;
+      attachHoldAndDetail(el, () => openDetail(console));
+      grid.append(el);
+    }
+  }
 
+  function drawServicesGrid() {
+    clear(grid);
+    dots.style.display = "none";
+    for (const t of State.otherTasks.slice(0, PER_PAGE)) grid.append(servicePill(t, opts.setFocus));
+    pruneMiniBots();
+  }
+
+  // ── Top-level keyboard: ←/→ changes the console page ────────────────────
+  root.addEventListener("keydown", (e) => {
+    if (pane !== "consoles" || detailId != null) return;
+    const key = (e as KeyboardEvent).key;
+    if (key !== "ArrowLeft" && key !== "ArrowRight") return;
+    const grouped = pages(availableClis, PER_PAGE);
+    if (grouped.length < 2) return;
+    e.preventDefault();
+    consolePage = (consolePage + (key === "ArrowRight" ? 1 : -1) + grouped.length) % grouped.length;
+    draw();
+  });
+
+  let shownShape = "";
+
+  function draw() {
+    rescanBtn.style.display = pane === "consoles" ? "" : "none";
+    if (pane === "consoles") {
+      drawConsolesGrid();
       clear(live);
+      const sessions = liveSessionRows();
       if (sessions.length > 0) {
         live.append(h("div", { class: "live-title", text: t("consoles.runningNow") }), ...sessions);
       }
+    } else {
+      drawServicesGrid();
+      clear(live);
+    }
+  }
+
+  draw();
+
+  return {
+    el: nav.el,
+    sync() {
+      if (detailId != null) return; // the detail frame owns the card while open
+      const shape = [
+        pane,
+        availableClis.map((c) => `${c.id}:${c.version}`).join("|"),
+        State.agentCli,
+        State.tasks.map((t) => `${t.id}:${t.name}:${t.host ?? ""}:${t.state}`).join("|"),
+        State.otherTasks.map((t) => `${t.id}:${t.pillBadge ?? ""}`).join("|"),
+        getLocale(),
+      ].join("~");
+      if (shape === shownShape) return;
+      shownShape = shape;
+      draw();
     },
-    /** Called when the panel becomes visible. */
     focus() {
       rescanOnFocus();
-      el.focus();
+      root.focus();
     },
   };
 }

@@ -35,6 +35,7 @@ export const en = {
     cap: {
       streams: "streams",
       oneShot: "one shot",
+      resume: "resumes",
       approvableHere: "approvable here",
       asksInTerminal: "asks in its terminal",
       unverified: "unverified",
@@ -43,6 +44,9 @@ export const en = {
     inUse: "In use",
     rescan: "Search again",
     sessions: { one: "{n} session", other: "{n} sessions" },
+    notFound: "Not found",
+    foundNew: { one: "Found {n} new console", other: "Found {n} new consoles" },
+    noneNew: "No new consoles found",
   },
 
   chat: {

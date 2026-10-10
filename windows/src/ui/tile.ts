@@ -12,7 +12,7 @@
 import { h } from "../views/dom";
 import { icon, type IconName } from "../views/icons";
 
-export type TileBadge = "approval" | "finished" | "error";
+export type TileBadge = "approval" | "finished" | "error" | "live";
 
 export interface TileOptions {
   /** The 24px face — an animated mini-bot canvas, a still one, whatever the
@@ -29,8 +29,12 @@ const BADGE_COLORS: Record<TileBadge, string> = {
   approval: "#F5A524",
   finished: "#22C55E",
   error: "#F4505E",
+  live: "#22C55E",
 };
-const BADGE_ICONS: Record<TileBadge, IconName> = { approval: "bang", finished: "check", error: "xmark" };
+// "live" has no icon — see tile()'s badge branch, which draws it as a
+// plain pulsing dot instead of an icon-in-a-circle, same mark as the
+// `.live-dot` rows below the grid (views/consoles.ts's liveSessionRows).
+const BADGE_ICONS: Partial<Record<TileBadge, IconName>> = { approval: "bang", finished: "check", error: "xmark" };
 
 /** Lightens a hex colour toward white by `amount` (0..1) — used for the label
  *  on hover, where the plain colour alone reads too dim against the tile. */
@@ -65,7 +69,11 @@ export function tile(opts: TileOptions): HTMLElement {
 
   if (opts.badge) {
     const color = BADGE_COLORS[opts.badge];
-    const inner = h("i", { style: `background:${color}` }, icon(BADGE_ICONS[opts.badge], { size: 6 }));
+    const iconName = BADGE_ICONS[opts.badge];
+    const inner =
+      opts.badge === "live"
+        ? h("i", { class: "pill-badge-live-dot", style: `background:${color}` })
+        : h("i", { style: `background:${color}` }, icon(iconName!, { size: 6 }));
     const badgeEl = h("div", { class: "pill-badge" }, inner);
     badgeEl.style.boxShadow = `0 0 4px ${color}99`;
     el.append(badgeEl);

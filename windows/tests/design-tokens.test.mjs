@@ -41,13 +41,18 @@ const cssFiles = allFiles(SRC).filter((f) => extname(f) === ".css");
  * Pre-existing gaps this test found but Fase 1 did not create and does not
  * fix — touching them would be scope creep into files this phase otherwise
  * leaves alone (rule 3, docs/plan-v2.md § 1; see docs/plan-v2-notas.md):
- *   --wash     set at runtime via `style.setProperty` (views/chat.ts,
- *              views/views.ts), never in a stylesheet — legitimate, not a gap.
- *   --ink-1/-3 used in style.css, declared nowhere — looks like a pre-Fase-1
- *              typo (for --ink/--ink-2?) that quietly no-ops those rules.
- *              Left for whichever phase actually touches that CSS.
+ *   --wash         set at runtime via `style.setProperty` (views/chat.ts,
+ *                  views/views.ts), never in a stylesheet — legitimate, not a gap.
+ *   --ink-1/-3     used in style.css, declared nowhere — looks like a pre-Fase-1
+ *                  typo (for --ink/--ink-2?) that quietly no-ops those rules.
+ *                  Left for whichever phase actually touches that CSS.
+ *   --tile-accent  same pattern as --wash: set at runtime via
+ *                  `style.setProperty` (views/consoles.ts, from the
+ *                  selected console's own color), with a literal fallback
+ *                  in .console-tile-selected's `var(--tile-accent, #22c55e)`
+ *                  for the one frame before JS sets it.
  */
-const KNOWN_UNDECLARED = new Set(["--wash", "--ink-1", "--ink-3"]);
+const KNOWN_UNDECLARED = new Set(["--wash", "--ink-1", "--ink-3", "--tile-accent"]);
 
 test("every CSS variable used in src/ is declared somewhere in src/", () => {
   const declared = new Set();

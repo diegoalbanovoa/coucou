@@ -7,13 +7,11 @@ import { icon } from "./icons";
 import { Ticker } from "./ticker";
 import { State, type AgentTask } from "../core/state";
 import { washRGBA, type IslandViewName, type Wash } from "../core/layout";
-import { createMiniBot, pruneMiniBots } from "../mochi/minibots";
 import { buildPrompt } from "./chat";
-import { buildConsolePanel } from "./consoles";
+import { buildHomeRightCard } from "./consoles";
 import { buildSystem } from "./system";
 import { buildChoose, buildUpload, buildUploading } from "./upload";
 import { renderIntegrationCard, type IntegrationCardHooks } from "./integrations";
-import { tile } from "../ui/tile";
 import { t, getLocale } from "../i18n/index";
 
 export interface ViewActions {
@@ -152,20 +150,18 @@ function buildOverview(actions: ViewActions): ViewHost {
     icon("arrowUpRight", { size: 8 }),
   );
   const left = card(null, leftBody, jump);
-  const pills = h("div", { class: "pills" });
-  // The right card was the integration pills and nothing else, so with no
-  // integration keys configured it was an empty half of the island. The
-  // consoles go there when there are no pills to show — without taking the
-  // pills away from anyone who does configure them.
-  const consoles = buildConsolePanel();
-  const right = card(null, pills, consoles.el);
+  // One card, two panes behind a segmented switch (Fase 3) — a user's
+  // choice via settings.homeRightPane, not the old "pills if any are
+  // configured, else consoles" auto-detection that left consoles
+  // unreachable the moment someone configured an integration.
+  const homeCard = buildHomeRightCard({ setFocus: (id) => actions.setFocus(id) });
+  const right = card(null, homeCard.el);
 
   const el = h("div", { class: "view overview" },
     h("div", { class: "left" }, left),
     h("div", { class: "right" }, right),
   );
 
-  let pillIds = "";
   let detailOpen = false;
   let lastFocus: string | null = null;
   let mode: "ticker" | "card" | null = null;
@@ -251,33 +247,9 @@ function buildOverview(actions: ViewActions): ViewHost {
       jump.style.display = detailOpen ? "none" : "";
       jump.title = t("tabs.openTarget");
 
-      const others = State.otherTasks.slice(0, 4);
-      const pillKey = others.map((t) => `${t.id}:${t.pillBadge ?? ""}`).join("|");
-      if (pillKey !== pillIds) {
-        pillIds = pillKey;
-        clear(pills);
-        for (const t of others) pills.append(buildPill(t, actions));
-        pruneMiniBots();
-      }
-      const anyPills = others.length > 0;
-      pills.style.display = anyPills ? "" : "none";
-      consoles.el.style.display = anyPills ? "none" : "";
-      if (!anyPills) consoles.sync();
+      homeCard.sync();
     },
   };
-}
-
-function buildPill(task: AgentTask, actions: ViewActions): HTMLElement {
-  // No override: `task.name` is the project while a session runs and the agent
-  // between sessions, and both are more use than the name of an editor that
-  // may not be involved at all.
-  return tile({
-    face: createMiniBot(task, 24),
-    name: task.name,
-    color: task.color,
-    badge: task.pillBadge,
-    onSelect: () => actions.setFocus(task.id),
-  });
 }
 
 // ── Empty ─────────────────────────────────────────────────────────────────────
@@ -297,7 +269,10 @@ function buildPill(task: AgentTask, actions: ViewActions): HTMLElement {
  * chat, which is what someone on this screen was reaching for.
  */
 function buildEmpty(actions: ViewActions): ViewHost {
-  const panel = buildConsolePanel({ onPick: () => actions.setView("prompt") });
+  const panel = buildHomeRightCard({
+    setFocus: (id) => actions.setFocus(id),
+    onPick: () => actions.setView("prompt"),
+  });
   const body = h("div", { class: "stack", style: "padding:0 16px 0 104px" }, panel.el);
   return {
     el: h("div", { class: "view" }, card(null, body)),
