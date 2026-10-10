@@ -485,12 +485,21 @@ export class Island {
 
   // ── Geometry ────────────────────────────────────────────────────────────────
 
+  /** Re-applies the current view's height against `State.workAreaHeight` —
+   *  called after a "screen-changed" event refreshes it (main.ts), so a chat
+   *  already open re-clamps to the new monitor without the user having to
+   *  touch the view. */
+  refreshGeometry() {
+    this.animateGeometry(false);
+  }
+
   private targetSize(): { w: number; h: number; r: number } {
     const { w, h } = islandSize(
       State.mode,
       State.view,
       State.chatHistory.length,
       State.chatExpanded,
+      State.workAreaHeight,
     );
     const r = State.mode === "expanded" ? EXPANDED_CORNER : ROUNDED_CORNER;
     return { w, h, r };
@@ -939,6 +948,6 @@ export class Island {
   }
 
   get chatHeight() {
-    return chatPromptHeight(State.chatHistory.length);
+    return chatPromptHeight(State.chatHistory.length, State.chatExpanded, State.workAreaHeight);
   }
 }

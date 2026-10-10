@@ -22,6 +22,7 @@ async function main() {
   const boot = await Bridge.boot();
   if (boot) {
     State.settings = { ...State.settings, ...boot.settings };
+    State.workAreaHeight = boot.screen.workHeight;
   }
   setLocale(resolveLocale(State.settings.language));
   document.documentElement.lang = resolveLocale(State.settings.language);
@@ -56,7 +57,14 @@ async function main() {
     }
   });
 
-  await onEvent<null>("screen-changed", () => void Bridge.reposition());
+  await onEvent<null>("screen-changed", () => {
+    void Bridge.reposition();
+    void Bridge.screenInfo().then((info) => {
+      if (!info) return;
+      State.workAreaHeight = info.workHeight;
+      island.refreshGeometry();
+    });
+  });
 
   // The settings window writes preferences; apply them here without a restart.
   await onEvent<Settings>("settings-changed", (s) => {

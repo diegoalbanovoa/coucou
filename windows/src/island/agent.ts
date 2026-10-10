@@ -121,15 +121,20 @@ export async function refreshSlashCommands() {
   slashCommands = (await Bridge.agentCommands()) ?? [];
 }
 
-/** Attach / detach, from the chip in the chat header. */
-export async function toggleProject() {
-  if (State.attachedProject) {
-    await Bridge.detachProject();
-    State.attachedProject = null;
-    await refreshSlashCommands();
-    State.notify();
-    return;
-  }
+/** Detaches the project, from "Quitar" in the chat header's project menu. */
+export async function detachProject() {
+  await Bridge.detachProject();
+  State.attachedProject = null;
+  await refreshSlashCommands();
+  State.notify();
+}
+
+/**
+ * Opens the native folder picker and attaches whatever was chosen — the
+ * chip's own click when nothing is attached yet, and "Cambiar…" in its menu
+ * when something already is (replacing it, not detaching first).
+ */
+export async function pickProject() {
   // The folder picker is a native window, so the cursor has to leave the
   // island to use it — and a cursor that leaves auto-closes the island after
   // `autoCloseInterval`, which is shorter than most folder hunts. Pinning is
@@ -159,19 +164,6 @@ export function chooseProvider(id: string | null) {
   State.agentCli = id;
   void Bridge.agentSetCli(id);
   State.notify();
-}
-
-/**
- * Cycles through the installed CLIs.
- *
- * There is no API-key mode at the end of the list any more. A CLI brings the
- * user's own subscription, tools, skills and CLAUDE.md; the key brought a
- * worse agent and a secret to look after.
- */
-export function nextProvider() {
-  if (availableClis.length < 2) return;
-  const index = availableClis.findIndex((c) => c.id === State.agentCli);
-  chooseProvider(availableClis[(index + 1) % availableClis.length].id);
 }
 
 /** The label shown in the chat header for the current agent. */

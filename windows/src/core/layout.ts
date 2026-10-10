@@ -49,10 +49,13 @@ export interface ViewLayout {
   agentMode: AgentLayoutMode;
 }
 
-// The window is a fixed 720×320 (largest view) like the macOS panel; the island is
-// drawn inside it, glued to the top edge and horizontally centred.
+// The window is a fixed 720×640 (tall enough for the tallest view) like the
+// macOS panel; the island is drawn inside it, glued to the top edge and
+// horizontally centred. PANEL_H has to stay ≥ CHAT_MAX_H + its margin or the
+// window itself clips the expanded chat — see chatPromptHeight's note and
+// src-tauri/src/island.rs's PANEL_H, hand-kept equal to this one.
 export const PANEL_W = 720;
-export const PANEL_H = 320;
+export const PANEL_H = 640;
 
 // No notch on a PC: these are the hidden/compact sizes from docs/SPEC.md.
 export const NOTCH_W = 184;
@@ -84,7 +87,12 @@ export const VIEW_LAYOUTS: Record<IslandViewName, ViewLayout> = {
   uploading: { height: 176, botX: 46, botY: 103, botDiameter: 20, agentMode: "none" },
   choose: { height: 176, botX: 60, botY: 101, botDiameter: 52, agentMode: "column" },
   mail: { height: 240, botX: 56, botY: null, botDiameter: 46, agentMode: "column" },
-  prompt: { height: 160, botX: 52, botY: null, botDiameter: 44, agentMode: "column" },
+  // The chat draws its own small Mochi in its header (24px, same engine —
+  // see views/chat.ts's avatarSlot) instead of using the big shared one
+  // every other view places off to the side. Tucked into the corner at
+  // effectively zero size rather than actually skipped: botPosition() has no
+  // per-view "don't draw" branch, and one was not worth adding for this.
+  prompt: { height: 160, botX: 8, botY: 8, botDiameter: 1, agentMode: "none" },
   searching: { height: 160, botX: 52, botY: null, botDiameter: 44, agentMode: "column" },
   result: { height: 160, botX: 52, botY: null, botDiameter: 44, agentMode: "column" },
   note: { height: 160, botX: 60, botY: null, botDiameter: 50, agentMode: "column" },
@@ -98,10 +106,19 @@ export const VIEW_LAYOUTS: Record<IslandViewName, ViewLayout> = {
 
 /** The chat never gets less than this, whatever is in it. */
 export const CHAT_MIN_H = 300;
-/** Nor more than this share of the display it is on… */
+/** Nor more than this share of the work area it is on… */
 const CHAT_SCREEN_SHARE = 0.62;
 /** …nor more than this outright, however large the display. */
-const CHAT_MAX_H = 620;
+export const CHAT_MAX_H = 620;
+
+/** `desired`, pinned inside `[minHeight, maxHeight]`. Applied to every view's
+ *  height (not just the chat's) so none of them can ever ask the native
+ *  window — fixed at `PANEL_H`, which only covers up to `CHAT_MAX_H` — for
+ *  more than the display the island is on can actually show before the
+ *  window itself clips it. See docs/plan-v2-notas.md § Fase 4. */
+export function clampViewHeight(desired: number, maxHeight: number, minHeight: number): number {
+  return Math.min(Math.max(desired, minHeight), maxHeight);
+}
 
 /**
  * How tall the chat panel is.
@@ -112,16 +129,18 @@ const CHAT_MAX_H = 620;
  * composer — which is why there was nowhere to put a search bar, and why the
  * log was a few lines tall on a 4K screen.
  *
- * The ceiling comes from the display rather than a constant, read straight off
- * `window.screen` so a second monitor or a resolution change needs no state
- * kept anywhere. `CHAT_MAX_H` is still there because a chat taller than that
- * stops being an island and becomes a window.
+ * The ceiling comes from the display rather than a constant. `workAreaHeight`
+ * is `core/bridge.ts`'s `ScreenInfo.workHeight` — the real work area of the
+ * monitor the island is on (taskbar excluded), read from Rust's
+ * `MonitorFromWindow`/`GetMonitorInfoW` rather than guessed from
+ * `window.screen`, which can name the wrong monitor entirely when the island
+ * is not on the primary display. `CHAT_MAX_H` is still there because a chat
+ * taller than that stops being an island and becomes a window.
  */
-export function chatPromptHeight(messageCount: number, expanded = false): number {
-  const display = globalThis.screen?.availHeight ?? 1080;
-  const ceiling = Math.min(CHAT_MAX_H, Math.max(CHAT_MIN_H, Math.round(display * CHAT_SCREEN_SHARE)));
+export function chatPromptHeight(messageCount: number, expanded = false, workAreaHeight = 1080): number {
+  const ceiling = clampViewHeight(Math.round(workAreaHeight * CHAT_SCREEN_SHARE), CHAT_MAX_H, CHAT_MIN_H);
   if (expanded) return ceiling;
-  return Math.min(ceiling, Math.max(CHAT_MIN_H, 300 + messageCount * 44));
+  return clampViewHeight(300 + messageCount * 44, ceiling, CHAT_MIN_H);
 }
 
 export function islandSize(
@@ -129,6 +148,7 @@ export function islandSize(
   view: IslandViewName,
   chatCount = 0,
   chatExpanded = false,
+  workAreaHeight = 1080,
 ): { w: number; h: number } {
   switch (mode) {
     case "hidden":
@@ -139,7 +159,9 @@ export function islandSize(
       return { w: COMPACT_W, h: NOTCH_H };
     case "expanded": {
       const h =
-        view === "prompt" ? chatPromptHeight(chatCount, chatExpanded) : VIEW_LAYOUTS[view].height;
+        view === "prompt"
+          ? chatPromptHeight(chatCount, chatExpanded, workAreaHeight)
+          : clampViewHeight(VIEW_LAYOUTS[view].height, workAreaHeight, 0);
       return { w: EXPANDED_W, h };
     }
   }

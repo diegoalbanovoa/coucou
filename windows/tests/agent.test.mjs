@@ -5,9 +5,10 @@ import { beforeEach, test } from "node:test";
 import assert from "node:assert/strict";
 import { calls, emit, replies, sent } from "./tauri.mjs";
 import {
+  availableClis,
+  chooseProvider,
   keepConversation,
   loadAgentEnvironment,
-  nextProvider,
   registerAgentHandlers,
   reloadConsoles,
   startFreshConversation,
@@ -89,31 +90,14 @@ test("no CLI installed leaves the chat on the API, with nothing remembered", asy
   assert.deepEqual(sent("agent_set_cli"), []);
 });
 
-test("switching agent cycles the installed CLIs and remembers the choice", async () => {
+test("picking an agent remembers the choice", async () => {
   machine({ cli: "claude" });
   await loadAgentEnvironment();
   calls.length = 0;
 
-  nextProvider();
+  chooseProvider("gemini");
   assert.equal(State.agentCli, "gemini");
-
-  // Past the last one it comes back round. There is no API-key mode at the end
-  // of the list to fall into any more.
-  nextProvider();
-  assert.equal(State.agentCli, "claude");
-
-  assert.deepEqual(sent("agent_set_cli"), [{ cli: "gemini" }, { cli: "claude" }]);
-});
-
-test("one installed CLI has nothing to switch to", async () => {
-  machine({ clis: [CLAUDE], cli: "claude" });
-  await loadAgentEnvironment();
-  calls.length = 0;
-
-  nextProvider();
-
-  assert.equal(State.agentCli, "claude");
-  assert.deepEqual(sent("agent_set_cli"), []);
+  assert.deepEqual(sent("agent_set_cli"), [{ cli: "gemini" }]);
 });
 
 test("the project Rust restored is what `/` is asked about", async () => {
@@ -201,8 +185,10 @@ test("the versions arriving late replace the CLI list", async () => {
 
   emit("agent-clis", [{ ...CLAUDE, version: "2.1.241" }, GEMINI]);
 
-  // Switching now reaches Gemini, which was not in the list a moment ago.
-  nextProvider();
+  // Gemini is now reachable, which it was not a moment ago.
+  assert.deepEqual(availableClis.map((c) => c.id), ["claude", "gemini"]);
+  assert.equal(availableClis.find((c) => c.id === "claude").version, "2.1.241");
+  chooseProvider("gemini");
   assert.equal(State.agentCli, "gemini");
 });
 
@@ -234,7 +220,8 @@ test("a re-scan picks up a console that was just installed", async () => {
 
   // The new one is reachable now, and the choice did not move on its own.
   assert.equal(State.agentCli, "claude");
-  nextProvider();
+  assert.deepEqual(availableClis.map((c) => c.id), ["claude", "gemini"]);
+  chooseProvider("gemini");
   assert.equal(State.agentCli, "gemini");
 });
 

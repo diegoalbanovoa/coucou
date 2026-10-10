@@ -179,6 +179,13 @@ class AppState {
   chatSteps: string[] = [];
   /** Whether the chat is using all the height the display allows. */
   chatExpanded = false;
+  /** The work area of the monitor the island is on (logical px, taskbar
+   *  excluded) — `core/bridge.ts`'s `ScreenInfo.workHeight`, refreshed on
+   *  boot and on every "screen-changed" event. `core/layout.ts`'s
+   *  `islandSize`/`chatPromptHeight` clamp every view's height against it so
+   *  the native window (fixed at `PANEL_H`) never has to draw past the
+   *  display it is actually on. 1080 until boot resolves it. */
+  workAreaHeight = 1080;
   /** The find bar's query. Null when it is closed. */
   chatQuery: string | null = null;
   /** Images attached to the message being written. */

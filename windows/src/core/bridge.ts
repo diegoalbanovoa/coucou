@@ -20,10 +20,22 @@ async function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T |
   }
 }
 
+export interface ScreenInfo {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  scale: number;
+  /** How tall the island can grow (logical px) before it would cover the
+   *  taskbar — see src-tauri/src/island.rs's screen_info, which this mirrors.
+   *  core/layout.ts's chatPromptHeight clamps against it. */
+  workHeight: number;
+}
+
 export interface BootInfo {
   settings: Settings;
   /** Logical screen rect of the monitor the island lives on. */
-  screen: { x: number; y: number; width: number; height: number; scale: number };
+  screen: ScreenInfo;
   version: string;
   hookPath: string;
   /** False where the OS has no global cursor (Wayland): see Island.followPageCursor. */
@@ -32,6 +44,10 @@ export interface BootInfo {
 
 export const Bridge = {
   boot: () => call<BootInfo>("boot"),
+
+  /** Re-read after a "screen-changed" event — resolution/work-area can only
+   *  change between calls, never during boot's. */
+  screenInfo: () => call<ScreenInfo>("screen_info"),
 
   saveSettings: (settings: Settings) => call<void>("save_settings", { settings }),
 

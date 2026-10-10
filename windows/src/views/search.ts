@@ -26,17 +26,28 @@ export interface Match {
 export const MIN_QUERY = 2;
 
 /**
+ * Case- and accent-insensitive, so "accion" finds "acción": decomposes
+ * accented letters into the base letter plus a combining mark (NFD) and
+ * drops the marks. Changes length (an "á" becomes two code units, "a" and
+ * the combining acute), which is why `findMatches`/`highlight` both measure
+ * `needle.length` in this normalized form, not the original query's.
+ */
+function normalize(s: string): string {
+  return s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+}
+
+/**
  * Every hit, in reading order — oldest message first, and within a message
- * left to right. Case-insensitive, because nobody searching a transcript
- * means to be particular about it.
+ * left to right. Case- and accent-insensitive, because nobody searching a
+ * transcript means to be particular about either.
  */
 export function findMatches(messages: ChatMessage[], query: string): Match[] {
-  const needle = query.trim().toLowerCase();
+  const needle = normalize(query.trim());
   if (needle.length < MIN_QUERY) return [];
 
   const out: Match[] = [];
   for (const message of messages) {
-    const hay = message.content.toLowerCase();
+    const hay = normalize(message.content);
     let at = hay.indexOf(needle);
     while (at !== -1) {
       out.push({ id: message.id, at, length: needle.length });
@@ -72,7 +83,7 @@ export function step(matches: Match[], index: number, by: number): number {
  * a text node is split and one piece is wrapped.
  */
 export function highlight(root: HTMLElement, query: string): HTMLElement[] {
-  const needle = query.trim().toLowerCase();
+  const needle = normalize(query.trim());
   if (needle.length < MIN_QUERY) return [];
 
   // Collected first: splitting text nodes while walking them would have the
@@ -80,7 +91,7 @@ export function highlight(root: HTMLElement, query: string): HTMLElement[] {
   const texts: Text[] = [];
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
   for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-    if (node.nodeValue && node.nodeValue.toLowerCase().includes(needle)) {
+    if (node.nodeValue && normalize(node.nodeValue).includes(needle)) {
       texts.push(node as Text);
     }
   }
@@ -90,7 +101,15 @@ export function highlight(root: HTMLElement, query: string): HTMLElement[] {
     let node = text;
     for (;;) {
       const value = node.nodeValue ?? "";
-      const at = value.toLowerCase().indexOf(needle);
+      // `needle` is normalized (NFD, diacritics stripped, lower-case); for
+      // every accented letter Spanish or English chat text actually uses,
+      // that normalizes to the same length as the original one character —
+      // à/é/ñ/ü and friends each decompose to exactly one base letter plus
+      // one combining mark, so stripping the mark lands back on 1:1. That
+      // means `at`/`needle.length`, measured in the normalized string, line
+      // up with `value`'s own indices closely enough to splitText on
+      // directly, with no separate re-mapping pass.
+      const at = normalize(value).indexOf(needle);
       if (at === -1) break;
 
       // splitText leaves `node` as the part before the hit and returns the

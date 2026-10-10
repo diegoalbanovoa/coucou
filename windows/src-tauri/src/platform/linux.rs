@@ -324,6 +324,21 @@ pub fn set_input_region(win: &WebviewWindow, rect: Region) {
     apply_input_region(&gw, rect);
 }
 
+/// Bottom edge of the work area of whichever monitor the island window is on
+/// (physical px, screen-relative) — see the Windows implementation and
+/// `island::screen_info` for what this feeds.
+///
+/// `None` here, always: layer-shell (Wayland) and X11 window managers expose
+/// this very differently, and verifying a GDK monitor/workarea call actually
+/// works needs a Linux build to test against, which this pass does not have.
+/// `screen_info` already falls back to the monitor's full height when this
+/// returns `None` — the same ceiling the chat view used before this fix, so
+/// nothing regresses; a taskbar-aware ceiling on Linux is left to whichever
+/// phase can build and run there. See docs/plan-v2-notas.md § Fase 4.
+pub fn work_area_bottom(_win: &WebviewWindow) -> Option<i32> {
+    None
+}
+
 /// The desktop's own folder picker, for attaching a project to the chat.
 /// Whichever of these is installed answers; none of them means no picker, and
 /// the caller simply gets nothing back.

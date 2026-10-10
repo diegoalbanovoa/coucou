@@ -14,12 +14,26 @@ use tauri::{AppHandle, Emitter, Manager, Monitor, PhysicalPosition, PhysicalSize
 
 use crate::platform::{self, cursor_physical, left_button_down};
 
-/// Logical size of the full window — the largest island view, like the macOS panel.
+/// Logical size of the full window — tall enough for the tallest view, like
+/// the macOS panel. That used to be a fixed 320 px, true while every view's
+/// height (core/layout.ts's VIEW_LAYOUTS) stayed under it — the expanded chat
+/// (core/layout.ts's CHAT_MAX_H, up to 620) no longer does, and a window
+/// shorter than the view it is told to draw clips that view at the OS level,
+/// not just visually (see docs/plan-v2-notas.md § Fase 4). Kept hand-synced
+/// with CHAT_MAX_H + its margin, the same way PANEL_W already stays in sync
+/// with EXPANDED_W — nothing wires the two files together at build time.
 pub const PANEL_W: f64 = 720.0;
-pub const PANEL_H: f64 = 320.0;
+pub const PANEL_H: f64 = 640.0;
 /// Logical size of the invisible strip that wakes the island when it is hidden.
 pub const STRIP_W: f64 = 240.0;
 pub const STRIP_H: f64 = 6.0;
+/// Floor under `ScreenInfo::work_height`, so a monitor reporting a bogus or
+/// tiny work area never hands the front end a ceiling the chat view's own
+/// `CHAT_MIN_H` (core/layout.ts) could never satisfy. Kept equal to it by
+/// convention, the same way `PANEL_H` is hand-kept equal to `CHAT_MAX_H`+
+/// margin on the TS side — the two files are not wired together at build
+/// time.
+const MIN_WORK_HEIGHT: f64 = 300.0;
 
 pub const WINDOW_LABEL: &str = "island";
 
@@ -34,12 +48,21 @@ pub struct CursorPayload {
 }
 
 #[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
 pub struct ScreenInfo {
     pub x: f64,
     pub y: f64,
     pub width: f64,
     pub height: f64,
     pub scale: f64,
+    /// How tall the island can grow, in logical px, before it would cover the
+    /// taskbar (or run off a short display) — the work area's bottom edge
+    /// minus the island's top (`y`, the monitor's own top edge) minus a 12 px
+    /// margin. Falls back to `height` (the monitor's full height) wherever the
+    /// platform cannot report a work area (today: Linux — see
+    /// `platform::work_area_bottom`). `core/layout.ts`'s `chatPromptHeight`
+    /// clamps against this instead of guessing from `window.screen`.
+    pub work_height: f64,
 }
 
 /// The island shape in window-logical coordinates, pushed by the front end.
@@ -136,15 +159,28 @@ pub fn screen_info(app: &AppHandle, pref: &str) -> ScreenInfo {
             let scale = m.scale_factor();
             let p = m.position();
             let s = m.size();
+            let height = s.height as f64 / scale;
+            let work_height = window(app)
+                .and_then(|win| platform::work_area_bottom(&win))
+                .map(|bottom| ((bottom as f64 - p.y as f64) / scale - 12.0).max(MIN_WORK_HEIGHT))
+                .unwrap_or(height);
             ScreenInfo {
                 x: p.x as f64 / scale,
                 y: p.y as f64 / scale,
                 width: s.width as f64 / scale,
-                height: s.height as f64 / scale,
+                height,
                 scale,
+                work_height,
             }
         }
-        None => ScreenInfo { x: 0.0, y: 0.0, width: 1920.0, height: 1080.0, scale: 1.0 },
+        None => ScreenInfo {
+            x: 0.0,
+            y: 0.0,
+            width: 1920.0,
+            height: 1080.0,
+            scale: 1.0,
+            work_height: 1080.0,
+        },
     }
 }
 

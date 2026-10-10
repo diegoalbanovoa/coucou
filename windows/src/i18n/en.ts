@@ -65,8 +65,11 @@ export const en = {
     showWhole: "Show the whole reply",
     foldBack: "Fold it back up",
     turnStopped: "The turn stopped",
+    retry: "Retry",
     noReply: "No reply came back.",
     jumpToLatest: "Jump to the latest",
+    emptyTitle: "Ask away.",
+    attachImage: "Attach an image",
     removeImage: "Remove {name}",
     steps: { one: "{n} step", other: "{n} steps" },
     hideSteps: "hide",
@@ -78,11 +81,19 @@ export const en = {
     // What search.ts's counter() shows when there is nothing to count — "none"
     // on purpose, not "0/0": see that file's own note on why.
     searchNone: "none",
-    detachProject: "{path} — click to detach",
+    detachProject: "{path}",
     chooseProjectFolder: "Choose the folder the agent works in",
+    changeProject: "Change…",
+    removeProject: "Remove",
     shrink: "Make the chat smaller",
     grow: "Use the whole height",
     stopTurn: "Stop this turn",
+    more: "More",
+    newChat: "New chat",
+    newChatConfirm: "Start a new chat? This clears the conversation.",
+    copyConversation: "Copy the conversation",
+    you: "You",
+    openProjectInVSCode: "Open the project in Visual Studio Code",
   },
 
   files: {

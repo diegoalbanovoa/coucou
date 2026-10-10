@@ -7,7 +7,10 @@ use std::process::Command;
 use tauri::{AppHandle, Manager, WebviewWindow};
 
 use ::windows::core::{BOOL, PWSTR};
-use ::windows::Win32::Foundation::{CloseHandle, HANDLE, HLOCAL, HWND, LPARAM, LocalFree, POINT};
+use ::windows::Win32::Foundation::{CloseHandle, HANDLE, HLOCAL, HWND, LPARAM, LocalFree, POINT, RECT};
+use ::windows::Win32::Graphics::Gdi::{
+    GetMonitorInfoW, MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTONEAREST,
+};
 use ::windows::Win32::Security::Authorization::ConvertSidToStringSidW;
 use ::windows::Win32::Security::{GetTokenInformation, TokenUser, TOKEN_QUERY, TOKEN_USER};
 use ::windows::Win32::System::Com::{
@@ -247,6 +250,24 @@ fn hwnd_of(win: &WebviewWindow) -> Option<HWND> {
         return None;
     }
     Some(HWND(raw as *mut _))
+}
+
+/// Bottom edge of the work area (physical px, screen-relative) of whichever
+/// monitor the island window is nearest — the taskbar excluded, unlike a
+/// monitor's full `size()` (all `tao`/`tauri` expose). This is what keeps the
+/// expanded chat from being clipped by the panel window's own fixed height:
+/// see `island::screen_info`, which turns this into the logical ceiling
+/// `core/layout.ts`'s `chatPromptHeight` clamps against.
+pub fn work_area_bottom(win: &WebviewWindow) -> Option<i32> {
+    let hwnd = hwnd_of(win)?;
+    let monitor = unsafe { MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST) };
+    let mut info = MONITORINFO { cbSize: std::mem::size_of::<MONITORINFO>() as u32, ..Default::default() };
+    let ok = unsafe { GetMonitorInfoW(monitor, &mut info) };
+    if !ok.as_bool() {
+        return None;
+    }
+    let RECT { bottom, .. } = info.rcWork;
+    Some(bottom)
 }
 
 /// Lets dropped files reach the app again.

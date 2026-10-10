@@ -57,7 +57,7 @@ async function boot() {
   console.info("[mock] boot");
   return {
     settings: { ...State.settings },
-    screen: { x: 0, y: 0, width: 1920, height: 1080, scale: 1 },
+    screen: { x: 0, y: 0, width: 1920, height: 1080, scale: 1, workHeight: 1040 },
     version: "0.1.1-mock",
     hookPath: "C:\\Users\\diego\\AppData\\Local\\Coucou\\bin\\coucou-hook.exe",
     cursorPoll: true,
@@ -66,6 +66,10 @@ async function boot() {
 
 async function saveSettings(settings: unknown) {
   console.info("[mock] save_settings", settings);
+}
+
+async function screenInfo() {
+  return { x: 0, y: 0, width: 1920, height: 1080, scale: 1, workHeight: 1040 };
 }
 
 // ── consoles / agent ──────────────────────────────────────────────────────────
@@ -276,6 +280,7 @@ const noop = (name: string) => async (...args: unknown[]) => {
 
 export const Bridge = {
   boot,
+  screenInfo,
   saveSettings,
   setCollapsed: noop("set_collapsed"),
   setIslandRect: noop("set_island_rect"),

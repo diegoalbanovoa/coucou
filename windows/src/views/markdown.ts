@@ -8,6 +8,8 @@
 // (`parse`), and so the drawing can build nodes rather than HTML text: nothing
 // in a reply is ever parsed as markup, whatever the agent wrote.
 
+import { Bridge } from "../core/bridge";
+
 /** A run of text inside one block. */
 export interface Span {
   kind: "text" | "code" | "bold" | "italic" | "link";
@@ -167,11 +169,16 @@ function spanNode(span: Span): Node {
     }
     case "link": {
       // Nothing in the island navigates — a click would replace the island
-      // with the page — so a link shows its label and names its target.
+      // with the page — so this is a <span>, not an <a>, and the click opens
+      // the system browser (open_url) instead of the webview following it.
       const link = document.createElement("span");
       link.className = "md-link";
       link.textContent = span.text;
       link.title = span.href ?? "";
+      if (span.href) {
+        const href = span.href;
+        link.addEventListener("click", () => void Bridge.openUrl(href));
+      }
       return link;
     }
     default:

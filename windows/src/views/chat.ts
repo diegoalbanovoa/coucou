@@ -9,12 +9,19 @@ import { Bridge, onEvent, type AgentTurn, type DroppedFile } from "../core/bridg
 import { Sound } from "../core/sound";
 import { State, type ChatMessage } from "../core/state";
 import {
+  availableClis,
+  chooseProvider,
+  detachProject,
   keepConversation,
   matchingCommands,
-  nextProvider,
+  pickProject,
   providerLabel,
-  toggleProject,
+  startFreshConversation,
 } from "../island/agent";
+import { orderConsoles } from "../consoles/order";
+import { consoleColor } from "../consoles/palette";
+import { stillMiniBot, createMiniBot, pruneMiniBots } from "../mochi/minibots";
+import { inlineConfirm } from "../ui/inline-confirm";
 import type { ViewHost } from "./views";
 import { t, tn, getLocale } from "../i18n/index";
 
@@ -98,7 +105,13 @@ function replyBody(content: string): HTMLElement {
   return h("div", { class: "reply-wrap" }, body, more);
 }
 
-function bubble(message: ChatMessage): HTMLElement {
+/**
+ * One message, as a row. `precedingUserText` is the user message right
+ * before this one, if there is one — the only thing a failed turn's "Retry"
+ * needs, since nothing else about the original prompt survives once it has
+ * been sent (see submit()).
+ */
+function bubble(message: ChatMessage, precedingUserText: string | null, onRetry: (query: string) => void): HTMLElement {
   if (message.role === "user") {
     return h(
       "div",
@@ -108,10 +121,16 @@ function bubble(message: ChatMessage): HTMLElement {
   }
 
   if (message.role === "error") {
+    const head = h("div", { class: "reply-error-head" }, icon("bang", { size: 10 }), h("span", { text: t("chat.turnStopped") }));
+    if (precedingUserText) {
+      const retry = h("button", { class: "reply-error-retry", text: t("chat.retry") });
+      retry.addEventListener("click", () => onRetry(precedingUserText));
+      head.append(retry);
+    }
     const card = h(
       "div",
       { class: "reply-error", title: clockOf(message.at) },
-      h("div", { class: "reply-error-head" }, icon("bang", { size: 10 }), h("span", { text: t("chat.turnStopped") })),
+      head,
       h("div", { class: "reply-error-detail", text: message.content }),
     );
     const row = h("div", { class: "chat-row" });
@@ -232,33 +251,91 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
   // draft on every frame a token arrives in.
   const historyBox = h("div", { class: "chat-stack" });
   const draftBox = h("div", { class: "chat-stack" });
-  log.append(historyBox, draftBox);
+  const emptyAvatarSlot = h("span", { class: "chat-empty-avatar" });
+  const emptyState = h(
+    "div",
+    { class: "chat-empty-state" },
+    emptyAvatarSlot,
+    h("div", { class: "chat-empty-title", text: t("chat.emptyTitle") }),
+  );
+  log.append(historyBox, draftBox, emptyState);
   const jump = h("button", { class: "jump-btn", title: t("chat.jumpToLatest") }, icon("arrowDown", { size: 10 }));
-  const input = h("input", {
-    type: "text",
+  const input = h("textarea", {
     class: "chat-input",
+    rows: "1",
     spellcheck: "false",
+  }) as HTMLTextAreaElement;
+  const attachBtn = h("button", { class: "chat-icon-btn chat-attach-btn", title: t("chat.attachImage") }, icon("paperclip", { size: 13 }));
+  const fileInput = h("input", {
+    type: "file",
+    accept: "image/*",
+    multiple: "",
+    style: "display:none",
   }) as HTMLInputElement;
   const send = h("button", { class: "send-btn", title: t("chat.send") }, icon("arrowUp", { size: 11 }));
-  const bar = h("div", { class: "chat-bar" }, input, send);
+  const bar = h("div", { class: "chat-bar" }, attachBtn, fileInput, input, send);
 
-  // The header carries the two things that decide what a message does: which
-  // agent runs it, and where. Both read as plain text until hovered, so an
-  // ordinary question is not surrounded by machinery.
+  // The header carries the three things that decide what a message does:
+  // Mochi (which agent, and whether it is thinking), which agent runs it as
+  // text, and where. All three read as plain text/a quiet face until
+  // hovered, so an ordinary question is not surrounded by machinery.
+  const avatarSlot = h("span", { class: "chat-avatar" });
+  const providerItem = h("div", { class: "chat-meta-item" });
   const provider = h("button", { class: "chat-meta-btn", title: t("chat.switchConsole") });
+  const providerMenu = h("div", { class: "chat-dropdown" });
+  providerItem.append(provider, providerMenu);
+
+  const projectItem = h("div", { class: "chat-meta-item" });
   const projectBtn = h("button", { class: "chat-meta-btn" });
+  const projectMenu = h("div", { class: "chat-dropdown" });
+  projectItem.append(projectBtn, projectMenu);
+
   const findBtn = h("button", { class: "chat-icon-btn", title: t("chat.findTitle") });
   findBtn.append(icon("search", { size: 11 }));
-  const growBtn = h("button", { class: "chat-icon-btn" });
+
+  const moreItem = h("div", { class: "chat-meta-item" });
+  const moreBtn = h("button", { class: "chat-icon-btn", title: t("chat.more") });
+  moreBtn.append(icon("ellipsis", { size: 13 }));
+  const moreMenu = h("div", { class: "chat-dropdown chat-dropdown-right" });
+  moreItem.append(moreBtn, moreMenu);
+
   const header = h(
     "div",
     { class: "chat-meta" },
-    provider,
+    avatarSlot,
+    providerItem,
     h("span", { class: "grow" }),
-    projectBtn,
+    projectItem,
     findBtn,
-    growBtn,
+    moreItem,
   );
+
+  // ── Dropdown menus (provider / project / more) ───────────────────────────
+  //
+  // One open at a time: opening a second closes whatever the first left open,
+  // and a click anywhere outside the open one's own item closes it too.
+  let activeMenu: { item: HTMLElement; popover: HTMLElement } | null = null;
+
+  function closeActiveMenu() {
+    if (!activeMenu) return;
+    activeMenu.popover.classList.remove("open");
+    clear(activeMenu.popover);
+    activeMenu = null;
+  }
+
+  /** Opens `popover` under `item`, or closes it if it was the open one. */
+  function toggleMenu(item: HTMLElement, popover: HTMLElement, fill: () => void) {
+    const wasThisOne = activeMenu?.item === item;
+    closeActiveMenu();
+    if (wasThisOne) return;
+    clear(popover);
+    fill();
+    popover.classList.add("open");
+    activeMenu = { item, popover };
+    // Same reflex as ui/inline-confirm.ts's own opening focus: a keyboard
+    // user who opened this did not do it to stare at the trigger button.
+    popover.querySelector<HTMLElement>(".chat-menu-row")?.focus();
+  }
 
   // ── The find bar ────────────────────────────────────────────────────────
   //
@@ -313,10 +390,35 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
   );
   (el.querySelector(".card") as HTMLElement).style.setProperty("--wash", "rgba(99,102,241,0.5)");
 
+  el.addEventListener(
+    "mousedown",
+    (e) => {
+      if (activeMenu && !activeMenu.item.contains(e.target as Node)) closeActiveMenu();
+    },
+    true,
+  );
+
+  // Escape closes whichever of the three dropdowns is open, before anything
+  // else's own Escape handling (the composer's stop-turn/close-search, the
+  // island's own close-on-Escape) gets a turn at the same keypress.
+  el.addEventListener(
+    "keydown",
+    (e) => {
+      if (activeMenu && (e as KeyboardEvent).key === "Escape") {
+        const trigger = activeMenu.item.querySelector<HTMLElement>("button");
+        closeActiveMenu();
+        trigger?.focus();
+        e.stopPropagation();
+      }
+    },
+    true,
+  );
+
   let sending = false;
   let renderedCount = -1;
   let renderedDraft = "";
   let renderedShots = "";
+  let renderedAvatar = "";
   let shownLocale = getLocale();
   let paletteKey = "";
   let highlighted = 0;
@@ -327,6 +429,18 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
   let current = 0;
   /** Marks placed by the last highlight pass, in document order. */
   let marks: HTMLElement[] = [];
+  /** What `↑` on an empty composer recalls — the last message this view
+   *  itself sent, not the log's last user turn (which could be a retry, or
+   *  from before the view was last rebuilt). */
+  let lastSentMessage = "";
+
+  /** Grows the composer 1 to 6 lines with what is typed; `.chat-input`'s own
+   *  `max-height` (style.css) is what actually caps it at six — this only
+   *  ever asks for `scrollHeight`, never clamps it itself. */
+  function autoGrow() {
+    input.style.height = "auto";
+    input.style.height = `${input.scrollHeight}px`;
+  }
 
   function openFind(open: boolean) {
     State.chatQuery = open ? (State.chatQuery ?? "") : null;
@@ -367,18 +481,17 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
   closeFind.addEventListener("click", () => openFind(false));
   prevBtn.addEventListener("click", () => goToMatch(-1));
   nextBtn.addEventListener("click", () => goToMatch(1));
-  findInput.addEventListener("input", () => runFind(findInput.value));
+  let findDebounce: number | undefined;
+  findInput.addEventListener("input", () => {
+    window.clearTimeout(findDebounce);
+    const query = findInput.value;
+    findDebounce = window.setTimeout(() => runFind(query), 120);
+  });
   findInput.addEventListener("keydown", (event) => {
     const key = (event as KeyboardEvent).key;
     event.stopPropagation();
     if (key === "Escape") openFind(false);
     else if (key === "Enter") goToMatch((event as KeyboardEvent).shiftKey ? -1 : 1);
-  });
-
-  growBtn.addEventListener("click", () => {
-    State.chatExpanded = !State.chatExpanded;
-    State.notify();
-    onHeightChange();
   });
 
   log.addEventListener("scroll", () => {
@@ -446,7 +559,25 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
     dropZone.addEventListener(kind, () => dropZone.classList.remove("dropping"));
   }
 
-  /** Pasting is the one way an image arrives with no path to copy from. */
+  /** Ingests one in-memory image — from a paste or the paperclip's file
+   *  picker, neither of which hands over a path the way a drop does, only
+   *  bytes. Same `paste_image` command either way. */
+  async function ingestBlob(blob: Blob) {
+    const buffer = await blob.arrayBuffer();
+    try {
+      const file = await Bridge.pasteImage(blob.type, [...new Uint8Array(buffer)]);
+      State.chatImages.push(file);
+      renderedShots = "";
+      State.notify();
+      onHeightChange();
+    } catch (err) {
+      State.noteMessage = String(err).replace(/^Error:\s*/, "");
+      State.notify();
+    }
+  }
+
+  /** Pasting is one way an image arrives with no path to copy from; the
+   *  paperclip's file picker (below) is the other. */
   input.addEventListener("paste", (event) => {
     const items = (event as ClipboardEvent).clipboardData?.items ?? [];
     for (const item of items) {
@@ -454,18 +585,7 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
       const blob = item.getAsFile();
       if (!blob) continue;
       event.preventDefault();
-      void blob.arrayBuffer().then(async (buffer) => {
-        try {
-          const file = await Bridge.pasteImage(item.type, [...new Uint8Array(buffer)]);
-          State.chatImages.push(file);
-          renderedShots = "";
-          State.notify();
-          onHeightChange();
-        } catch (err) {
-          State.noteMessage = String(err).replace(/^Error:\s*/, "");
-          State.notify();
-        }
-      });
+      void ingestBlob(blob);
       return;
     }
   });
@@ -478,12 +598,96 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
     paint();
   });
 
+  /** One row of any of the three dropdowns. */
+  function menuRow(label: string, onClick: () => void, face?: HTMLElement): HTMLElement {
+    const row = h("button", { class: "chat-menu-row" }, ...(face ? [face] : []), h("span", { text: label }));
+    row.addEventListener("click", () => {
+      closeActiveMenu();
+      onClick();
+    });
+    return row;
+  }
+
   provider.addEventListener("click", () => {
-    nextProvider();
-    input.focus();
+    // Nothing to switch to — opening an empty popover would be worse than
+    // the click doing nothing, same as nextProvider() used to no-op here.
+    if (availableClis.length === 0) return;
+    toggleMenu(providerItem, providerMenu, () => {
+      // Same order as the Fase 3 console grid, so picking an agent here and
+      // picking one there never disagree about which comes first.
+      const ordered = orderConsoles(availableClis, State.agentCli, new Set());
+      for (const c of ordered) {
+        providerMenu.append(
+          menuRow(
+            c.label,
+            () => {
+              chooseProvider(c.id);
+              input.focus();
+            },
+            stillMiniBot(consoleColor(c.id), 14),
+          ),
+        );
+      }
+    });
   });
+
   projectBtn.addEventListener("click", () => {
-    void toggleProject().then(() => input.focus());
+    if (!State.attachedProject) {
+      void pickProject().then(() => input.focus());
+      return;
+    }
+    toggleMenu(projectItem, projectMenu, () => {
+      projectMenu.append(
+        menuRow(t("chat.changeProject"), () => void pickProject().then(() => input.focus())),
+        menuRow(t("chat.removeProject"), () => void detachProject().then(() => input.focus())),
+      );
+    });
+  });
+
+  moreBtn.addEventListener("click", () => {
+    toggleMenu(moreItem, moreMenu, () => {
+      const hasHistory = State.chatHistory.length > 0;
+      const newChatRow = menuRow(t("chat.newChat"), () => {
+        if (!hasHistory) {
+          startNewChat();
+          return;
+        }
+        // Replaces the menu in place with the same yes/no pattern every other
+        // destructive choice in the island uses (ui/inline-confirm.ts) —
+        // never a native confirm(), which rule 5 of docs/plan-v2.md § 1 bans.
+        clear(moreMenu);
+        moreMenu.append(
+          inlineConfirm({
+            message: t("chat.newChatConfirm"),
+            confirmLabel: t("chat.newChat"),
+            cancelLabel: t("common.cancel"),
+            destructive: true,
+            onConfirm: () => {
+              closeActiveMenu();
+              startNewChat();
+            },
+            onCancel: closeActiveMenu,
+          }),
+        );
+      });
+      moreMenu.append(newChatRow);
+      moreMenu.append(
+        menuRow(t("chat.copyConversation"), () => {
+          void copyToClipboard(conversationAsText());
+        }),
+      );
+      if (State.attachedProject) {
+        const project = State.attachedProject;
+        moreMenu.append(menuRow(t("chat.openProjectInVSCode"), () => void Bridge.openInVSCode(project)));
+      }
+      moreMenu.append(
+        menuRow(State.chatExpanded ? t("chat.shrink") : t("chat.grow"), () => {
+          State.chatExpanded = !State.chatExpanded;
+          State.notify();
+          onHeightChange();
+        }),
+      );
+    });
   });
 
   /** The commands `/` currently offers, or none when not typing a slash. */
@@ -526,10 +730,40 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
     onHeightChange();
   }
 
-  async function submit() {
-    const query = input.value.trim();
+  /** "New chat" from the header's "More" menu. `startFreshConversation`
+   *  (agent.ts) is the same drop-the-log-and-chat_forget the island's own
+   *  file-drop sequence uses — this adds `agent_reset` on top, which that
+   *  sequence deliberately does not: a dropped file still continues whatever
+   *  CLI session was running, where this is meant to actually start a new
+   *  one (plan v2 § 4.3's "Nuevo chat"). */
+  function startNewChat() {
+    void Bridge.agentReset();
+    startFreshConversation();
+    lastSentMessage = "";
+    renderedCount = -1;
+    onHeightChange();
+    input.focus();
+  }
+
+  /** "Copy the conversation" — plain text, not Markdown source: a paste
+   *  target outside the app (an email, a doc) wants to read it, not render
+   *  it. */
+  function conversationAsText(): string {
+    const who = (role: ChatMessage["role"]) =>
+      role === "user" ? t("chat.you") : role === "error" ? t("chat.turnStopped") : providerLabel();
+    return State.chatHistory.map((m) => `${who(m.role)}: ${m.content}`).join("\n\n");
+  }
+
+  /** `forcedQuery` is "Retry" resending a failed turn's prompt — everything
+   *  else about submitting is the same either way. */
+  async function submit(forcedQuery?: string) {
+    const query = forcedQuery ?? input.value.trim();
     if (!query || sending) return;
-    input.value = "";
+    if (forcedQuery == null) {
+      input.value = "";
+      autoGrow();
+    }
+    lastSentMessage = query;
     highlighted = 0;
     syncPalette();
     sending = true;
@@ -611,13 +845,32 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
     if (sending) void Bridge.agentCancel();
     else void submit();
   });
+  attachBtn.addEventListener("click", () => fileInput.click());
+  fileInput.addEventListener("change", () => {
+    const files = [...(fileInput.files ?? [])];
+    fileInput.value = ""; // so picking the same file twice still fires "change"
+    for (const file of files) {
+      if (State.chatImages.length >= MAX_IMAGES) {
+        State.noteMessage = tn("files.tooManyImages", MAX_IMAGES, { max: MAX_IMAGES });
+        break;
+      }
+      if (file.size > MAX_IMAGE_BYTES) {
+        State.noteMessage = t("files.tooLarge", { name: file.name, max: "10 MB" });
+        continue;
+      }
+      void ingestBlob(file);
+    }
+  });
   input.addEventListener("input", () => {
     highlighted = 0;
     syncPalette();
+    autoGrow();
+    State.notify(); // the send button's "nothing to send yet" dimming
   });
   input.addEventListener("keydown", (e) => {
-    const key = (e as KeyboardEvent).key;
-    if ((e as KeyboardEvent).ctrlKey && key.toLowerCase() === "f") {
+    const ke = e as KeyboardEvent;
+    const key = ke.key;
+    if (ke.ctrlKey && key.toLowerCase() === "f") {
       e.preventDefault();
       e.stopPropagation();
       openFind(true);
@@ -642,11 +895,32 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
         return;
       }
     }
-    if (key === "Enter") {
+    if (key === "Enter" && !ke.shiftKey) {
+      // Shift+Enter is left alone — the textarea's own newline.
       e.preventDefault();
       void submit();
+      e.stopPropagation();
+      return;
     }
-    e.stopPropagation(); // Escape closes the island, not the chat
+    if (key === "Escape") {
+      if (sending) {
+        void Bridge.agentCancel();
+        e.preventDefault();
+      } else if (State.chatQuery !== null) {
+        openFind(false);
+        e.preventDefault();
+      }
+      // Otherwise left alone: Escape closes the island, not the chat.
+    } else if (key === "ArrowUp" && input.value === "" && lastSentMessage) {
+      // Recalls what this view itself last sent — never mid-edit, and never
+      // when there is already something typed that `↑` would otherwise
+      // clobber silently.
+      input.value = lastSentMessage;
+      autoGrow();
+      input.setSelectionRange(input.value.length, input.value.length);
+      e.preventDefault();
+    }
+    e.stopPropagation(); // Escape (when left alone) closes the island, not the chat
   });
 
   return {
@@ -690,7 +964,11 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
       if (State.chatHistory.length !== renderedCount) {
         renderedCount = State.chatHistory.length;
         clear(historyBox);
-        for (const message of State.chatHistory) historyBox.append(bubble(message));
+        State.chatHistory.forEach((message, i) => {
+          const prev = State.chatHistory[i - 1];
+          const precedingUserText = prev?.role === "user" ? prev.content : null;
+          historyBox.append(bubble(message, precedingUserText, (q) => void submit(q)));
+        });
         // After drawing, never before: the marks go into the rendered output,
         // so a repaint would throw them away. Searching the markup instead
         // would make a query for "code" hit every code tag.
@@ -711,6 +989,35 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
       }
       if (stick) log.scrollTop = log.scrollHeight;
 
+      // The header's own Mochi, and the bigger one the empty log shows before
+      // the first message — the same engine as the console grid's fichas and
+      // the service pills (src/mochi/minibots.ts), in place of the big one
+      // every other view uses off to the side (which the chat no longer draws
+      // room for — see .chat-body's padding, and VIEW_LAYOUTS.prompt in
+      // core/layout.ts). "thinking" while a turn is in flight is as far as
+      // this phase takes its mood; eyes following the streamed text and the
+      // health/sickness range are Fase 7's (docs/plan-v2.md § 7).
+      const avatarKey = `${State.agentCli ?? ""}|${sending}`;
+      if (avatarKey !== renderedAvatar) {
+        renderedAvatar = avatarKey;
+        const task = {
+          id: "chat-avatar",
+          name: "",
+          color: consoleColor(State.agentCli ?? ""),
+          state: sending ? ("thinking" as const) : ("idle" as const),
+          stepIndex: 0,
+          steps: [],
+          source: "agent" as const,
+          isIntegration: false,
+        };
+        clear(avatarSlot);
+        avatarSlot.append(createMiniBot(task, 24));
+        clear(emptyAvatarSlot);
+        emptyAvatarSlot.append(createMiniBot({ ...task, id: "chat-empty-avatar" }, 64));
+        pruneMiniBots();
+      }
+      emptyState.classList.toggle("on", State.chatHistory.length === 0 && !sending);
+
       provider.textContent = providerLabel();
       const attached = State.attachedProject;
       // The folder name is enough to recognise it; the full path is the title.
@@ -721,15 +1028,13 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
       projectBtn.classList.toggle("on", attached != null);
 
       findBtn.classList.toggle("on", State.chatQuery !== null);
-      clear(growBtn);
-      growBtn.append(icon(State.chatExpanded ? "chevronLeft" : "chevronRight", { size: 11 }));
-      growBtn.title = State.chatExpanded ? t("chat.shrink") : t("chat.grow");
-      growBtn.classList.toggle("on", State.chatExpanded);
+      moreBtn.classList.toggle("on", State.chatExpanded);
 
       clear(send);
       send.append(icon(sending ? "stop" : "arrowUp", { size: sending ? 9 : 11 }));
       send.title = sending ? t("chat.stopTurn") : t("chat.send");
       send.classList.toggle("stopping", sending);
+      send.classList.toggle("empty", !sending && input.value.trim() === "" && State.chatImages.length === 0);
 
       input.placeholder = placeholder();
       input.disabled = sending;

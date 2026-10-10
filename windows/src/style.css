@@ -805,7 +805,7 @@ input[type="range"]::-webkit-slider-thumb {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  padding: 12px 16px 14px 84px;
+  padding: 12px 16px 14px;
 }
 
 .chip-row:empty {
@@ -841,11 +841,96 @@ input[type="range"]::-webkit-slider-thumb {
   color: var(--ink-1);
 }
 
+.chat-meta-btn:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
 /* An attached folder is live state, not a suggestion, so it stays legible
    without hovering. */
 .chat-meta-btn.on {
   color: var(--ink-2);
   background: rgba(255, 255, 255, 0.07);
+}
+
+/* The header's own 24px Mochi — see views/chat.ts's avatarSlot. */
+.chat-avatar {
+  flex: 0 0 auto;
+  display: flex;
+}
+
+/* Anchors a trigger button and its dropdown together, so the dropdown's
+   `position: absolute; top: 100%` lands right under its own button with no
+   coordinate math. */
+.chat-meta-item {
+  position: relative;
+  display: flex;
+}
+
+/* top offset (~44-48px: chat-body's padding-top + the header row's own
+   height + the 4px gap) + this max-height (184px) has to stay under
+   CHAT_MIN_H (core/layout.ts, 300px) — the card never gets shorter than
+   that, however short the conversation or the display. Re-check this if
+   either the header grows taller or CHAT_MIN_H shrinks. */
+.chat-dropdown {
+  display: none;
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 5;
+  min-width: 150px;
+  max-height: 184px;
+  overflow-y: auto;
+  padding: 3px;
+  border-radius: 10px;
+  background: rgba(20, 21, 24, 0.96);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+}
+
+.chat-dropdown.open {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+/* The "more" menu hangs off the right-most header button, so it opens
+   leftward — anchored left:0 like the others would run off the island. */
+.chat-dropdown-right {
+  left: auto;
+  right: 0;
+}
+
+.chat-menu-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: var(--hit-min, 32px);
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  color: var(--ink-2);
+  font: 400 11.5px var(--font);
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.chat-menu-row:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--ink-1);
+}
+
+.chat-menu-row:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.chat-menu-row .mini {
+  flex: 0 0 auto;
 }
 
 /* `/` autocomplete. Collapsed to nothing when there is nothing to show, so it
@@ -920,6 +1005,29 @@ input[type="range"]::-webkit-slider-thumb {
   height: 7px;
   border-radius: 50%;
   background: linear-gradient(135deg, #ff6b5b, #f7b32b, #2dd4a7, #38bdf8, #a78bfa);
+}
+
+/* Shown instead of the log before the first message — see views/chat.ts's
+   `emptyState`, toggled by the same State.chatHistory.length check the
+   composer's own placeholder() already uses. */
+.chat-empty-state {
+  display: none;
+  flex: 1 1 auto;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s-2, 10px);
+  min-height: 0;
+  text-align: center;
+}
+
+.chat-empty-state.on {
+  display: flex;
+}
+
+.chat-empty-title {
+  font: var(--t-title3);
+  color: var(--ink-2);
 }
 
 .chat-log {
@@ -1580,19 +1688,24 @@ button:focus-visible {
 .chat-icon-btn {
   display: grid;
   place-items: center;
-  width: 20px;
-  height: 20px;
+  width: var(--hit-min, 32px);
+  height: var(--hit-min, 32px);
   border: 0;
   border-radius: 5px;
   background: none;
   color: var(--dim-3);
   cursor: pointer;
-  flex: 0 0 20px;
+  flex: 0 0 auto;
 }
 
 .chat-icon-btn:hover {
   background: rgba(255, 255, 255, 0.09);
   color: var(--ink-2);
+}
+
+.chat-icon-btn:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
 }
 
 .chat-icon-btn.on {
@@ -1878,8 +1991,8 @@ mark.hit.on {
 }
 
 .reply-error {
-  border-left: 2px solid #f4505e;
-  background: rgba(244, 80, 94, 0.08);
+  border-left: 2px solid var(--c-red);
+  background: color-mix(in srgb, var(--c-red) 8%, transparent);
   border-radius: 0 8px 8px 0;
   padding: 5px 9px;
   min-width: 0;
@@ -1890,7 +2003,22 @@ mark.hit.on {
   align-items: center;
   gap: 5px;
   font: 500 11.5px var(--font);
-  color: #f4505e;
+  color: var(--c-red);
+}
+
+.reply-error-retry {
+  margin-left: auto;
+  padding: 2px 7px;
+  border: 1px solid color-mix(in srgb, var(--c-red) 40%, transparent);
+  border-radius: 999px;
+  background: none;
+  color: var(--c-red);
+  font: 500 10.5px var(--font);
+  cursor: pointer;
+}
+
+.reply-error-retry:hover {
+  background: color-mix(in srgb, var(--c-red) 14%, transparent);
 }
 
 .reply-error-detail {
@@ -1986,41 +2114,58 @@ mark.hit.on {
   white-space: pre;
 }
 
+/* Opens in the system browser on click (markdown.ts) — cursor:pointer, not
+   :help, now that it actually does something. */
 .reply .md-link {
-  color: #8ab4f8;
+  color: var(--c-accent, #8ab4f8);
   text-decoration: underline;
   text-underline-offset: 2px;
-  cursor: help;
+  cursor: pointer;
 }
 
 .chat-bar {
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   gap: 8px;
   padding: 6px 10px;
   background: rgba(255, 255, 255, 0.07);
   border-radius: 12px;
 }
 
+/* 1 line to start (18px), growing with the content up to 6 (108px) — past
+   that the textarea scrolls internally rather than the composer growing
+   without bound. JS (chat.ts's autoGrow) only ever sets `height` up toward
+   `scrollHeight`; this max-height is what actually caps it. */
 .chat-input {
   flex: 1 1 auto;
   min-width: 0;
+  min-height: 18px;
+  max-height: 108px;
+  line-height: 18px;
   border: 0;
   background: transparent;
   color: var(--ink);
   font: 400 13px var(--font);
   outline: none;
   cursor: text;
+  resize: none;
+  padding: 5px 0;
+  overflow-y: auto;
 }
 
 .chat-input::placeholder {
   color: var(--dim-3);
 }
 
+.chat-attach-btn {
+  margin-bottom: 4px;
+}
+
 .send-btn {
   width: 28px;
   height: 28px;
   flex: 0 0 28px;
+  margin-bottom: 0;
   border: 0;
   border-radius: 50%;
   background: var(--ink);
@@ -2028,7 +2173,11 @@ mark.hit.on {
   display: grid;
   place-items: center;
   cursor: default;
-  transition: transform 0.08s ease-out;
+  transition: transform 0.08s ease-out, opacity 0.15s ease;
+}
+
+.send-btn.empty {
+  opacity: 0.4;
 }
 
 .send-btn:active {

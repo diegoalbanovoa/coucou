@@ -64,6 +64,14 @@ fn boot(app: AppHandle, shared: State<Shared>) -> BootInfo {
     }
 }
 
+/// Re-read after a `screen-changed` event — monitor geometry (and therefore
+/// `workHeight`) can only change between calls, never during `boot`'s.
+#[tauri::command]
+fn screen_info(app: AppHandle, shared: State<Shared>) -> ScreenInfo {
+    let pref = shared.settings.lock().unwrap().screen.clone();
+    island::screen_info(&app, &pref)
+}
+
 #[tauri::command]
 fn save_settings(app: AppHandle, shared: State<Shared>, settings: Settings) {
     let (screen_changed, autostart_changed, switched_on) = {
@@ -823,6 +831,7 @@ pub fn run() {
         .manage(agent::Cancel::default())
         .invoke_handler(tauri::generate_handler![
             boot,
+            screen_info,
             save_settings,
             set_collapsed,
             set_island_rect,

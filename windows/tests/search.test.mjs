@@ -68,6 +68,13 @@ test("the counter is one-based, and says so plainly when there is nothing", () =
   assert.equal(counter([], 0), "none", "never 0/0");
 });
 
+test("tildes are not something a transcript search should care about either", () => {
+  const es = [msg(1, "la acción fue rápida y él lo sabía")];
+  assert.equal(findMatches(es, "accion").length, 1, "plain finds accented");
+  assert.equal(findMatches(es, "acción").length, 1, "accented finds itself");
+  assert.equal(findMatches(es, "RAPIDA").length, 1, "and case together with accents");
+});
+
 test("the arrows wrap at both ends, so neither ever needs disabling", () => {
   const found = findMatches(log, "pipe");
   assert.equal(step(found, 0, 1), 1);
