@@ -22,6 +22,26 @@ pub struct Drive {
     pub total: u64,
 }
 
+/// One running process exactly as the OS reports it — before `system.rs`
+/// decides what any of it means (protected, grouped, offered to end).
+///
+/// `start_time` has no shared meaning across platforms and is never shown:
+/// it only needs to change when a pid is recycled, so `system_end_process`
+/// can tell "the process the row was drawn for" from "a different one that
+/// happens to have the same pid now".
+pub struct RawProc {
+    pub pid: u32,
+    pub ppid: u32,
+    pub name: String,
+    pub memory: u64,
+    pub start_time: u64,
+}
+
+/// The number of logical cores, for the System tab's CPU gauge detail line.
+pub fn core_count() -> usize {
+    std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1)
+}
+
 /// Wall-clock time in the user's time zone, for log lines and backup names.
 pub struct LocalTime {
     pub year: u32,

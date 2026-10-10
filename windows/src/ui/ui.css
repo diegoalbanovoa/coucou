@@ -355,6 +355,8 @@
   min-height: 0;
   overflow-y: auto;
   padding: var(--s-2) var(--s-3);
+  scrollbar-width: thin;
+  scrollbar-color: var(--c-fill) transparent;
 }
 
 .ui-sheet-footer {
@@ -442,7 +444,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 2px;
+  gap: 4px;
 }
 
 .ui-gauge-value {
@@ -454,10 +456,6 @@
 .ui-gauge-orange .ui-gauge-value,
 .ui-gauge-red .ui-gauge-value {
   color: var(--c-label);
-}
-
-.ui-gauge-orange svg.ui-gauge-svg {
-  color: var(--c-orange);
 }
 
 .ui-gauge-label {

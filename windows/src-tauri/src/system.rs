@@ -50,6 +50,10 @@ pub struct Stats {
     pub drives: Vec<Drive>,
     pub memory_used: u64,
     pub memory_total: u64,
+    /// 0 to 100. See `platform::cpu_percent` — this is a delta since the
+    /// previous call, so the very first reading of a run is always 0.
+    pub cpu_percent: f32,
+    pub cores: usize,
     /// Whether the tab's "Open Disk Cleanup" button does anything on this
     /// machine. Windows only — there is no one-click equivalent to offer on
     /// Linux across distributions.
@@ -62,7 +66,14 @@ pub fn stats() -> Stats {
         .into_iter()
         .map(|d| Drive { name: d.name, free: d.free, total: d.total })
         .collect();
-    Stats { drives, memory_used, memory_total, disk_cleanup_available: cfg!(windows) }
+    Stats {
+        drives,
+        memory_used,
+        memory_total,
+        cpu_percent: platform::cpu_percent(),
+        cores: platform::core_count(),
+        disk_cleanup_available: cfg!(windows),
+    }
 }
 
 /// Opens Windows' own Disk Cleanup. `false` on Linux, or if it could not be
@@ -369,9 +380,9 @@ pub fn clean(ids: &[String]) -> Vec<Swept> {
 // guard also refuses anything that looks like a Windows session process by
 // where it would have to run, not only by matching a list.
 
-/// Lower-cased executable names `kill_process` refuses, whatever account asks.
-/// Not a claim that nothing else matters — it is the floor the list and the
-/// self-pid check both sit above.
+/// Lower-cased executable names `end_processes` refuses, whatever account
+/// asks. Not a claim that nothing else matters — it is the floor the list
+/// and the self-pid check both sit above. Matches plan-v2.md § 6.4's list.
 const PROTECTED_NAMES: &[&str] = &[
     "system",
     "system idle process",
@@ -387,60 +398,136 @@ const PROTECTED_NAMES: &[&str] = &[
     "fontdrvhost.exe",
     "memory compression",
     "explorer.exe",
+    "msmpeng.exe",
+    "securityhealthservice.exe",
     "coucou.exe",
     "coucou",
     "systemd",
     "init",
 ];
 
-/// One running process, as the System tab lists it.
+/// One running process, as the System tab lists it. `protected` ones are
+/// still shown — seeing what `svchost.exe` or Coucou's own webview is doing
+/// answers "what is using my memory" as much as anything else does — they
+/// just never offer the button that would end them.
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct ProcInfo {
     pub pid: u32,
     pub name: String,
     pub memory: u64,
+    pub protected: bool,
+    /// Opaque outside this file — see `platform::RawProc`. The TS side
+    /// carries it right back in an end request and nowhere else.
+    pub start_time: u64,
 }
 
 fn protected(pid: u32, name: &str) -> bool {
     pid == std::process::id() || PROTECTED_NAMES.contains(&name.to_lowercase().as_str())
 }
 
-/// The processes using the most memory, heaviest first — Coucou itself and
-/// anything on the protected list left out entirely, so there is nothing in
-/// the list `kill_process` would refuse anyway.
-pub fn top_processes(limit: usize) -> Vec<ProcInfo> {
-    let mut procs: Vec<ProcInfo> = platform::processes()
-        .into_iter()
-        .filter(|(pid, name, _)| !protected(*pid, name))
-        .map(|(pid, name, memory)| ProcInfo { pid, name, memory })
+/// Whether `pid` is Coucou itself or a descendant of it (its `msedgewebview2`
+/// child, chiefly) — walked through `raw`'s own ppid chain rather than
+/// trusted from a second, possibly stale snapshot. Bounded, so a ppid cycle
+/// (which should never happen, but this is exactly the kind of check that
+/// must not hang if it somehow does) gives up rather than loops forever.
+fn is_coucou_descendant(pid: u32, raw: &[platform::RawProc], coucou_pid: u32) -> bool {
+    let mut current = pid;
+    for _ in 0..32 {
+        if current == coucou_pid {
+            return true;
+        }
+        let Some(p) = raw.iter().find(|r| r.pid == current) else { return false };
+        if p.ppid == 0 || p.ppid == current {
+            return false;
+        }
+        current = p.ppid;
+    }
+    false
+}
+
+/// The pure half of `top_processes`: given a snapshot and Coucou's own pid,
+/// says what the tab shows. Separated out so a test can hand it a small,
+/// made-up process tree instead of whatever happens to be running on the
+/// machine `cargo test` runs on.
+fn rank(raw: &[platform::RawProc], coucou_pid: u32, limit: usize) -> Vec<ProcInfo> {
+    let mut procs: Vec<ProcInfo> = raw
+        .iter()
+        .map(|p| ProcInfo {
+            pid: p.pid,
+            name: p.name.clone(),
+            memory: p.memory,
+            start_time: p.start_time,
+            protected: protected(p.pid, &p.name) || is_coucou_descendant(p.pid, raw, coucou_pid),
+        })
         .collect();
     procs.sort_by_key(|p| std::cmp::Reverse(p.memory));
     procs.truncate(limit);
     procs
 }
 
-/// Ends one process. Refuses anything on the protected list or Coucou's own
-/// pid even if the caller somehow asked for it — the list shown to the user
-/// already leaves these out, but the refusal lives here, not in the
-/// interface, the same way the file broom's guard does.
-pub fn kill_process(pid: u32) -> Result<(), String> {
-    let name = platform::processes()
-        .into_iter()
-        .find(|(p, _, _)| *p == pid)
-        .map(|(_, name, _)| name)
-        .ok_or_else(|| "that process is no longer running".to_string())?;
+/// The processes using the most memory, heaviest first. `limit` is generous
+/// (today's one caller asks for 40) because grouping by executable and the
+/// 8-then-"see more"-to-20 cutoff are both the TS side's job — see
+/// `groupProcesses` in `views/system.ts`.
+pub fn top_processes(limit: usize) -> Vec<ProcInfo> {
+    rank(&platform::processes(), std::process::id(), limit)
+}
 
-    if protected(pid, &name) {
-        return Err(format!("{name} is not something Coucou will end"));
-    }
+/// One process an end request names — the pid a row's button was drawn for,
+/// and the start time it was drawn with.
+#[derive(serde::Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct EndTarget {
+    pub pid: u32,
+    pub start_time: u64,
+}
 
-    if platform::kill_process(pid) {
-        crate::log::line(format!("ended process {pid} ({name})"));
-        Ok(())
-    } else {
-        Err(format!("could not end {name}"))
+/// The pure half of `end_processes`: which targets a given live snapshot
+/// lets through, and which it refuses before `kill` is ever asked to try —
+/// reused pids, processes that have since exited, and anything protected,
+/// whether or not the caller already knew that. `kill` is the only side
+/// effect, so a test can hand this a made-up tree and a `kill` that never
+/// really ends anything.
+fn settle(
+    live: &[platform::RawProc],
+    coucou_pid: u32,
+    targets: &[EndTarget],
+    mut kill: impl FnMut(u32) -> bool,
+) -> Vec<u32> {
+    let mut failed = Vec::new();
+
+    for target in targets {
+        let Some(proc) = live.iter().find(|p| p.pid == target.pid) else {
+            failed.push(target.pid);
+            continue;
+        };
+        if protected(proc.pid, &proc.name) || is_coucou_descendant(proc.pid, live, coucou_pid) {
+            failed.push(target.pid);
+            continue;
+        }
+        // A start time of 0 means it could not be read in the first place —
+        // never treated as a match, since that is also what an inaccessible
+        // process reports.
+        if proc.start_time == 0 || proc.start_time != target.start_time {
+            failed.push(target.pid);
+            continue;
+        }
+        if kill(target.pid) {
+            crate::log::line(format!("ended process {} ({})", target.pid, proc.name));
+        } else {
+            failed.push(target.pid);
+        }
     }
+    failed
+}
+
+/// Ends every target whose live process still matches both the pid and the
+/// start time it was last drawn with. Returns the pids that could not be
+/// ended, for any reason, so the tab can say how many failed without having
+/// to guess why.
+pub fn end_processes(targets: &[EndTarget]) -> Vec<u32> {
+    settle(&platform::processes(), std::process::id(), targets, platform::kill_process)
 }
 
 fn platform_path(path: &Path) -> String {
@@ -588,23 +675,85 @@ mod tests {
     }
 
     #[test]
-    fn killing_a_protected_name_is_refused_before_the_platform_is_asked() {
-        // No real process has this pid, so a call that reaches `platform::kill_process`
-        // would fail for a different reason than the one this test checks for.
-        let err = kill_process(std::process::id()).unwrap_err();
-        assert!(err.contains("not something Coucou will end"), "{err}");
+    fn ending_coucou_itself_is_refused_before_its_start_time_is_even_checked() {
+        // A real process has this pid (the test binary), so a wrong start
+        // time alone would also fail — the point of this test is that the
+        // protected check catches it first regardless.
+        let failed = end_processes(&[EndTarget { pid: std::process::id(), start_time: 0 }]);
+        assert_eq!(failed, vec![std::process::id()]);
+    }
+
+    fn raw(pid: u32, ppid: u32, name: &str, memory: u64, start_time: u64) -> platform::RawProc {
+        platform::RawProc { pid, ppid, name: name.into(), memory, start_time }
     }
 
     #[test]
-    fn the_top_processes_list_is_sorted_heaviest_first() {
-        let list = top_processes(5);
-        for pair in list.windows(2) {
-            assert!(pair[0].memory >= pair[1].memory, "not sorted: {:?} then {:?}", pair[0].memory, pair[1].memory);
-        }
-        assert!(list.len() <= 5, "the limit is honoured");
-        assert!(
-            list.iter().all(|p| !protected(p.pid, &p.name)),
-            "nothing protected is ever offered"
-        );
+    fn the_top_processes_list_is_sorted_heaviest_first_and_the_limit_is_honoured() {
+        let tree = vec![raw(1, 0, "a.exe", 300, 1), raw(2, 0, "b.exe", 900, 1), raw(3, 0, "c.exe", 10, 1)];
+        let list = rank(&tree, 999, 2);
+        assert_eq!(list.len(), 2, "the limit is honoured");
+        assert_eq!(list[0].pid, 2, "heaviest first");
+        assert_eq!(list[1].pid, 1);
+    }
+
+    #[test]
+    fn a_protected_process_is_shown_not_hidden_but_carries_the_flag() {
+        let tree = vec![raw(1, 0, "lsass.exe", 50, 1), raw(2, 0, "chrome.exe", 50, 1)];
+        let list = rank(&tree, 999, 10);
+        assert_eq!(list.len(), 2, "protected ones are listed, not dropped");
+        assert!(list.iter().find(|p| p.pid == 1).unwrap().protected);
+        assert!(!list.iter().find(|p| p.pid == 2).unwrap().protected);
+    }
+
+    #[test]
+    fn coucous_own_child_is_protected_even_though_its_name_is_not_on_the_list() {
+        // webview2.exe is a plain name as far as PROTECTED_NAMES is concerned
+        // — what makes it untouchable here is being Coucou's own child.
+        let tree = vec![raw(10, 999, "coucou.exe", 50, 1), raw(11, 10, "msedgewebview2.exe", 50, 1)];
+        let list = rank(&tree, 999, 10);
+        assert!(list.iter().find(|p| p.pid == 11).unwrap().protected);
+    }
+
+    #[test]
+    fn a_ppid_cycle_is_given_up_on_rather_than_looped_forever() {
+        // Should never happen on a real machine — the bound exists for this
+        // test, not for correctness on one.
+        let tree = vec![raw(1, 2, "a.exe", 1, 1), raw(2, 1, "b.exe", 1, 1)];
+        assert!(!is_coucou_descendant(1, &tree, 999));
+    }
+
+    #[test]
+    fn ending_a_process_whose_start_time_no_longer_matches_is_refused() {
+        let tree = vec![raw(42, 0, "stale.exe", 1, 7)];
+        // Same pid, a different start time — the row this click came from
+        // was drawn for a process that pid no longer is.
+        let failed = settle(&tree, 999, &[EndTarget { pid: 42, start_time: 8 }], |_| true);
+        assert_eq!(failed, vec![42]);
+    }
+
+    #[test]
+    fn ending_a_process_that_is_no_longer_running_is_refused() {
+        let failed = settle(&[], 999, &[EndTarget { pid: 42, start_time: 1 }], |_| true);
+        assert_eq!(failed, vec![42]);
+    }
+
+    #[test]
+    fn a_matching_target_actually_gets_killed() {
+        let tree = vec![raw(42, 0, "ordinary.exe", 1, 7)];
+        let mut asked = Vec::new();
+        let failed =
+            settle(&tree, 999, &[EndTarget { pid: 42, start_time: 7 }], |pid| {
+                asked.push(pid);
+                true
+            });
+        assert_eq!(failed, Vec::<u32>::new());
+        assert_eq!(asked, vec![42]);
+    }
+
+    #[test]
+    fn a_kill_the_platform_itself_refuses_is_reported_as_failed() {
+        let tree = vec![raw(42, 0, "ordinary.exe", 1, 7)];
+        let failed = settle(&tree, 999, &[EndTarget { pid: 42, start_time: 7 }], |_| false);
+        assert_eq!(failed, vec![42]);
     }
 }

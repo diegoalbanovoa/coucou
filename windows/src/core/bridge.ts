@@ -136,10 +136,12 @@ export const Bridge = {
   systemScan: (ids: string[]) => call<Found[]>("system_scan", { ids }),
   /** Deletes what the preview said, re-checking every file against the guard. */
   systemClean: (ids: string[]) => call<Swept[]>("system_clean", { ids }),
-  /** The heaviest processes right now. Coucou and the system's own are left out. */
+  /** The heaviest processes right now, ungrouped — see `groupProcesses`. */
   systemProcesses: () => call<ProcInfo[]>("system_processes"),
-  /** Ends one. Refused in Rust, not only hidden here, for anything protected. */
-  systemKillProcess: (pid: number) => callOrThrow<void>("system_kill_process", { pid }),
+  /** Ends the named ones. Refused in Rust, not only hidden here, for anything
+   *  protected or whose startTime no longer matches the pid. Returns the
+   *  pids that could not be ended. */
+  systemEndProcess: (targets: EndTarget[]) => call<number[]>("system_end_process", { targets }),
   /** Windows' own Disk Cleanup. False on Linux, or if it would not start. */
   systemOpenDiskCleanup: () => call<boolean>("system_open_disk_cleanup"),
   /** Where the chat runs with nothing attached, and whether it is still there. */
@@ -214,15 +216,31 @@ export interface Stats {
   drives: Drive[];
   memoryUsed: number;
   memoryTotal: number;
+  /** 0 to 100 — a delta since the previous call, so the very first reading
+   *  of a run is always 0. */
+  cpuPercent: number;
+  cores: number;
   /** Whether "Open Disk Cleanup" does anything on this machine. */
   diskCleanupAvailable: boolean;
 }
 
-/** One running process, heaviest first in the list the tab is given. */
+/** One running process, heaviest first in the list the tab is given.
+ *  `protected` ones are still listed, just never offered a close button —
+ *  see `groupProcesses` for turning this flat list into the tab's rows. */
 export interface ProcInfo {
   pid: number;
   name: string;
   memory: number;
+  protected: boolean;
+  /** Opaque — carried right back in an `EndTarget`, read nowhere else. */
+  startTime: number;
+}
+
+/** The pid and startTime a row's close button was drawn with — Rust refuses
+ *  the request if a different process has since taken that pid. */
+export interface EndTarget {
+  pid: number;
+  startTime: number;
 }
 
 /** What one cleanable thing holds, as the preview reports it. */

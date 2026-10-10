@@ -529,6 +529,46 @@ pub fn drives() -> Vec<super::Drive> {
     out
 }
 
+/// The share of CPU time spent outside idle since the last call, 0 to 100.
+///
+/// `GetSystemTimes` only ever gives a running total, so there is nothing to
+/// report from one call alone — the first call of a run has no prior sample
+/// to diff against and answers 0, which is fine for a value polled every
+/// couple of seconds for as long as the tab is open.
+pub fn cpu_percent() -> f32 {
+    use ::windows::Win32::Foundation::FILETIME;
+    use ::windows::Win32::System::Threading::GetSystemTimes;
+    use std::sync::{Mutex, OnceLock};
+
+    fn as_u64(ft: FILETIME) -> u64 {
+        ((ft.dwHighDateTime as u64) << 32) | ft.dwLowDateTime as u64
+    }
+
+    let mut idle = FILETIME::default();
+    let mut kernel = FILETIME::default();
+    let mut user = FILETIME::default();
+    if unsafe { GetSystemTimes(Some(&mut idle), Some(&mut kernel), Some(&mut user)) }.is_err() {
+        return 0.0;
+    }
+    // `lpKernelTime` already counts idle time, so the busy share is the total
+    // minus idle, not kernel+user+idle.
+    let idle = as_u64(idle);
+    let total = as_u64(kernel) + as_u64(user);
+
+    static LAST: OnceLock<Mutex<Option<(u64, u64)>>> = OnceLock::new();
+    let mut last = LAST.get_or_init(|| Mutex::new(None)).lock().unwrap();
+    let pct = match *last {
+        Some((last_idle, last_total)) => {
+            let d_total = total.saturating_sub(last_total);
+            let d_idle = idle.saturating_sub(last_idle);
+            if d_total == 0 { 0.0 } else { (d_total - d_idle) as f32 / d_total as f32 * 100.0 }
+        }
+        None => 0.0,
+    };
+    *last = Some((idle, total));
+    pct.clamp(0.0, 100.0)
+}
+
 /// Memory in use and installed, in bytes.
 pub fn memory() -> (u64, u64) {
     use ::windows::Win32::System::SystemInformation::{GlobalMemoryStatusEx, MEMORYSTATUSEX};
@@ -565,20 +605,25 @@ pub fn recycle_bin_size() -> Option<(u64, u64)> {
 // the drive and memory readers above call Win32 directly: one more crate
 // trades a known, small surface for one this file does not control.
 
-/// Every running process, as (pid, executable name, working-set bytes).
+/// Every running process, with enough to group it, show it, and later tell
+/// whether a pid someone clicked "end" on is still the same process.
 ///
 /// The memory figure is best-effort: a process this account cannot query —
 /// another user's, or one elevated above it — is still listed, with `0`
 /// rather than being dropped, so the list is not quietly missing the very
-/// processes most likely to be using the memory.
-pub fn processes() -> Vec<(u32, String, u64)> {
+/// processes most likely to be using the memory. `start_time` and `ppid`
+/// come from the same handle the memory query opens, so a process this
+/// account cannot touch gets `0` for those too — `system.rs`'s pid-reuse
+/// check treats an unreadable start time as never matching, which is the
+/// safe direction for a check that exists to refuse an end request.
+pub fn processes() -> Vec<super::RawProc> {
     use ::windows::Win32::System::Diagnostics::ToolHelp::{
         CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W,
         TH32CS_SNAPPROCESS,
     };
     use ::windows::Win32::System::ProcessStatus::{GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS};
     use ::windows::Win32::System::Threading::{
-        OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_VM_READ,
+        GetProcessTimes, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_VM_READ,
     };
 
     let Ok(snapshot) = (unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) }) else {
@@ -594,9 +639,10 @@ pub fn processes() -> Vec<(u32, String, u64)> {
             let end = entry.szExeFile.iter().position(|&c| c == 0).unwrap_or(entry.szExeFile.len());
             let name = String::from_utf16_lossy(&entry.szExeFile[..end]);
             let pid = entry.th32ProcessID;
+            let ppid = entry.th32ParentProcessID;
 
             if pid != 0 {
-                let memory = unsafe {
+                let (memory, start_time) = unsafe {
                     OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_VM_READ, false, pid)
                 }
                 .map(|handle| {
@@ -604,13 +650,25 @@ pub fn processes() -> Vec<(u32, String, u64)> {
                         cb: std::mem::size_of::<PROCESS_MEMORY_COUNTERS>() as u32,
                         ..Default::default()
                     };
-                    let got =
-                        unsafe { GetProcessMemoryInfo(handle, &mut counters, counters.cb) };
+                    let got = unsafe { GetProcessMemoryInfo(handle, &mut counters, counters.cb) };
+                    let memory = if got.is_ok() { counters.WorkingSetSize as u64 } else { 0 };
+
+                    let (mut created, mut exited, mut kernel, mut user) = Default::default();
+                    let start_time = if unsafe {
+                        GetProcessTimes(handle, &mut created, &mut exited, &mut kernel, &mut user)
+                    }
+                    .is_ok()
+                    {
+                        ((created.dwHighDateTime as u64) << 32) | created.dwLowDateTime as u64
+                    } else {
+                        0
+                    };
+
                     unsafe { let _ = CloseHandle(handle); }
-                    if got.is_ok() { counters.WorkingSetSize as u64 } else { 0 }
+                    (memory, start_time)
                 })
-                .unwrap_or(0);
-                out.push((pid, name, memory));
+                .unwrap_or((0, 0));
+                out.push(super::RawProc { pid, ppid, name, memory, start_time });
             }
 
             if unsafe { Process32NextW(snapshot, &mut entry) }.is_err() {

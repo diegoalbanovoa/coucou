@@ -58,12 +58,11 @@ const SHOTS = [
   shot({ view: "system", label: "ok", url: "?scenario=ok" }),
   shot({ view: "system", label: "strained", url: "?scenario=strained" }),
   shot({ view: "system", label: "sick", url: "?scenario=sick" }),
-  // The scan/clean checklist and its buttons are real today, but the process
-  // list above them already pushes both off the bottom of the card at a
-  // realistic process count (see docs/plan-v2-notas.md) — reaching them needs
-  // a scroll this script does not attempt, since Fase 6 replaces this layout
-  // outright rather than patching the scroll.
-  shot({ view: "system", label: "cleanup", url: "?scenario=ok&state=cleanup", ready: false }),
+  shot({ view: "system", label: "storage", url: "?scenario=strained&state=storage" }),
+  // Fase 6: the sheet is seeded straight to its results step (see
+  // mock-bridge.ts's `state=cleanup`), since reaching it for real needs a
+  // click and a wait for a scan this script does not drive.
+  shot({ view: "system", label: "cleanup", url: "?scenario=ok&state=cleanup" }),
   // ── settings (own window, own navigation) ────────────────────────────────
   shot({ view: "settings", label: "general", url: "", settings: true }),
   shot({ view: "settings", label: "health", url: "", settings: true, ready: false }),

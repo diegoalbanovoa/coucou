@@ -67,6 +67,11 @@ if (chatState === "attachments") {
 // only way a static capture can show it, since nothing here can simulate an
 // actual OS-level drag.
 if (chatState === "drop") State.fileDragOver = true;
+// The System tab's "free up space" sheet (plan-v2.md § 6.5) — seeded open
+// on its results step, since reaching it for real needs a click and a wait
+// for a scan this script does not drive.
+if (chatState === "cleanup") State.systemOpenCleanupSheet = true;
+if (chatState === "storage") State.systemInitialPane = "storage";
 
 // ── boot / settings ────────────────────────────────────────────────────────────
 
@@ -214,8 +219,9 @@ async function systemProcesses() {
   return MOCK_PROCESSES;
 }
 
-async function systemKillProcess(pid: number) {
-  console.info("[mock] system_kill_process", pid);
+async function systemEndProcess(targets: { pid: number; startTime: number }[]) {
+  console.info("[mock] system_end_process", targets);
+  return [] as number[];
 }
 
 async function systemOpenDiskCleanup() {
@@ -224,6 +230,9 @@ async function systemOpenDiskCleanup() {
 }
 
 async function systemScan(ids: string[]) {
+  // `label`/`about` mirror the real `system_scan`: untranslated, internal,
+  // and never shown — views/system.ts's own `targetLabel()` is what the
+  // sheet actually displays, keyed by `id`.
   return ids.map((id) => ({
     id,
     label: id,
@@ -343,7 +352,7 @@ export const Bridge = {
   systemScan,
   systemClean,
   systemProcesses,
-  systemKillProcess,
+  systemEndProcess,
   systemOpenDiskCleanup,
   chatFolderState,
   pickChatFolder,

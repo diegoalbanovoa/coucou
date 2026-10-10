@@ -495,6 +495,40 @@ pub fn memory() -> (u64, u64) {
     (total.saturating_sub(field("MemAvailable:")), total)
 }
 
+/// The share of CPU time spent outside idle since the last call, 0 to 100,
+/// read from `/proc/stat`'s own running totals the same way `top` does.
+///
+/// The first call of a run has no prior sample to diff against and answers
+/// 0 — fine for a value polled every couple of seconds for as long as the
+/// tab showing it is open.
+pub fn cpu_percent() -> f32 {
+    use std::sync::{Mutex, OnceLock};
+
+    let Ok(text) = std::fs::read_to_string("/proc/stat") else { return 0.0 };
+    let Some(line) = text.lines().next() else { return 0.0 };
+    // "cpu  user nice system idle iowait irq softirq steal …"
+    let fields: Vec<u64> =
+        line.split_whitespace().skip(1).filter_map(|s| s.parse().ok()).collect();
+    if fields.len() < 4 {
+        return 0.0;
+    }
+    let idle = fields[3] + fields.get(4).copied().unwrap_or(0); // idle + iowait
+    let total: u64 = fields.iter().sum();
+
+    static LAST: OnceLock<Mutex<Option<(u64, u64)>>> = OnceLock::new();
+    let mut last = LAST.get_or_init(|| Mutex::new(None)).lock().unwrap();
+    let pct = match *last {
+        Some((last_idle, last_total)) => {
+            let d_total = total.saturating_sub(last_total);
+            let d_idle = idle.saturating_sub(last_idle);
+            if d_total == 0 { 0.0 } else { (d_total - d_idle) as f32 / d_total as f32 * 100.0 }
+        }
+        None => 0.0,
+    };
+    *last = Some((idle, total));
+    pct.clamp(0.0, 100.0)
+}
+
 /// The freedesktop trash is a folder, so the generic walk handles it and this
 /// has nothing to report.
 pub fn recycle_bin_size() -> Option<(u64, u64)> {
@@ -507,10 +541,16 @@ pub fn empty_recycle_bin() -> bool {
 
 // ── Processes ─────────────────────────────────────────────────────────────────
 
-/// Every running process, as (pid, command name, resident set bytes), read
-/// straight from `/proc` rather than through a crate: the two files this
-/// needs are already the ones `memory()` above reads the same way.
-pub fn processes() -> Vec<(u32, String, u64)> {
+/// Every running process, read straight from `/proc` rather than through a
+/// crate: the files this needs are already the ones `memory()` above reads
+/// the same way.
+///
+/// `ppid` and `start_time` both come from `/proc/<pid>/stat`, whose first
+/// field after the process name is the state and whose 2nd and 20th fields
+/// from there are `ppid` and `starttime` — read by skipping past the name's
+/// closing `)` rather than splitting on spaces, since a comm containing one
+/// (`"my (odd) name"`) would otherwise shift every field after it.
+pub fn processes() -> Vec<super::RawProc> {
     let Ok(entries) = std::fs::read_dir("/proc") else { return Vec::new() };
     let mut out = Vec::new();
 
@@ -536,7 +576,21 @@ pub fn processes() -> Vec<(u32, String, u64)> {
             })
             .map(|kb| kb * 1024)
             .unwrap_or(0);
-        out.push((pid, name, rss));
+
+        let (ppid, start_time) = std::fs::read_to_string(dir.join("stat"))
+            .ok()
+            .and_then(|stat| {
+                // fields[0] is the state (field 3); ppid is field 4 and
+                // starttime is field 22, so index 1 and 19 from here.
+                let after_name = stat.rfind(')')?;
+                let fields: Vec<&str> = stat[after_name + 1..].split_whitespace().collect();
+                let ppid = fields.get(1)?.parse::<u32>().ok()?;
+                let start_time = fields.get(19)?.parse::<u64>().ok()?;
+                Some((ppid, start_time))
+            })
+            .unwrap_or((0, 0));
+
+        out.push(super::RawProc { pid, ppid, name, memory: rss, start_time });
     }
     out
 }

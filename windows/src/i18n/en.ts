@@ -126,6 +126,49 @@ export const en = {
     notLookedAt: "not looked at yet",
     removedFreed: { one: "{n} removed · {size} freed", other: "{n} removed · {size} freed" },
     inUseLeftAlone: { one: "{n} in use, left alone", other: "{n} in use, left alone" },
+
+    // Fase 6 (plan-v2.md § 6) — the headline, the three gauges, the
+    // processes/storage segmented pane, and the "Free up space…" sheet.
+    tabProcesses: "Processes",
+    tabStorage: "Storage",
+    statusOk: "Your machine is doing fine",
+    statusStrained: "Your machine is working hard",
+    statusSick: "Your machine needs help",
+    detail: "Memory at {mem} · CPU {cpu}",
+    cpuLabel: "CPU",
+    memoryLabel: "Memory",
+    cores: { one: "{n} core", other: "{n} cores" },
+    /** Composed with the gauge's own label, value and detail — see
+     *  ui/gauge.ts's file note on why the wording of "high"/"critical"
+     *  belongs to the caller and not the component. */
+    gaugeNormal: "{label} {value} percent, {detail}",
+    gaugeHigh: "{label} {value} percent, high, {detail}",
+    gaugeCritical: "{label} {value} percent, critical, {detail}",
+    seeMore: "See more",
+    moreActions: "More actions",
+    viewProcesses: { one: "View process ({n})", other: "View processes ({n})" },
+    endConfirmGroup: { one: "End {name}?", other: "End {name} ({n} processes)?" },
+    agentWarning: "This is an agent CLI — ending it may interrupt work in progress.",
+    endFailed: { one: "Could not end 1 process", other: "Could not end {n} processes" },
+    protected: "Protected",
+    freeUpSpace: "Free up space…",
+    driveFree: "{free} free of {total}",
+    analyzing: "Analyzing…",
+    needsAdmin: "Needs administrator rights",
+    windowsTemp: "Windows' own Temp folder",
+    windowsUpdate: "Windows Update's leftovers",
+    cleaning: "Cleaning…",
+    /** The cleanup sheet's category names — system.rs's own `Target.label`
+     *  is an internal, English, log-line string and never shown; these are
+     *  what the sheet actually displays, keyed by the same ids. */
+    target: {
+      temp: "Temporary files",
+      recycle: "Recycle Bin",
+      npmCache: "npm cache",
+      pipCache: "pip cache",
+      coucouInbox: "Coucou's inbox",
+      coucouLog: "Coucou's log",
+    },
   },
 
   integrations: {

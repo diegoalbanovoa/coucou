@@ -1094,316 +1094,458 @@ input[type="range"]::-webkit-slider-thumb {
   50% { transform: scale(1.2); }
 }
 
-/* ── The System tab ──────────────────────────────────────────────────────── */
+/* ── The System tab (plan-v2.md § 6) ─────────────────────────────────────── */
 
 .sys-card {
   height: 100%;
 }
 
 .sys-body {
-  position: relative;
   z-index: 1;
   height: 100%;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 12px 16px 14px 104px;
+  padding: var(--s-3) var(--s-4) var(--s-3) 148px;
   min-width: 0;
 }
 
-.sys-stats {
+/* `.ui-sheet`'s `inset` is relative to its own positioned ancestor's padding
+ * box, which — were that ancestor `.sys-body` — would include `.sys-body`'s
+ * own left padding and so cover Mochi's reserved column instead of
+ * respecting it. `.sys-content` carries the `position: relative` instead,
+ * with no padding of its own, so a sheet mounted here starts exactly where
+ * the reserved column ends. */
+.sys-content {
+  position: relative;
+  height: 100%;
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: var(--s-3);
+  min-width: 0;
+  min-height: 0;
 }
 
-.sys-stat {
+.sys-head {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s-2);
+  flex: 0 0 auto;
+}
+
+.sys-head .dot {
+  margin-top: 6px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  transition: background var(--d-base) var(--ease-out);
+}
+
+.sys-head-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.sys-headline {
+  font: var(--t-headline);
+  color: var(--c-label);
+}
+
+.sys-detail {
+  font: var(--t-footnote);
+  color: var(--c-label-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.sys-gauges {
+  display: flex;
+  gap: var(--s-4);
+  flex: 0 0 auto;
+}
+
+.sys-gauge-btn {
+  border: 0;
+  background: none;
+  padding: 0;
+  border-radius: var(--r-md);
+  cursor: pointer;
+  color: inherit;
+}
+
+.sys-gauge-btn:hover .ui-gauge-label {
+  color: var(--c-label);
+}
+
+.sys-gauge-btn:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.sys-panel {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+}
+
+.sys-panel-actions {
+  flex: 0 0 auto;
+  padding-top: var(--s-1);
+}
+
+.sys-see-more {
+  align-self: center;
+  min-height: var(--hit-min);
+  padding: 0 var(--s-3);
+  border: 0;
+  border-radius: var(--r-sm);
+  background: none;
+  color: var(--c-accent);
+  font: var(--t-footnote);
+  cursor: pointer;
+}
+
+.sys-see-more:hover {
+  background: var(--c-fill-2);
+}
+
+.sys-see-more:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+/* ── Processes pane ──────────────────────────────────────────────────────── */
+
+.proc-list,
+.drive-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--c-fill) transparent;
+}
+
+.proc-row {
+  border-radius: var(--r-sm);
+}
+
+.proc-row-main {
   display: flex;
   align-items: center;
-  gap: 8px;
-  color: var(--dim-3);
+  gap: var(--s-2);
+  min-height: 32px;
+  padding: 0 var(--s-1);
 }
 
-.sys-stat-name {
-  font: 500 11.5px var(--font);
-  color: var(--ink-2);
-  white-space: nowrap;
-  flex: 0 0 56px;
+.proc-avatar {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  flex: 0 0 20px;
+  border-radius: 50%;
+  font: 600 10px var(--font-ui);
+  color: var(--c-on-accent);
 }
 
-.sys-stat-value {
-  font: 400 11px var(--font);
-  font-variant-numeric: tabular-nums;
-  color: var(--dim-2);
-  white-space: nowrap;
-  flex: 0 0 auto;
-  min-width: 96px;
-  text-align: right;
-}
-
-/* Windows only — hidden outright on Linux rather than shown disabled. */
-.sys-cleanup {
-  display: flex;
-}
-
-/*
- * The meter. Its colour is the warning and not decoration: green while there
- * is room, amber past three quarters, red past nine tenths.
- */
-.meter {
+.proc-row-text {
   flex: 1 1 auto;
   min-width: 0;
-  height: 5px;
-  border-radius: 3px;
-  background: rgba(255, 255, 255, 0.08);
-  overflow: hidden;
-}
-
-.meter i {
-  display: block;
-  height: 100%;
-  border-radius: 3px;
-  background: var(--green);
-}
-
-.meter.close i {
-  background: var(--amber);
-}
-
-.meter.tight i {
-  background: var(--red);
-}
-
-.sys-procs {
   display: flex;
   flex-direction: column;
   gap: 2px;
 }
 
-.sys-procs-title {
-  font: 400 10px var(--font);
-  color: var(--dim-4);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  padding: 2px 8px;
-}
-
-.sys-proc {
+.proc-row-name {
   display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 3px 8px;
-  border-radius: 8px;
-  color: var(--dim-3);
+  align-items: baseline;
+  gap: var(--s-1);
+  min-width: 0;
 }
 
-.sys-proc-name {
-  font: 400 11px var(--font);
-  color: var(--ink-2);
+.proc-row-name b {
+  font: var(--t-subhead);
+  color: var(--c-label);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  flex: 1 1 auto;
-  min-width: 0;
 }
 
-.sys-proc-mem {
-  font: 400 10.5px var(--font);
+.proc-badge {
+  font: var(--t-caption2);
+  color: var(--c-label-3);
+  flex: 0 0 auto;
+}
+
+.proc-bar {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--c-fill);
+  overflow: hidden;
+}
+
+.proc-bar i {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+  background: var(--c-label-3);
+}
+
+.proc-value {
+  font: var(--t-footnote);
   font-variant-numeric: tabular-nums;
-  color: var(--dim-3);
+  color: var(--c-label-2);
   white-space: nowrap;
   flex: 0 0 auto;
 }
 
-.sys-proc-end {
+.proc-lock {
   display: grid;
   place-items: center;
-  width: 18px;
-  height: 18px;
-  flex: 0 0 18px;
-  border: 0;
-  border-radius: 6px;
-  background: none;
-  color: var(--dim-3);
-  cursor: pointer;
+  width: 32px;
+  height: 32px;
+  flex: 0 0 32px;
+  color: var(--c-label-3);
 }
 
-.sys-proc-end:hover {
-  background: var(--red);
-  color: #fff;
-}
-
-.sys-proc-confirm {
+.proc-menu {
   display: flex;
-  align-items: center;
-  gap: 4px;
-  flex: 0 0 auto;
+  justify-content: flex-end;
+  gap: var(--s-1);
+  padding: 0 var(--s-1) var(--s-1);
 }
 
-.sys-proc-yes,
-.sys-proc-no {
-  border: 0;
-  border-radius: 6px;
-  padding: 3px 8px;
-  font: 500 10.5px var(--font);
-  cursor: pointer;
-}
-
-.sys-proc-yes {
-  background: var(--red);
-  color: #fff;
-}
-
-.sys-proc-yes:hover {
-  background: #ff6572;
-}
-
-.sys-proc-no {
-  background: none;
-  color: var(--dim-3);
-}
-
-.sys-proc-no:hover {
-  background: rgba(255, 255, 255, 0.07);
-  color: var(--ink-2);
-}
-
-.sys-list {
+.proc-members {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  overflow-y: auto;
-  min-height: 0;
-  flex: 1 1 auto;
-  scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
+  padding: 0 var(--s-1) var(--s-2) 52px;
 }
 
+.proc-member {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--s-2);
+  font: var(--t-footnote);
+  font-variant-numeric: tabular-nums;
+  color: var(--c-label-2);
+}
+
+/* ── Storage pane ─────────────────────────────────────────────────────────── */
+
+.drive-bar {
+  width: 72px;
+  flex: 0 0 72px;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--c-fill-2);
+  overflow: hidden;
+}
+
+.drive-bar i {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  background: var(--c-green);
+}
+
+.drive-bar-orange i {
+  background: var(--c-orange);
+}
+
+.drive-bar-red i {
+  background: var(--c-red);
+}
+
+/* ── The "free up space" sheet ────────────────────────────────────────────── */
+
+.sheet-step-label {
+  display: block;
+  font: var(--t-caption);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--c-label-3);
+  margin-bottom: var(--s-2);
+}
+
+.sheet-skel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+}
+
+.sheet-skel-row {
+  height: 36px;
+  border-radius: var(--r-sm);
+  background: var(--c-fill-2);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .sheet-skel-row {
+    animation: sheet-skel-pulse 1.1s ease-in-out infinite;
+  }
+}
+
+@keyframes sheet-skel-pulse {
+  50% {
+    opacity: 0.5;
+  }
+}
+
+.sheet-results {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+/* Reused from the checklist look this tab has always had. */
 .sys-row {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--s-2);
   width: 100%;
   border: 0;
-  border-radius: 8px;
-  padding: 4px 8px;
+  border-radius: var(--r-sm);
+  min-height: var(--hit-primary);
+  padding: 0 var(--s-2);
   background: none;
   cursor: pointer;
   text-align: left;
-  color: var(--dim-3);
+  color: var(--c-label-2);
 }
 
 .sys-row:hover {
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--c-fill-2);
+}
+
+.sys-row.disabled {
+  cursor: default;
+  opacity: 0.5;
 }
 
 /* The tick box says what will be looked at — never what will be deleted. */
 .sys-tick {
   display: grid;
   place-items: center;
-  width: 14px;
-  height: 14px;
-  flex: 0 0 14px;
-  border-radius: 4px;
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.22);
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+  border-radius: var(--r-xs);
+  box-shadow: inset 0 0 0 1px var(--c-glass-border);
 }
 
 .sys-row.on .sys-tick {
-  background: var(--indigo);
+  background: var(--c-accent);
   box-shadow: none;
-  color: #fff;
+  color: var(--c-on-accent);
 }
 
 .sys-row-text {
   display: flex;
-  align-items: baseline;
-  gap: 8px;
+  flex-direction: column;
+  gap: 1px;
   min-width: 0;
   flex: 1 1 auto;
 }
 
 .sys-row-text b {
-  font: 500 11.5px var(--font);
-  color: var(--ink-2);
+  font: var(--t-subhead);
+  color: var(--c-label);
   white-space: nowrap;
 }
 
 .sys-row-about {
-  font: 400 10.5px var(--font);
+  font: var(--t-footnote);
   font-variant-numeric: tabular-nums;
-  color: var(--dim-3);
+  color: var(--c-label-2);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.sys-actions {
-  display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
-}
-
-.sys-btn {
+.sheet-link {
+  align-self: flex-start;
   border: 0;
-  border-radius: 8px;
-  padding: 5px 11px;
-  font: 500 11.5px var(--font);
-  background: rgba(255, 255, 255, 0.1);
-  color: var(--ink-2);
-  cursor: pointer;
-}
-
-.sys-btn:hover {
-  background: rgba(255, 255, 255, 0.16);
-}
-
-.sys-btn:disabled {
-  opacity: 0.38;
-  cursor: default;
-}
-
-/* The one button that deletes anything looks like it. */
-.sys-btn.danger {
-  background: var(--red);
-  color: #fff;
-}
-
-.sys-btn.danger:hover {
-  background: #ff6572;
-}
-
-.sys-btn.quiet {
   background: none;
-  color: var(--dim-3);
+  color: var(--c-accent);
+  font: var(--t-footnote);
+  cursor: pointer;
+  padding: var(--s-2);
 }
 
-.sys-btn.quiet:hover {
-  background: rgba(255, 255, 255, 0.07);
-  color: var(--ink-2);
+.sheet-footer-row {
+  display: flex;
+  justify-content: flex-end;
 }
 
-.sys-result {
+.sheet-progress {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: var(--s-2);
+  padding: var(--s-4) 0;
 }
 
-.sys-result:empty {
-  display: none;
+.sheet-progress-track {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--c-fill-2);
+  overflow: hidden;
+}
+
+.sheet-progress-fill {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  background: var(--c-accent);
+  transition: width var(--d-base) var(--ease-out);
+}
+
+.sheet-result {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--s-1);
+  padding: var(--s-4) 0;
+  text-align: center;
+}
+
+.sheet-result-check {
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--c-green) 16%, transparent);
+  color: var(--c-green);
+  margin-bottom: var(--s-1);
+}
+
+.sheet-result-headline {
+  font: var(--t-title3);
+  color: var(--c-label);
+}
+
+.sheet-result-sub {
+  font: var(--t-footnote);
+  color: var(--c-label-2);
+  font-variant-numeric: tabular-nums;
 }
 
 .sys-swept {
   display: flex;
   align-items: baseline;
-  gap: 8px;
-  font: 400 10.5px var(--font);
+  gap: var(--s-2);
+  font: var(--t-footnote);
   font-variant-numeric: tabular-nums;
-  color: var(--green-2);
+  color: var(--c-green);
+  padding: 2px var(--s-2);
 }
 
 .sys-swept b {
   font-weight: 500;
-  color: var(--ink-2);
+  color: var(--c-label);
   white-space: nowrap;
 }
 

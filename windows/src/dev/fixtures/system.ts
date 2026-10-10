@@ -18,18 +18,30 @@ export interface MockProcInfo {
   pid: number;
   name: string;
   memory: number;
+  protected: boolean;
+  startTime: number;
 }
 
 export interface MockStats {
   drives: MockDrive[];
   memoryUsed: number;
   memoryTotal: number;
+  cpuPercent: number;
+  cores: number;
   diskCleanupAvailable: boolean;
 }
 
 export type MockScenario = "ok" | "strained" | "sick";
 
 const TOTAL_MEMORY = 16 * GB;
+
+/** CPU percent per scenario — folded into `MOCK_SCENARIOS` below and also
+ *  exported on its own for the health monitor Fase 7 adds. */
+export const MOCK_CPU: Record<MockScenario, number> = {
+  ok: 18,
+  strained: 32,
+  sick: 91,
+};
 
 export const MOCK_SCENARIOS: Record<MockScenario, MockStats> = {
   ok: {
@@ -39,6 +51,8 @@ export const MOCK_SCENARIOS: Record<MockScenario, MockStats> = {
     ],
     memoryUsed: Math.round(TOTAL_MEMORY * 0.45),
     memoryTotal: TOTAL_MEMORY,
+    cpuPercent: MOCK_CPU.ok,
+    cores: 8,
     diskCleanupAvailable: true,
   },
   strained: {
@@ -48,6 +62,8 @@ export const MOCK_SCENARIOS: Record<MockScenario, MockStats> = {
     ],
     memoryUsed: Math.round(TOTAL_MEMORY * 0.76),
     memoryTotal: TOTAL_MEMORY,
+    cpuPercent: MOCK_CPU.strained,
+    cores: 8,
     diskCleanupAvailable: true,
   },
   sick: {
@@ -57,34 +73,32 @@ export const MOCK_SCENARIOS: Record<MockScenario, MockStats> = {
     ],
     memoryUsed: Math.round(TOTAL_MEMORY * 0.88),
     memoryTotal: TOTAL_MEMORY,
+    cpuPercent: MOCK_CPU.sick,
+    cores: 8,
     diskCleanupAvailable: true,
   },
 };
 
-/** CPU percent per scenario — the health monitor's other half (Fase 7). */
-export const MOCK_CPU: Record<MockScenario, number> = {
-  ok: 18,
-  strained: 32,
-  sick: 91,
-};
-
 const MB = 1024 ** 2;
 
-/** 14 processes with repeats, as `system_processes` would hand them back —
- *  already heaviest-first, the way the real command sorts them. */
+/** 15 processes with repeats, as `system_processes` would hand them back —
+ *  already heaviest-first, the way the real command sorts them. One
+ *  (`MsMpEng.exe`) is protected, to prove the lock glyph has something to
+ *  show in a screenshot rather than only in a unit test. */
 export const MOCK_PROCESSES: MockProcInfo[] = [
-  { pid: 10412, name: "claude.exe", memory: Math.round(1.36 * GB / 3) },
-  { pid: 20072, name: "claude.exe", memory: Math.round(1.36 * GB / 3) },
-  { pid: 13288, name: "claude.exe", memory: Math.round(1.36 * GB / 3) },
-  { pid: 8841, name: "msedgewebview2.exe", memory: 372 * MB },
-  { pid: 9102, name: "msedgewebview2.exe", memory: 298 * MB },
-  { pid: 4410, name: "msedge.exe", memory: 309 * MB },
-  { pid: 4512, name: "msedge.exe", memory: 211 * MB },
-  { pid: 7781, name: "chrome.exe", memory: 239 * MB },
-  { pid: 7790, name: "chrome.exe", memory: 188 * MB },
-  { pid: 5521, name: "Obsidian.exe", memory: 420 * MB },
-  { pid: 6630, name: "rustc.exe", memory: 859 * MB },
-  { pid: 6631, name: "cargo.exe", memory: 100 * MB },
-  { pid: 2211, name: "node.exe", memory: 142 * MB },
-  { pid: 3301, name: "Code.exe", memory: 512 * MB },
+  { pid: 10412, name: "claude.exe", memory: Math.round(1.36 * GB / 3), protected: false, startTime: 1001 },
+  { pid: 20072, name: "claude.exe", memory: Math.round(1.36 * GB / 3), protected: false, startTime: 1002 },
+  { pid: 13288, name: "claude.exe", memory: Math.round(1.36 * GB / 3), protected: false, startTime: 1003 },
+  { pid: 8841, name: "msedgewebview2.exe", memory: 372 * MB, protected: false, startTime: 1004 },
+  { pid: 9102, name: "msedgewebview2.exe", memory: 298 * MB, protected: false, startTime: 1005 },
+  { pid: 4410, name: "msedge.exe", memory: 309 * MB, protected: false, startTime: 1006 },
+  { pid: 4512, name: "msedge.exe", memory: 211 * MB, protected: false, startTime: 1007 },
+  { pid: 7781, name: "chrome.exe", memory: 239 * MB, protected: false, startTime: 1008 },
+  { pid: 7790, name: "chrome.exe", memory: 188 * MB, protected: false, startTime: 1009 },
+  { pid: 5521, name: "Obsidian.exe", memory: 420 * MB, protected: false, startTime: 1010 },
+  { pid: 6630, name: "rustc.exe", memory: 859 * MB, protected: false, startTime: 1011 },
+  { pid: 6631, name: "cargo.exe", memory: 100 * MB, protected: false, startTime: 1012 },
+  { pid: 2211, name: "node.exe", memory: 142 * MB, protected: false, startTime: 1013 },
+  { pid: 3301, name: "Code.exe", memory: 512 * MB, protected: false, startTime: 1014 },
+  { pid: 1428, name: "MsMpEng.exe", memory: 268 * MB, protected: true, startTime: 1015 },
 ].sort((a, b) => b.memory - a.memory);

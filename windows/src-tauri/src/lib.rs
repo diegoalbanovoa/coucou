@@ -615,20 +615,21 @@ fn system_clean(ids: Vec<String>) -> Vec<system::Swept> {
     system::clean(&ids)
 }
 
-/// The processes using the most memory right now. Coucou itself and anything
-/// the system needs are left out entirely — there is nothing in this list
-/// `system_kill_process` would refuse anyway.
+/// The processes using the most memory right now. Generous on purpose —
+/// grouping by executable and the 8-then-20 cutoff both happen in TS, over
+/// the raw list this hands back.
 #[tauri::command]
 fn system_processes() -> Vec<system::ProcInfo> {
-    system::top_processes(8)
+    system::top_processes(40)
 }
 
-/// Ends one process. Refused in Rust, not only hidden in the interface, if it
-/// turns out to be Coucou itself or something the system needs — the pid a
-/// click sends is trusted no further than that.
+/// Ends the named processes. Refused in Rust, not only hidden in the
+/// interface, for anything protected or whose start time no longer matches
+/// what the row was drawn with — the pids a click sends are trusted no
+/// further than that. Returns the ones that could not be ended.
 #[tauri::command]
-fn system_kill_process(pid: u32) -> Result<(), String> {
-    system::kill_process(pid)
+fn system_end_process(targets: Vec<system::EndTarget>) -> Vec<u32> {
+    system::end_processes(&targets)
 }
 
 /// Hands off to Windows' own Disk Cleanup. `false` on Linux, or if it could
@@ -884,7 +885,7 @@ pub fn run() {
             system_scan,
             system_clean,
             system_processes,
-            system_kill_process,
+            system_end_process,
             system_open_disk_cleanup,
             chat_load,
             chat_keep,

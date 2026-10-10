@@ -68,9 +68,12 @@ export const WAKE_STRIP_W = 240;
 export const WAKE_STRIP_H = 6;
 
 export const VIEW_LAYOUTS: Record<IslandViewName, ViewLayout> = {
-  // Taller than the cards: it holds the drives, the memory, five tick boxes and
-  // whatever the last sweep reported.
-  system: { height: 300, botX: 60, botY: null, botDiameter: 52, agentMode: "none" },
+  // Fase 6 (plan-v2.md § 6.2): Mochi is the protagonist of this view, large
+  // and centred in its own left column rather than sharing the header strip
+  // the other views tuck it into — hence the explicit `botY` rather than the
+  // generic "centre of an 84pt card" fallback `botPosition` falls back to
+  // when it is null, which assumes a card far shorter than this one.
+  system: { height: 380, botX: 70, botY: 211, botDiameter: 96, agentMode: "none" },
   overview: { height: 160, botX: 68, botY: null, botDiameter: 58, agentMode: "pills" },
   empty: { height: 160, botX: 70, botY: null, botDiameter: 62, agentMode: "none" },
   approval: { height: 160, botX: 62, botY: null, botDiameter: 56, agentMode: "column" },

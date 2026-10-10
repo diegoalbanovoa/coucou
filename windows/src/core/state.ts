@@ -161,6 +161,16 @@ class AppState {
 
   fileDragOver = false;
 
+  /** Mock mode only (`?state=cleanup`) — opens the System tab's "free up
+   *  space" sheet already on its results step, since neither a real click
+   *  nor a wait for a real scan can be driven from shots.mjs. */
+  systemOpenCleanupSheet = false;
+
+  /** Mock mode only (`?state=storage`) — starts the System tab on its
+   *  Almacenamiento pane instead of the Procesos default, so shots.mjs can
+   *  capture the drive list without scripting a segmented-control click. */
+  systemInitialPane: "processes" | "storage" | null = null;
+
   noteMessage: string | null = null;
   searchResult: SearchResult | null = null;
   chatHistory: ChatMessage[] = [];
