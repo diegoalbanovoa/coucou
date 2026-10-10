@@ -82,6 +82,7 @@ export function keepConversation() {
     content: message.content,
     at: message.at,
     steps: message.steps ?? [],
+    attachments: message.attachments ?? [],
   }));
   void Bridge.chatKeep(kept);
 }

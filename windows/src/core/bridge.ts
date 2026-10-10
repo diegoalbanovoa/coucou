@@ -110,6 +110,12 @@ export const Bridge = {
   agentCommands: () => call<SlashCommand[]>("agent_commands"),
   /** Opens the folder picker. Null when the user cancelled. */
   pickProject: () => call<string | null>("pick_project"),
+
+  /** The paperclip's native picker — any file, any number. `call()` already
+   *  turns "not in Tauri" into null; empty on Linux too (platform/linux.rs
+   *  doesn't build one this pass), which chat.ts's attachBtn reads the same
+   *  way as a cancel: fall back to its Fase 4 HTML file input. */
+  pickFiles: () => call<string[]>("pick_files"),
   /** Attaches the folder the agent runs in. */
   attachProject: (path: string) => callOrThrow<string>("attach_project", { path }),
   detachProject: () => call<void>("detach_project"),
@@ -178,11 +184,21 @@ export interface IntegrationUpdate {
   event: { success: boolean; label: string; detail: string | null } | null;
 }
 
+/** What a message carried, never the bytes — `id` is the inbox path, the
+ *  same string `imagePreview` takes to ask for a thumbnail again. */
+export interface ChatAttachment {
+  id: string;
+  name: string;
+  kind: "image" | "pdf" | "code" | "doc" | "other";
+  size: number;
+}
+
 export interface KeptMessage {
   role: "user" | "assistant" | "error";
   content: string;
   at: number;
   steps: string[];
+  attachments: ChatAttachment[];
 }
 
 /** One drive and the room left on it. */

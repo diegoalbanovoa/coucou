@@ -46,3 +46,17 @@ test("chatPromptHeight: never under CHAT_MIN_H, even on a short display", () => 
   assert.equal(chatPromptHeight(0, false, 200), CHAT_MIN_H);
   assert.equal(chatPromptHeight(0, true, 200), CHAT_MIN_H);
 });
+
+test("chatPromptHeight: a populated attachment tray gets its own room, not squeezed out of the log's", () => {
+  // Regression: the tray used to be sized for Fase 4's short image chips: once
+  // Fase 5 made the tiles 56px, a populated tray clipped against the composer
+  // because nothing told islandSize() it needed the extra room — see
+  // docs/plan-v2-notas.md § Fase 5.
+  const bare = chatPromptHeight(2, false, 1080, false);
+  const withTray = chatPromptHeight(2, false, 1080, true);
+  assert.ok(withTray > bare, "a populated tray must ask for more height than an empty one");
+});
+
+test("chatPromptHeight: the tray's extra room still respects the ceiling", () => {
+  assert.equal(chatPromptHeight(500, false, 4000, true), CHAT_MAX_H);
+});

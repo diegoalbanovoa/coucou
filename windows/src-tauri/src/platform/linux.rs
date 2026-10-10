@@ -365,6 +365,18 @@ pub fn pick_folder(_win: &WebviewWindow) -> Option<String> {
     None
 }
 
+/// The paperclip's native picker (plan-v2.md § 5.3) — not built this pass,
+/// by explicit choice rather than a platform limitation: `pick_folder` just
+/// above already shells out to zenity/kdialog safely (both support multi-
+/// select — `zenity --file-selection --multiple`, `kdialog
+/// --getopenfilename`), so a Linux `pick_files` could follow the same
+/// pattern later. Chat's paperclip already falls back to its Fase 4 picker
+/// (an HTML file input, images only) whenever this returns empty, so leaving
+/// it empty here is a real, working state, not a stub masking a gap.
+pub fn pick_files(_win: &WebviewWindow, _title: &str) -> Vec<String> {
+    Vec::new()
+}
+
 fn apply_input_region(gw: &impl IsA<gtk::Widget>, rect: Region) {
     match rect {
         None => gw.input_shape_combine_region(None),

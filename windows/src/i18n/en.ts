@@ -13,7 +13,6 @@ export const en = {
     // — Fase 2 translates what exists; renaming the tabs is Fase 3's job.
     home: "Overview",
     chat: "Ask",
-    drop: "Drop",
     system: "System",
     settings: "Settings",
     mute: "Mute",
@@ -70,7 +69,6 @@ export const en = {
     jumpToLatest: "Jump to the latest",
     emptyTitle: "Ask away.",
     attachImage: "Attach an image",
-    removeImage: "Remove {name}",
     steps: { one: "{n} step", other: "{n} steps" },
     hideSteps: "hide",
     findPlaceholder: "Find in the conversation…",
@@ -99,17 +97,14 @@ export const en = {
   files: {
     dropTitle: "Drop your files here",
     kind: { pdf: "PDF", images: "Images", code: "Code", docs: "Docs" },
-    uploadingFallback: "file",
-    uploading: "Uploading {name}",
-    uploaded: "✓  {name}",
-    whatNow: "What do you want to do with it?",
-    readyFileFallback: "file",
-    /** Appended after a bold filename node — see views/upload.ts's buildChoose,
-     *  which keeps the name bold and this plain rather than folding both into
-     *  one string. Leading space is deliberate. */
-    readySuffix: " is ready.",
-    askQuestion: "Ask a question",
-    tooManyImages: { one: "Up to {max} image on one message.", other: "Up to {max} images on one message." },
+    remove: "Remove {name}",
+    blocked: "{name} can't be attached — Coucou doesn't accept that kind of file.",
+    tooMany: { one: "Up to {max} file on one message.", other: "Up to {max} files on one message." },
+    missing: "No longer there",
+    /** Header line above the bulleted path list a turn's prompt carries when
+     *  files are attached (plan-v2.md § 5.6) — read by the agent, never shown
+     *  in the island, but still routed through t() like everything else. */
+    promptHeader: "Attached files:",
     tooLarge: "{name} is larger than {max}.",
   },
 

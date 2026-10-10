@@ -1,11 +1,12 @@
-// What little of the UI is Rust's to say: the tray menu, today. See
-// docs/plan-v2.md § 2.3 — the folder and file pickers use whatever title
-// Windows itself gives an `IFileOpenDialog`, which this crate does not set,
-// so there is nothing of theirs to translate yet.
+// What little of the UI is Rust's to say: the tray menu, and (since plan-v2.md
+// § 5.3 asks for it specifically) the paperclip's native file picker's title.
+// The folder picker (`pick_folder`) still uses whatever title Windows itself
+// gives an `IFileOpenDialog` — the plan never asked for that one, and
+// changing a dialog nobody filed an issue against was not this phase's job.
 //
 // `TypeScript` owns the real dictionary (src/i18n/); this is deliberately a
-// much smaller mirror of just the tray's four labels; a new key here does not
-// need a matching one there, and vice versa.
+// much smaller mirror of just a few platform-native strings; a new key here
+// does not need a matching one there, and vice versa.
 
 /// "system", "en" or "es" — the same three values `Settings::language`
 /// stores, resolved the same way `i18n/index.ts`'s `resolveLocale` does.
@@ -40,6 +41,8 @@ pub enum Key {
     Settings,
     Pause,
     Quit,
+    /// Title bar of the paperclip's native multi-select picker.
+    AttachFiles,
 }
 
 pub fn tr(locale: Locale, key: Key) -> &'static str {
@@ -52,6 +55,8 @@ pub fn tr(locale: Locale, key: Key) -> &'static str {
         (Locale::Es, Key::Pause) => "Pausar",
         (Locale::En, Key::Quit) => "Quit",
         (Locale::Es, Key::Quit) => "Salir",
+        (Locale::En, Key::AttachFiles) => "Attach files",
+        (Locale::Es, Key::AttachFiles) => "Adjuntar archivos",
     }
 }
 
@@ -61,7 +66,7 @@ mod tests {
 
     #[test]
     fn every_key_answers_in_both_locales() {
-        for key in [Key::Open, Key::Settings, Key::Pause, Key::Quit] {
+        for key in [Key::Open, Key::Settings, Key::Pause, Key::Quit, Key::AttachFiles] {
             assert!(!tr(Locale::En, key_copy(&key)).is_empty());
             assert!(!tr(Locale::Es, key).is_empty());
         }
@@ -75,6 +80,7 @@ mod tests {
             Key::Settings => Key::Settings,
             Key::Pause => Key::Pause,
             Key::Quit => Key::Quit,
+            Key::AttachFiles => Key::AttachFiles,
         }
     }
 

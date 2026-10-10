@@ -18,6 +18,23 @@ const KEEP: usize = 40;
 /// carrying across a restart, and the island folds long replies down anyway.
 const MAX_CHARS: usize = 20_000;
 
+/// What a message carried, never the bytes — just enough to show a chip
+/// again, or a grey "missing" one if the inbox file is gone by the time the
+/// conversation is reloaded. `id` is the inbox path, the same string
+/// `preview`/`inbox_thumb` take to ask for a thumbnail again.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Attachment {
+    pub id: String,
+    pub name: String,
+    /// "image" | "pdf" | "code" | "doc" | "other" — decided once, at attach
+    /// time, by the front end (views/chat.ts's kindOf); kept as a plain
+    /// string rather than a Rust enum because nothing here branches on it,
+    /// only the webview does.
+    pub kind: String,
+    pub size: u64,
+}
+
 /// One message, in the shape the island already holds it.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -29,6 +46,8 @@ pub struct Message {
     pub at: f64,
     #[serde(default)]
     pub steps: Vec<String>,
+    #[serde(default)]
+    pub attachments: Vec<Attachment>,
 }
 
 fn path() -> PathBuf {
@@ -75,6 +94,7 @@ pub fn trim(messages: &[Message]) -> Vec<Message> {
             content: cut(&message.content, MAX_CHARS),
             at: message.at,
             steps: message.steps.clone(),
+            attachments: message.attachments.clone(),
         })
         .collect()
 }
@@ -98,7 +118,7 @@ mod tests {
     use super::*;
 
     fn message(role: &str, content: &str) -> Message {
-        Message { role: role.into(), content: content.into(), at: 1.0, steps: Vec::new() }
+        Message { role: role.into(), content: content.into(), at: 1.0, steps: Vec::new(), attachments: Vec::new() }
     }
 
     #[test]
@@ -146,11 +166,32 @@ mod tests {
             content: "done".into(),
             at: 17.5,
             steps: vec!["Read agent.rs".into()],
+            attachments: Vec::new(),
         };
         let json = serde_json::to_string(std::slice::from_ref(&with)).unwrap();
         assert_eq!(serde_json::from_str::<Vec<Message>>(&json).unwrap(), [with]);
 
         let older = r#"[{"role":"user","content":"hi","at":1}]"#;
-        assert_eq!(serde_json::from_str::<Vec<Message>>(older).unwrap()[0].steps, Vec::<String>::new());
+        let loaded = &serde_json::from_str::<Vec<Message>>(older).unwrap()[0];
+        assert_eq!(loaded.steps, Vec::<String>::new());
+        assert_eq!(loaded.attachments, Vec::<Attachment>::new());
+    }
+
+    #[test]
+    fn attachments_survive_a_round_trip_and_a_file_without_them_still_loads() {
+        let with = Message {
+            role: "user".into(),
+            content: "look at this".into(),
+            at: 5.0,
+            steps: Vec::new(),
+            attachments: vec![Attachment {
+                id: "C:/inbox/photo.png".into(),
+                name: "photo.png".into(),
+                kind: "image".into(),
+                size: 1024,
+            }],
+        };
+        let json = serde_json::to_string(std::slice::from_ref(&with)).unwrap();
+        assert_eq!(serde_json::from_str::<Vec<Message>>(&json).unwrap(), [with]);
     }
 }

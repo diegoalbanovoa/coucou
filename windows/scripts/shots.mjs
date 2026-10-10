@@ -48,8 +48,11 @@ const SHOTS = [
   shot({ view: "chat", label: "populated", url: "" }),
   shot({ view: "chat", label: "empty", url: "?state=empty" }),
   shot({ view: "chat", label: "search", url: "?state=search", ready: false }),
-  shot({ view: "chat", label: "drop", url: "?state=drop", ready: false }),
-  shot({ view: "chat", label: "attachments", url: "?state=attachments", ready: false }),
+  // drop/attachments: Fase 5 — mock-bridge.ts seeds State.fileDragOver /
+  // State.chatAttachments directly for these, since neither a real drag nor
+  // a real pick can be simulated here.
+  shot({ view: "chat", label: "drop", url: "?state=drop" }),
+  shot({ view: "chat", label: "attachments", url: "?state=attachments" }),
   shot({ view: "chat", label: "streaming", url: "?state=streaming", ready: false }),
   // ── system ────────────────────────────────────────────────────────────────
   shot({ view: "system", label: "ok", url: "?scenario=ok" }),

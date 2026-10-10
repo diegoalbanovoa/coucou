@@ -492,6 +492,29 @@ async fn pick_project(app: AppHandle) -> Option<String> {
     choose_folder(island::window(&app)?).await
 }
 
+/// The paperclip's native multi-select picker (plan-v2.md § 5.3) — any kind
+/// of file, any number. Shares `PICKING` with `choose_folder`: two native
+/// dialogs open at once would be confusing, whichever two they are.
+#[tauri::command]
+async fn pick_files(app: AppHandle, shared: State<'_, Shared>) -> Result<Vec<String>, ()> {
+    let Some(win) = island::window(&app) else { return Ok(Vec::new()) };
+    if PICKING.swap(true, Ordering::SeqCst) {
+        return Ok(Vec::new());
+    }
+    let _guard = PickingGuard;
+    // Resolved to an owned String, and the lock dropped, before the spawn:
+    // `shared`'s guard must not cross the `.await` below.
+    let title = {
+        let settings = shared.settings.lock().unwrap();
+        let locale = i18n::Locale::resolve(&settings.language);
+        i18n::tr(locale, i18n::Key::AttachFiles).to_string()
+    };
+    let paths = tauri::async_runtime::spawn_blocking(move || platform::pick_files(&win, &title))
+        .await
+        .unwrap_or_default();
+    Ok(paths)
+}
+
 /// One agent turn through the chosen CLI. Its tool calls come back to the
 /// island as ordinary hook events, and its permission card is the one Claude
 /// Code sessions already use.
@@ -854,6 +877,7 @@ pub fn run() {
             attach_project,
             detach_project,
             pick_project,
+            pick_files,
             agent_send,
             agent_cancel,
             system_stats,

@@ -11,7 +11,17 @@ use crate::settings;
 
 const KEEP_FOR: Duration = Duration::from_secs(7 * 24 * 60 * 60);
 
-#[derive(Serialize, Clone)]
+/// Never copied into the inbox, whatever sent it — an executable the agent
+/// could run is not "an attachment" in any sense this feature means. Checked
+/// before the copy, not after: unlike the size cap (see `ingest`'s own note),
+/// the extension is known for free from the path alone.
+pub const BLOCKED_EXTS: &[&str] = &["exe", "msi", "bat", "cmd", "ps1", "vbs", "lnk", "scr"];
+/// Sentinel prefix `ingest`/`ingest_bytes` return instead of a free-text
+/// message when the reason is one the front end turns into `t('files.blocked')`
+/// rather than showing verbatim — see views/chat.ts's attach().
+pub const BLOCKED_ERR: &str = "blocked-extension";
+
+#[derive(Serialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct DroppedFile {
     pub name: String,
@@ -23,8 +33,18 @@ pub fn inbox_dir() -> PathBuf {
     settings::local_dir().join("inbox")
 }
 
+fn is_blocked(path: &Path) -> bool {
+    path.extension()
+        .map(|e| e.to_string_lossy().to_lowercase())
+        .map(|e| BLOCKED_EXTS.contains(&e.as_str()))
+        .unwrap_or(false)
+}
+
 pub fn ingest(source: &str) -> Result<DroppedFile, String> {
     let src = Path::new(source);
+    if is_blocked(src) {
+        return Err(BLOCKED_ERR.into());
+    }
     let meta = std::fs::metadata(src).map_err(|e| format!("cannot read {source}: {e}"))?;
     if meta.is_dir() {
         return Err("Folders can't be dropped yet.".into());
@@ -88,6 +108,25 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_blocked_extension_is_refused_before_it_is_ever_copied() {
+        let tmp = std::env::temp_dir().join(format!("coucou-test-blocked-{}", std::process::id()));
+        std::fs::create_dir_all(&tmp).unwrap();
+        for ext in BLOCKED_EXTS {
+            let source = tmp.join(format!("thing.{ext}"));
+            std::fs::write(&source, b"x").unwrap();
+            let err = ingest(source.to_str().unwrap()).unwrap_err();
+            assert_eq!(err, BLOCKED_ERR, "{ext} should be blocked");
+            let _ = std::fs::remove_file(&source);
+        }
+        // Case does not let one through: Windows extensions are case-insensitive.
+        let source = tmp.join("thing.EXE");
+        std::fs::write(&source, b"x").unwrap();
+        assert_eq!(ingest(source.to_str().unwrap()).unwrap_err(), BLOCKED_ERR);
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
     fn ingest_copies_and_never_overwrites() {
         let tmp = std::env::temp_dir().join(format!("coucou-test-{}", std::process::id()));
         std::fs::create_dir_all(&tmp).unwrap();
@@ -131,10 +170,12 @@ mod tests {
     }
 }
 
-// ── Images in the chat ───────────────────────────────────────────────────────
+// ── Attachments in the chat ───────────────────────────────────────────────────
 
-/// What may be attached to a message.
-pub const IMAGE_EXTS: &[&str] = &["png", "jpg", "jpeg", "webp", "gif"];
+/// What may be attached to a message, and get a real thumbnail rather than a
+/// glyph (plan-v2.md § 5.4's table) — bmp decodes fine in an `<img>`, same as
+/// the other four, so `preview` can hand it back as a data URI too.
+pub const IMAGE_EXTS: &[&str] = &["png", "jpg", "jpeg", "webp", "gif", "bmp"];
 /// How large a file may be and still be attachable.
 ///
 /// Enforced here for a paste, where Coucou receives the bytes. A drop is
@@ -142,6 +183,11 @@ pub const IMAGE_EXTS: &[&str] = &["png", "jpg", "jpeg", "webp", "gif"];
 /// the file has already been copied — mirrored deliberately, and this comment
 /// is here so the two cannot drift unnoticed.
 pub const MAX_IMAGE_BYTES: u64 = 10 * 1024 * 1024;
+// The general per-file (20 MB) and per-message (10 files) caps for a
+// non-image attachment live only in views/chat.ts's attach() — a Rust
+// constant nothing here reads would just be a number to keep in sync by
+// hand, same as the file-count cap already is for images (see this file's
+// own note just above, "the tray's business").
 /// How large it may be and still be shown inline.
 ///
 /// The preview crosses the IPC boundary as base64, which is a third larger
@@ -166,6 +212,7 @@ fn media_type(path: &Path) -> &'static str {
         "png" => "image/png",
         "webp" => "image/webp",
         "gif" => "image/gif",
+        "bmp" => "image/bmp",
         _ => "image/jpeg",
     }
 }
@@ -284,10 +331,10 @@ mod image_tests {
 
     #[test]
     fn only_the_image_kinds_coucou_shows_are_images() {
-        for name in ["a.png", "a.PNG", "a.jpg", "a.jpeg", "a.webp", "a.gif"] {
+        for name in ["a.png", "a.PNG", "a.jpg", "a.jpeg", "a.webp", "a.gif", "a.bmp"] {
             assert!(is_image(Path::new(name)), "{name} should be an image");
         }
-        for name in ["a.svg", "a.bmp", "a.txt", "a.png.exe", "a", "a."] {
+        for name in ["a.svg", "a.txt", "a.png.exe", "a", "a."] {
             assert!(!is_image(Path::new(name)), "{name} should not be");
         }
     }
@@ -297,6 +344,7 @@ mod image_tests {
         assert_eq!(media_type(Path::new("a.png")), "image/png");
         assert_eq!(media_type(Path::new("a.webp")), "image/webp");
         assert_eq!(media_type(Path::new("a.gif")), "image/gif");
+        assert_eq!(media_type(Path::new("a.bmp")), "image/bmp");
         assert_eq!(media_type(Path::new("a.jpeg")), "image/jpeg");
         assert_eq!(media_type(Path::new("image/png.jpg")), "image/jpeg");
     }

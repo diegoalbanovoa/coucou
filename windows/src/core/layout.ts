@@ -12,9 +12,6 @@ export type IslandViewName =
   | "error"
   | "finished"
   | "confused"
-  | "upload"
-  | "uploading"
-  | "choose"
   | "mail"
   | "prompt"
   | "searching"
@@ -81,11 +78,6 @@ export const VIEW_LAYOUTS: Record<IslandViewName, ViewLayout> = {
   error: { height: 160, botX: 62, botY: null, botDiameter: 58, agentMode: "column" },
   finished: { height: 160, botX: 62, botY: null, botDiameter: 58, agentMode: "column" },
   confused: { height: 160, botX: 76, botY: null, botDiameter: 66, agentMode: "column" },
-  upload: { height: 176, botX: 140, botY: 104, botDiameter: 62, agentMode: "column" },
-  // botY 103 = bar top (42 + 58) + 3, so the dot really rides the bar. The Swift
-  // layout says 118 while its own comment says 103; the comment matches the spec.
-  uploading: { height: 176, botX: 46, botY: 103, botDiameter: 20, agentMode: "none" },
-  choose: { height: 176, botX: 60, botY: 101, botDiameter: 52, agentMode: "column" },
   mail: { height: 240, botX: 56, botY: null, botDiameter: 46, agentMode: "column" },
   // The chat draws its own small Mochi in its header (24px, same engine —
   // see views/chat.ts's avatarSlot) instead of using the big shared one
@@ -100,16 +92,18 @@ export const VIEW_LAYOUTS: Record<IslandViewName, ViewLayout> = {
   greeting: { height: 150, botX: 320, botY: 90, botDiameter: 0, agentMode: "none" },
 };
 
-// The upload views above are only the fallback geometry. Once a file is actually
-// dropped the whole sequence — Mochi included — is drawn by src/upload, which
-// owns its own constants (USC) straight from UploadSequenceEngine.swift.
-
 /** The chat never gets less than this, whatever is in it. */
 export const CHAT_MIN_H = 300;
 /** Nor more than this share of the work area it is on… */
 const CHAT_SCREEN_SHARE = 0.62;
 /** …nor more than this outright, however large the display. */
 export const CHAT_MAX_H = 620;
+/** Room the attachment tray (56px tiles, plan-v2.md § 5.5) needs on top of
+ *  the log when it has anything in it — the tile height plus the gap above
+ *  and below it (style.css's .chat-body `gap` and the tray's own margin).
+ *  Without this the tray was sized for the old, shorter image chips
+ *  (Fase 4) and the new taller tiles clipped against the composer. */
+const ATTACHMENT_TRAY_H = 70;
 
 /** `desired`, pinned inside `[minHeight, maxHeight]`. Applied to every view's
  *  height (not just the chat's) so none of them can ever ask the native
@@ -137,10 +131,16 @@ export function clampViewHeight(desired: number, maxHeight: number, minHeight: n
  * is not on the primary display. `CHAT_MAX_H` is still there because a chat
  * taller than that stops being an island and becomes a window.
  */
-export function chatPromptHeight(messageCount: number, expanded = false, workAreaHeight = 1080): number {
+export function chatPromptHeight(
+  messageCount: number,
+  expanded = false,
+  workAreaHeight = 1080,
+  hasAttachments = false,
+): number {
   const ceiling = clampViewHeight(Math.round(workAreaHeight * CHAT_SCREEN_SHARE), CHAT_MAX_H, CHAT_MIN_H);
   if (expanded) return ceiling;
-  return clampViewHeight(300 + messageCount * 44, ceiling, CHAT_MIN_H);
+  const desired = 300 + messageCount * 44 + (hasAttachments ? ATTACHMENT_TRAY_H : 0);
+  return clampViewHeight(desired, ceiling, CHAT_MIN_H);
 }
 
 export function islandSize(
@@ -149,6 +149,7 @@ export function islandSize(
   chatCount = 0,
   chatExpanded = false,
   workAreaHeight = 1080,
+  chatHasAttachments = false,
 ): { w: number; h: number } {
   switch (mode) {
     case "hidden":
@@ -160,7 +161,7 @@ export function islandSize(
     case "expanded": {
       const h =
         view === "prompt"
-          ? chatPromptHeight(chatCount, chatExpanded, workAreaHeight)
+          ? chatPromptHeight(chatCount, chatExpanded, workAreaHeight, chatHasAttachments)
           : clampViewHeight(VIEW_LAYOUTS[view].height, workAreaHeight, 0);
       return { w: EXPANDED_W, h };
     }
@@ -175,12 +176,7 @@ export interface BotPlacement {
 }
 
 /** IslandRootView.botPosition — cy is measured from the island's top edge. */
-export function botPosition(
-  mode: IslandMode,
-  view: IslandViewName,
-  islandH: number,
-  uploadProgress = 0,
-): BotPlacement {
+export function botPosition(mode: IslandMode, view: IslandViewName, islandH: number): BotPlacement {
   switch (mode) {
     case "hidden":
       return { cx: 46, cy: 16, diameter: 6, opacity: 0 };
@@ -188,14 +184,6 @@ export function botPosition(
       return { cx: 40, cy: 16, diameter: 20, opacity: 1 };
     case "expanded": {
       const layout = VIEW_LAYOUTS[view];
-      if (view === "uploading") {
-        return {
-          cx: 36 + uploadProgress * 526,
-          cy: layout.botY ?? 103,
-          diameter: layout.botDiameter,
-          opacity: 1,
-        };
-      }
       if (layout.botY != null) {
         return { cx: layout.botX, cy: layout.botY, diameter: layout.botDiameter, opacity: 1 };
       }

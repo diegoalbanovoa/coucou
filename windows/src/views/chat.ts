@@ -2,10 +2,10 @@
 // IslandViewContent.swift.
 
 import { h, clear, copyToClipboard } from "./dom";
-import { icon } from "./icons";
+import { icon, type IconName } from "./icons";
 import { render } from "./markdown";
 import { counter, findMatches, highlight, step, type Match } from "./search";
-import { Bridge, onEvent, type AgentTurn, type DroppedFile } from "../core/bridge";
+import { Bridge, onEvent, type AgentTurn, type ChatAttachment, type DroppedFile } from "../core/bridge";
 import { Sound } from "../core/sound";
 import { State, type ChatMessage } from "../core/state";
 import {
@@ -111,13 +111,34 @@ function replyBody(content: string): HTMLElement {
  * needs, since nothing else about the original prompt survives once it has
  * been sent (see submit()).
  */
+/** What a sent message's attachments look like above its bubble — 48px
+ *  (plan-v2.md § 5.6), smaller than the tray's own 56px tiles but the same
+ *  shape: a thumbnail for images, a glyph and extension for everything else.
+ *  A grey, un-clickable tile stands in once the inbox file is gone. */
+function sentAttachments(attachments: ChatAttachment[]): HTMLElement {
+  const row = h("div", { class: "sent-attach-row" });
+  for (const a of attachments) {
+    const thumb = h("span", { class: "attach-thumb" });
+    if (a.kind === "image") {
+      void Bridge.imagePreview(a.id)
+        .then((url) => thumb.append(h("img", { src: url, alt: "" })))
+        .catch(() => thumb.append(icon("image", { size: 16 }), h("span", { class: "attach-ext", text: extensionOf(a.name) })));
+    } else {
+      thumb.append(icon(KIND_ICON[a.kind], { size: 16 }), h("span", { class: "attach-ext", text: extensionOf(a.name) }));
+    }
+    row.append(h("div", { class: "sent-attach-tile", title: a.name }, thumb));
+  }
+  return row;
+}
+
 function bubble(message: ChatMessage, precedingUserText: string | null, onRetry: (query: string) => void): HTMLElement {
   if (message.role === "user") {
-    return h(
-      "div",
-      { class: "chat-row user" },
-      h("div", { class: "bubble", text: message.content, title: clockOf(message.at) }),
-    );
+    const column = h("div", { class: "user-col" });
+    if (message.attachments && message.attachments.length > 0) column.append(sentAttachments(message.attachments));
+    if (message.content.trim() !== "") {
+      column.append(h("div", { class: "bubble", text: message.content, title: clockOf(message.at) }));
+    }
+    return h("div", { class: "chat-row user" }, column);
   }
 
   if (message.role === "error") {
@@ -166,70 +187,131 @@ function draftRow(): HTMLElement {
   return h("div", { class: "chat-row" }, column);
 }
 
-/** The coloured chip showing what the question is about (a dropped file). */
-function contextChip(label: string): HTMLElement {
-  const chip = h("div", { class: "chip" }, h("i", { class: "chip-dot" }), h("span", { text: label }));
-  requestAnimationFrame(() => chip.classList.add("settled"));
-  return chip;
-}
-
 /**
- * The chat's way in for dropped images, set when the view is built.
+ * The chat's way in for dropped files, set when the view is built.
  *
  * The island owns the drop event — Tauri delivers it to the window, not to an
  * element — so it has to be able to hand the paths to whichever view wants
  * them. One function rather than an event, because there is exactly one chat.
+ * Every drop goes here now (plan-v2.md § 5.2): the island opens the chat
+ * before calling this, so there is always somewhere to put the files.
  */
 let intoChat: ((paths: string[]) => void) | null = null;
 
-/** Called by the island when a drop lands while the chat is open. */
-export function takeChatImages(paths: string[]) {
+/** Called by the island when a file (of any kind — see attach()) is dropped. */
+export function takeChatFiles(paths: string[]) {
   intoChat?.(paths);
 }
 
-/** How many images may ride on one message, and how large each may be. */
-const MAX_IMAGES = 5;
+/** How many attachments may ride on one message, of any kind (plan-v2.md
+ *  § 5.4's table), and how large each may be. Mirrored, not shared, from
+ *  src-tauri/src/files.rs's own note on why: Rust only learns a drop's size
+ *  after copying it, so the cap lives here, checked against what `ingest`
+ *  already reports. */
+const MAX_ATTACHMENTS = 10;
+const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
+/** Tighter cap for the paste/file-picker path specifically, which can only
+ *  ever carry an image (Bridge.pasteImage → files.rs's ingest_bytes, which
+ *  hard-refuses anything over this) — mirrors files.rs's own MAX_IMAGE_BYTES. */
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 
+const IMAGE_EXTS = new Set(["png", "jpg", "jpeg", "webp", "gif", "bmp"]);
+const CODE_EXTS = new Set([
+  "ts", "tsx", "js", "jsx", "mjs", "cjs", "py", "rs", "go", "java", "c", "cpp", "h", "hpp",
+  "cs", "rb", "php", "swift", "kt", "sh", "ps1", "sql", "html", "css", "scss", "json", "yaml",
+  "yml", "toml", "xml", "vue", "svelte",
+]);
+const DOC_EXTS = new Set(["doc", "docx", "xls", "xlsx", "ppt", "pptx", "csv", "md", "txt"]);
+
+/** Which tray glyph a file gets, and whether it gets a thumbnail instead —
+ *  decided once by extension and stored on the message that sends it
+ *  (ChatAttachment.kind), not re-derived each render. */
+function kindOf(name: string): ChatAttachment["kind"] {
+  const ext = name.split(".").pop()?.toLowerCase() ?? "";
+  if (IMAGE_EXTS.has(ext)) return "image";
+  if (ext === "pdf") return "pdf";
+  if (CODE_EXTS.has(ext)) return "code";
+  if (DOC_EXTS.has(ext)) return "doc";
+  return "other";
+}
+
+function extensionOf(name: string): string {
+  const ext = name.split(".").pop();
+  return ext && ext !== name ? ext : "";
+}
+
+const KIND_ICON: Record<Exclude<ChatAttachment["kind"], "image">, IconName> = {
+  pdf: "pdf",
+  code: "code",
+  doc: "doc",
+  other: "doc",
+};
+
 /**
- * One attached image.
- *
- * The thumbnail is asked for by path and arrives as a data URI, because the
- * webview never holds file bytes: Tauri intercepts the drop and hands over
- * paths only, so `URL.createObjectURL` has nothing to work with here. A file
- * too large to inline keeps its chip and loses only the picture.
+ * One attachment tile in the tray — 56×56 (plan-v2.md § 5.5). Images get a
+ * thumbnail; everything else gets a glyph and its extension. The thumbnail
+ * is asked for by path and arrives as a data URI, because the webview never
+ * holds file bytes: Tauri intercepts the drop and hands over paths only, so
+ * `URL.createObjectURL` has nothing to work with here.
  */
-function imageChip(file: DroppedFile, onRemove: () => void): HTMLElement {
-  const thumb = h("span", { class: "shot-thumb" });
-  const drop = h("button", { class: "shot-drop", title: t("chat.removeImage", { name: file.name }) });
-  drop.append(icon("xmark", { size: 9 }));
-  drop.addEventListener("click", onRemove);
+function attachmentTile(file: DroppedFile, onRemove: () => void): HTMLElement {
+  const kind = kindOf(file.name);
+  const thumb = h("span", { class: "attach-thumb" });
+  if (kind === "image") {
+    void Bridge.imagePreview(file.path)
+      .then((url) => thumb.append(h("img", { src: url, alt: "" })))
+      .catch(() => {
+        // Too large to inline, or not one of the image kinds Coucou shows
+        // inline (see files.rs's IMAGE_EXTS) — the glyph stands in for it,
+        // same as any other kind's tile.
+        thumb.append(icon("image", { size: 18 }), h("span", { class: "attach-ext", text: extensionOf(file.name) }));
+      });
+  } else {
+    thumb.append(icon(KIND_ICON[kind], { size: 18 }), h("span", { class: "attach-ext", text: extensionOf(file.name) }));
+  }
 
-  const chip = h(
+  const remove = h("button", { class: "attach-remove", title: t("files.remove", { name: file.name }) });
+  remove.append(icon("xmark", { size: 9 }));
+  remove.addEventListener("click", onRemove);
+
+  const tile = h(
     "div",
-    { class: "shot", title: file.path },
+    { class: "attach-tile", tabindex: 0, title: file.name, "aria-label": t("files.remove", { name: file.name }) },
     thumb,
-    h("span", { class: "shot-name", text: file.name }),
-    drop,
+    remove,
   );
-
-  void Bridge.imagePreview(file.path)
-    .then((url) => {
-      const img = h("img", { src: url, alt: "" });
-      thumb.append(img);
-    })
-    .catch(() => {
-      // Too large to inline, or not an image Coucou shows. The chip stays:
-      // the agent still gets the path, which is the part that matters.
-      thumb.append(icon("image", { size: 11 }));
-    });
-
-  return chip;
+  tile.addEventListener("keydown", (e) => {
+    if ((e as KeyboardEvent).key === "Delete" || (e as KeyboardEvent).key === "Backspace") {
+      e.preventDefault();
+      onRemove();
+    }
+  });
+  return tile;
 }
 
 function lastPathComponent(path: string): string {
   const parts = path.split(/[\\/]/).filter(Boolean);
   return parts[parts.length - 1] ?? path;
+}
+
+/** Dashed rounded rect drawn as SVG so the dashes can march like on macOS —
+ *  the drop overlay's border (plan-v2.md § 5.2). */
+function dashedFrame(): SVGSVGElement {
+  const ns = "http://www.w3.org/2000/svg";
+  const el = document.createElementNS(ns, "svg");
+  el.setAttribute("class", "drop-frame");
+  el.setAttribute("preserveAspectRatio", "none");
+  const rect = document.createElementNS(ns, "rect");
+  rect.setAttribute("x", "0.75");
+  rect.setAttribute("y", "0.75");
+  rect.setAttribute("width", "calc(100% - 1.5px)");
+  rect.setAttribute("height", "calc(100% - 1.5px)");
+  rect.setAttribute("rx", "16");
+  rect.setAttribute("fill", "none");
+  rect.setAttribute("stroke-width", "1.5");
+  rect.setAttribute("stroke-dasharray", "6 5");
+  el.append(rect);
+  return el;
 }
 
 /**
@@ -244,7 +326,6 @@ function placeholder(): string {
 }
 
 export function buildPrompt(onHeightChange: () => void): ViewHost {
-  const chipRow = h("div", { class: "chip-row" });
   const shotRow = h("div", { class: "shot-row" });
   const log = h("div", { class: "chat-log" });
   // Rebuilt on their own schedules: the history only when a message lands, the
@@ -368,6 +449,35 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
   // `/` autocomplete. Hidden unless the input starts with a slash.
   const palette = h("div", { class: "slash-palette" });
 
+  // The drop invitation (plan-v2.md § 5.2) — dashed glass over the message
+  // area, not the whole card, so the header and composer stay reachable
+  // while something is being dragged in.
+  const dropAvatar = h("span", { class: "drop-avatar" });
+  const dropTags = h("div", { class: "drop-tags" });
+  for (const key of ["pdf", "images", "code", "docs"] as const) {
+    dropTags.append(h("span", { text: t(`files.kind.${key}`) }));
+  }
+  const dropOverlay = h(
+    "div",
+    { class: "drop-overlay" },
+    dashedFrame(),
+    h("div", { class: "drop-body" }, dropAvatar, h("div", { class: "drop-title", text: t("files.dropTitle") }), dropTags),
+  );
+  // A sibling of `log`, not a child of it: `log` scrolls (overflow-y: auto),
+  // and an absolutely positioned descendant of a scrolled container moves
+  // with that scroll — with a long conversation stuck to its latest message,
+  // the overlay landed hundreds of px above the visible viewport. `logWrap`
+  // is the one that actually scrolls nowhere, so it is what `.drop-overlay`
+  // (style.css) positions itself against.
+  // `jump` rides along too (not a sibling in `.chat-body`): it is positioned
+  // against the nearest `position: relative` ancestor, which used to be
+  // `.card` — fine when nothing sat below the log, but with the attachment
+  // tray now also in `.chat-body`, anchoring to the whole card let the
+  // button's fixed `bottom` land inside the tray instead of just above it.
+  // `logWrap` is the box that actually shrinks to leave the tray room, so
+  // anchoring here keeps the button above the log in both cases.
+  const logWrap = h("div", { class: "log-wrap" }, log, dropOverlay, jump);
+
   const el = h(
     "div",
     { class: "view" },
@@ -379,9 +489,7 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
         { class: "chat-body" },
         header,
         findBar,
-        chipRow,
-        log,
-        jump,
+        logWrap,
         palette,
         shotRow,
         bar,
@@ -518,28 +626,31 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
   }
 
   /**
-   * Takes images into the tray, refusing what cannot ride along and saying why.
+   * Takes files into the tray, refusing what cannot ride along and saying why.
    *
-   * Every file goes through `ingest_file` first, which copies it into the inbox
-   * without ever overwriting — so the original is untouched and the copy
-   * survives the folder it came from going away mid-conversation.
+   * Every file goes through `ingest_file` first, which copies it into the
+   * inbox without ever overwriting — so the original is untouched and the
+   * copy survives the folder it came from going away mid-conversation. The
+   * extension block is Rust's (files.rs's BLOCKED_EXTS, checked before the
+   * copy); the count and size caps are this file's own, mirrored from
+   * files.rs's own note on why they live here and not there.
    */
   async function attach(paths: string[]) {
     for (const path of paths) {
-      if (State.chatImages.length >= MAX_IMAGES) {
-        State.noteMessage = tn("files.tooManyImages", MAX_IMAGES, { max: MAX_IMAGES });
+      if (State.chatAttachments.length >= MAX_ATTACHMENTS) {
+        State.noteMessage = tn("files.tooMany", MAX_ATTACHMENTS, { max: MAX_ATTACHMENTS });
         break;
       }
-      if (!/\.(png|jpe?g|webp|gif)$/i.test(path)) continue;
       try {
         const file = await Bridge.ingestFile(path);
-        if (file.size > MAX_IMAGE_BYTES) {
-          State.noteMessage = t("files.tooLarge", { name: file.name, max: "10 MB" });
+        if (file.size > MAX_ATTACHMENT_BYTES) {
+          State.noteMessage = t("files.tooLarge", { name: file.name, max: "20 MB" });
           continue;
         }
-        State.chatImages.push(file);
+        State.chatAttachments.push(file);
       } catch (err) {
-        void Bridge.log(`attach failed: ${String(err)}`);
+        const message = String(err).replace(/^Error:\s*/, "");
+        State.noteMessage = message === "blocked-extension" ? t("files.blocked", { name: lastPathComponent(path) }) : message;
       }
     }
     renderedShots = "";
@@ -547,7 +658,13 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
     onHeightChange();
   }
 
-  /** The chat's own drop target, used while the chat is the open view. */
+  /**
+   * The chat's own drop target. These are the browser's own drag events, not
+   * Tauri's — real paths come from the island's native drag-drop pipe
+   * instead (island.ts's onDragDrop → takeChatFiles → intoChat, below), so
+   * this half only ever drives the invitation's own show/hide; it never
+   * tries to read a file from the browser event itself.
+   */
   const dropZone = el;
   for (const kind of ["dragenter", "dragover"]) {
     dropZone.addEventListener(kind, (event) => {
@@ -566,7 +683,7 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
     const buffer = await blob.arrayBuffer();
     try {
       const file = await Bridge.pasteImage(blob.type, [...new Uint8Array(buffer)]);
-      State.chatImages.push(file);
+      State.chatAttachments.push(file);
       renderedShots = "";
       State.notify();
       onHeightChange();
@@ -590,7 +707,15 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
     }
   });
 
-  intoChat = (paths) => void attach(paths);
+  intoChat = (paths) => {
+    dropZone.classList.remove("dropping");
+    // The short swallow (plan-v2.md § 5.2, ≤600ms, skipped under
+    // prefers-reduced-motion by the animation's own CSS) — on the same
+    // avatar the header already shows, not a separate character.
+    avatarSlot.classList.add("gulp");
+    window.setTimeout(() => avatarSlot.classList.remove("gulp"), 600);
+    void attach(paths);
+  };
 
   void onEvent<AgentTurn>("agent-turn", (turn) => {
     if (turn.kind === "text") State.chatDraft += turn.text;
@@ -758,7 +883,11 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
    *  else about submitting is the same either way. */
   async function submit(forcedQuery?: string) {
     const query = forcedQuery ?? input.value.trim();
-    if (!query || sending) return;
+    // A caption is not required — "here, look at this" is a whole message
+    // when something is already in the tray (plan-v2.md § 5.2: dropped files
+    // wait in the tray, never send themselves; this is what lets a user
+    // actually send them once they are ready to).
+    if ((!query && State.chatAttachments.length === 0) || sending) return;
     if (forcedQuery == null) {
       input.value = "";
       autoGrow();
@@ -769,7 +898,27 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
     sending = true;
     Sound.play("send");
 
-    State.chatHistory.push({ id: freshId(), role: "user", content: query, at: Date.now() });
+    // The agent is told where things are rather than handed their bytes: it
+    // can open a file itself, which is the whole point of running the real
+    // CLI — attachments go by path, in a fixed header-plus-list shape
+    // (plan-v2.md § 5.6) whatever the mix of kinds.
+    const attached = State.chatAttachments.slice();
+    State.chatAttachments = [];
+    renderedShots = "";
+    const attachments: ChatAttachment[] = attached.map((f) => ({
+      id: f.path,
+      name: f.name,
+      kind: kindOf(f.name),
+      size: f.size,
+    }));
+
+    State.chatHistory.push({
+      id: freshId(),
+      role: "user",
+      content: query,
+      at: Date.now(),
+      attachments: attachments.length > 0 ? attachments : undefined,
+    });
     State.chatDraft = "";
     State.chatSteps = [];
     stick = true;
@@ -777,23 +926,9 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
     State.notify();
     onHeightChange();
 
-    // The agent is told where things are rather than handed their bytes: it
-    // can open a file itself, which is the whole point of running the real
-    // CLI. Images attached to this message go the same way, by path.
-    const shots = State.chatImages.slice();
-    State.chatImages = [];
-    renderedShots = "";
-
-    const file = State.droppedFile;
-    const parts = [query];
-    if (shots.length > 0) {
-      parts.push(
-        shots.length === 1
-          ? `The image this is about: ${shots[0].path}`
-          : `The images this is about:\n${shots.map((s) => `- ${s.path}`).join("\n")}`,
-      );
-    } else if (State.chatHistory.length === 1 && file?.path) {
-      parts.push(`The file this is about: ${file.path}`);
+    const parts = query ? [query] : [];
+    if (attached.length > 0) {
+      parts.push(`${t("files.promptHeader")}\n${attached.map((f) => `- ${f.path}`).join("\n")}`);
     }
     const prompt = parts.join("\n\n");
 
@@ -845,13 +980,23 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
     if (sending) void Bridge.agentCancel();
     else void submit();
   });
-  attachBtn.addEventListener("click", () => fileInput.click());
+  // The native picker (plan-v2.md § 5.3, Windows only this pass — see
+  // bridge.ts's pickFiles) takes any file, any number; its empty result
+  // (not in Tauri, cancelled, or no picker built for this platform yet) is
+  // indistinguishable on purpose, and falls back to the Fase 4 HTML input,
+  // which can only ever offer images.
+  attachBtn.addEventListener("click", () => {
+    void Bridge.pickFiles().then((paths) => {
+      if (paths && paths.length > 0) void attach(paths);
+      else fileInput.click();
+    });
+  });
   fileInput.addEventListener("change", () => {
     const files = [...(fileInput.files ?? [])];
     fileInput.value = ""; // so picking the same file twice still fires "change"
     for (const file of files) {
-      if (State.chatImages.length >= MAX_IMAGES) {
-        State.noteMessage = tn("files.tooManyImages", MAX_IMAGES, { max: MAX_IMAGES });
+      if (State.chatAttachments.length >= MAX_ATTACHMENTS) {
+        State.noteMessage = tn("files.tooMany", MAX_ATTACHMENTS, { max: MAX_ATTACHMENTS });
         break;
       }
       if (file.size > MAX_IMAGE_BYTES) {
@@ -937,22 +1082,14 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
         renderedDraft = "";
       }
 
-      const file = State.droppedFile;
-      const wantChip = file?.name ?? "";
-      if (chipRow.dataset.label !== wantChip) {
-        chipRow.dataset.label = wantChip;
-        clear(chipRow);
-        if (wantChip) chipRow.append(contextChip(wantChip));
-      }
-
-      const shotKey = State.chatImages.map((i) => i.path).join("|");
+      const shotKey = State.chatAttachments.map((i) => i.path).join("|");
       if (shotKey !== renderedShots) {
         renderedShots = shotKey;
         clear(shotRow);
-        for (const file of State.chatImages) {
+        for (const file of State.chatAttachments) {
           shotRow.append(
-            imageChip(file, () => {
-              State.chatImages = State.chatImages.filter((i) => i.path !== file.path);
+            attachmentTile(file, () => {
+              State.chatAttachments = State.chatAttachments.filter((i) => i.path !== file.path);
               renderedShots = "";
               State.notify();
               onHeightChange();
@@ -1014,9 +1151,16 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
         avatarSlot.append(createMiniBot(task, 24));
         clear(emptyAvatarSlot);
         emptyAvatarSlot.append(createMiniBot({ ...task, id: "chat-empty-avatar" }, 64));
+        clear(dropAvatar);
+        dropAvatar.append(stillMiniBot(task.color, 36));
         pruneMiniBots();
       }
       emptyState.classList.toggle("on", State.chatHistory.length === 0 && !sending);
+      // The native Tauri drag path (island.ts) sets this; the browser's own
+      // dragenter/dragover (dropZone, below) sets the same class directly,
+      // for mock mode and plain-browser dev where Tauri's own event never
+      // fires. Either one shows the same overlay.
+      dropZone.classList.toggle("dropping", State.fileDragOver);
 
       provider.textContent = providerLabel();
       const attached = State.attachedProject;
@@ -1034,7 +1178,7 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
       send.append(icon(sending ? "stop" : "arrowUp", { size: sending ? 9 : 11 }));
       send.title = sending ? t("chat.stopTurn") : t("chat.send");
       send.classList.toggle("stopping", sending);
-      send.classList.toggle("empty", !sending && input.value.trim() === "" && State.chatImages.length === 0);
+      send.classList.toggle("empty", !sending && input.value.trim() === "" && State.chatAttachments.length === 0);
 
       input.placeholder = placeholder();
       input.disabled = sending;

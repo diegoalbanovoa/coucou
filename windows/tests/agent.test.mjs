@@ -142,9 +142,9 @@ test("a conversation already on screen is not replaced by the kept one", async (
   assert.deepEqual(State.chatHistory.map((m) => m.content), ["already here"]);
 });
 
-test("what is kept is the message shape Rust stores, steps always an array", () => {
+test("what is kept is the message shape Rust stores, steps and attachments always arrays", () => {
   State.chatHistory = [
-    { id: 1, role: "user", content: "hi", at: 5 },
+    { id: 1, role: "user", content: "hi", at: 5, attachments: [{ id: "C:/inbox/a.png", name: "a.png", kind: "image", size: 10 }] },
     { id: 2, role: "assistant", content: "hello", at: 6, steps: ["Bash ls"] },
   ];
 
@@ -153,8 +153,14 @@ test("what is kept is the message shape Rust stores, steps always an array", () 
   assert.deepEqual(sent("chat_keep"), [
     {
       messages: [
-        { role: "user", content: "hi", at: 5, steps: [] },
-        { role: "assistant", content: "hello", at: 6, steps: ["Bash ls"] },
+        {
+          role: "user",
+          content: "hi",
+          at: 5,
+          steps: [],
+          attachments: [{ id: "C:/inbox/a.png", name: "a.png", kind: "image", size: 10 }],
+        },
+        { role: "assistant", content: "hello", at: 6, steps: ["Bash ls"], attachments: [] },
       ],
     },
   ]);

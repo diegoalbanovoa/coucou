@@ -2,7 +2,7 @@
 
 import type { BotEmoteName, BotStateName, IslandMode, IslandViewName } from "./layout";
 import type { EyeShape } from "../mochi/engine";
-import type { DroppedFile } from "./bridge";
+import type { ChatAttachment, DroppedFile } from "./bridge";
 
 export type AgentSource = "claudeCode" | "n8n" | "agent";
 export type PillBadge = "approval" | "finished" | "error";
@@ -40,11 +40,11 @@ export interface ChatMessage {
   at: number;
   /** The tools the agent reached for, in order. Assistant turns only. */
   steps?: string[];
+  /** What rode along with this message — user turns only. Shown as 48px
+   *  chips above the text (views/chat.ts's bubble()); never the bytes, see
+   *  src-tauri/src/transcript.rs's own Attachment. */
+  attachments?: ChatAttachment[];
 }
-
-export type PromptContext =
-  | { kind: "window"; appName: string; title: string; url?: string }
-  | { kind: "file"; name: string; path?: string };
 
 export interface ResultItem {
   label: string;
@@ -159,12 +159,8 @@ class AppState {
   isPinned = false;
   paused = false;
 
-  uploadProgress = 0;
-  uploadDuration = 2.4;
   fileDragOver = false;
 
-  promptContext: PromptContext | null = null;
-  droppedFile: { name: string; path: string } | null = null;
   noteMessage: string | null = null;
   searchResult: SearchResult | null = null;
   chatHistory: ChatMessage[] = [];
@@ -188,8 +184,10 @@ class AppState {
   workAreaHeight = 1080;
   /** The find bar's query. Null when it is closed. */
   chatQuery: string | null = null;
-  /** Images attached to the message being written. */
-  chatImages: DroppedFile[] = [];
+  /** Files attached to the message being written — any kind (5.4), not just
+   *  images; kindOf() in views/chat.ts sorts a dropped/picked/pasted one into
+   *  the right tray glyph. Not sent until the message is. */
+  chatAttachments: DroppedFile[] = [];
 
   integrations: Record<string, IntegrationInfo> = {};
 

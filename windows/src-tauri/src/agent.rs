@@ -505,6 +505,13 @@ pub async fn send(
         if let Some(vault) = &knowledge.vault {
             cmd.arg("--add-dir").arg(vault);
         }
+        // The inbox (files.rs's inbox_dir) is outside the project too, and an
+        // attached file is read, not written — but the same refusal applies
+        // to Read. Added unconditionally for every streaming turn rather than
+        // only when this one actually carries an attachment: agent_send only
+        // ever sees the flat prompt string by the time it gets here, and a
+        // directory grant that happens to go unused costs nothing.
+        cmd.arg("--add-dir").arg(crate::files::inbox_dir());
         if let Some(briefing) = &knowledge.briefing {
             cmd.arg("--append-system-prompt").arg(briefing);
         }

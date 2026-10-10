@@ -50,6 +50,23 @@ for (const [id, data] of Object.entries(MOCK_INTEGRATION_DATA)) {
 // engine (src/i18n/index.ts), not just the cosmetic <html lang> attribute.
 State.settings.language = lang;
 document.documentElement.lang = lang;
+// Fase 5's attachment tray (plan-v2.md § 5.4/5.5) — one of each glyph kind,
+// so a single capture shows the thumbnail path and all three glyph paths at
+// once. imagePreview() below returns the same placeholder PNG for any path,
+// so the exact names here only matter for kindOf()'s extension sniffing.
+if (chatState === "attachments") {
+  State.chatAttachments = [
+    { name: "captura-1.png", path: "C:\\inbox\\captura-1.png", size: 420_000 },
+    { name: "informe.pdf", path: "C:\\inbox\\informe.pdf", size: 1_200_000 },
+    { name: "main.ts", path: "C:\\inbox\\main.ts", size: 3_400 },
+    { name: "notas.docx", path: "C:\\inbox\\notas.docx", size: 58_000 },
+  ];
+}
+// The drop overlay (plan-v2.md § 5.2) reacts to this same flag in the real
+// app (island.ts, from Tauri's own drag events) — seeding it directly is the
+// only way a static capture can show it, since nothing here can simulate an
+// actual OS-level drag.
+if (chatState === "drop") State.fileDragOver = true;
 
 // ── boot / settings ────────────────────────────────────────────────────────────
 
@@ -141,6 +158,12 @@ async function agentCancel() {
 
 async function pickProject() {
   return "C:\\Users\\diego\\IdeaProjects\\coucou";
+}
+
+// Empty, same as Linux today — exercises chat.ts's fallback to its Fase 4
+// HTML file input rather than faking a native dialog's result.
+async function pickFiles() {
+  return [] as string[];
 }
 
 async function attachProject(path: string) {
@@ -308,6 +331,7 @@ export const Bridge = {
   agentSetCli,
   agentCommands,
   pickProject,
+  pickFiles,
   attachProject,
   detachProject,
   agentSend,

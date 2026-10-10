@@ -19,7 +19,8 @@ use ::windows::Win32::System::Com::{
 };
 use ::windows::Win32::System::Ole::RevokeDragDrop;
 use ::windows::Win32::UI::Shell::{
-    FileOpenDialog, IFileOpenDialog, FOS_FORCEFILESYSTEM, FOS_PICKFOLDERS, SIGDN_FILESYSPATH,
+    FileOpenDialog, IFileOpenDialog, IShellItemArray, FOS_ALLOWMULTISELECT, FOS_FORCEFILESYSTEM,
+    FOS_PICKFOLDERS, SIGDN_FILESYSPATH,
 };
 use ::windows::Win32::System::SystemInformation::GetLocalTime;
 use ::windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
@@ -401,6 +402,64 @@ unsafe fn open_folder_dialog(owner: Option<HWND>) -> ::windows::core::Result<Opt
     let path = wide.to_string().ok();
     CoTaskMemFree(Some(wide.0 as *const _));
     Ok(path)
+}
+
+/// The paperclip's native picker (plan-v2.md § 5.3) — any kind of file, any
+/// number of them. Validation (blocked extensions, size, count) is Rust's
+/// `files::ingest` and views/chat.ts's own caps, same as a drop; this only
+/// ever hands back paths. An empty `Vec` means cancelled, same as `None`
+/// would for a single pick — there is nothing here a caller needs to tell
+/// apart from "nothing chosen".
+pub fn pick_files(win: &WebviewWindow, title: &str) -> Vec<String> {
+    pick_files_owned(hwnd_of(win).map(|h| h.0 as isize), title.to_string())
+}
+
+fn pick_files_owned(owner: Option<isize>, title: String) -> Vec<String> {
+    // Same reasoning as pick_folder_owned: its own thread and COM apartment,
+    // since the dialog runs a modal message loop on whichever thread shows it.
+    std::thread::spawn(move || unsafe {
+        let init = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+        let picked = show_files_dialog(owner.map(|h| HWND(h as *mut _)), &title);
+        if init.is_ok() {
+            CoUninitialize();
+        }
+        picked
+    })
+    .join()
+    .unwrap_or_default()
+}
+
+unsafe fn show_files_dialog(owner: Option<HWND>, title: &str) -> Vec<String> {
+    match open_files_dialog(owner, title) {
+        Ok(paths) => paths,
+        Err(err) if err.code() == CANCELLED => Vec::new(),
+        Err(err) => {
+            log::line(format!("file picker failed: {err}"));
+            Vec::new()
+        }
+    }
+}
+
+unsafe fn open_files_dialog(owner: Option<HWND>, title: &str) -> ::windows::core::Result<Vec<String>> {
+    let dialog: IFileOpenDialog = CoCreateInstance(&FileOpenDialog, None, CLSCTX_INPROC_SERVER)?;
+    let options = dialog.GetOptions()?;
+    dialog.SetOptions(options | FOS_ALLOWMULTISELECT | FOS_FORCEFILESYSTEM)?;
+    // plan-v2.md § 5.3 asks for this one's title specifically — see
+    // i18n.rs's own note on why the folder picker next to this does not.
+    dialog.SetTitle(&::windows::core::HSTRING::from(title))?;
+    dialog.Show(owner)?;
+    let items: IShellItemArray = dialog.GetResults()?;
+    let count = items.GetCount()?;
+    let mut paths = Vec::with_capacity(count as usize);
+    for i in 0..count {
+        let item = items.GetItemAt(i)?;
+        let wide = item.GetDisplayName(SIGDN_FILESYSPATH)?;
+        if let Ok(path) = wide.to_string() {
+            paths.push(path);
+        }
+        CoTaskMemFree(Some(wide.0 as *const _));
+    }
+    Ok(paths)
 }
 
 // ── Disk, memory and the recycle bin ─────────────────────────────────────────

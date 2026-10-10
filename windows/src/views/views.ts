@@ -10,7 +10,6 @@ import { washRGBA, type IslandViewName, type Wash } from "../core/layout";
 import { buildPrompt } from "./chat";
 import { buildHomeRightCard } from "./consoles";
 import { buildSystem } from "./system";
-import { buildChoose, buildUpload, buildUploading } from "./upload";
 import { renderIntegrationCard, type IntegrationCardHooks } from "./integrations";
 import { t, getLocale } from "../i18n/index";
 
@@ -94,7 +93,6 @@ function stack(padLeft: number, padRight: number, ...children: Node[]): HTMLElem
 export function buildHeader(actions: ViewActions): ViewHost {
   const tabHome = h("button", { class: "tab", onclick: () => go("overview") }, icon("house", { size: 13 }));
   const tabChat = h("button", { class: "tab", onclick: () => go("prompt") }, icon("bubble", { size: 13 }));
-  const tabDrop = h("button", { class: "tab", onclick: () => go("upload") }, icon("plus", { size: 13 }));
   const tabSystem = h("button", { class: "tab", onclick: () => go("system") }, icon("disk", { size: 13 }));
 
   const gearBtn = h("button", { onclick: () => go("settings") }, icon("gear", { size: 14 }));
@@ -108,7 +106,7 @@ export function buildHeader(actions: ViewActions): ViewHost {
   const el = h(
     "div",
     { id: "header" },
-    h("div", { class: "tabs" }, tabHome, tabChat, tabDrop, tabSystem),
+    h("div", { class: "tabs" }, tabHome, tabChat, tabSystem),
     h("div", { class: "header-actions" }, gearBtn, soundBtn),
   );
 
@@ -118,7 +116,6 @@ export function buildHeader(actions: ViewActions): ViewHost {
       const v = State.view;
       tabHome.classList.toggle("on", v === "overview" || v === "empty");
       tabChat.classList.toggle("on", v === "prompt");
-      tabDrop.classList.toggle("on", v === "upload");
       tabSystem.classList.toggle("on", v === "system");
       gearBtn.classList.toggle("on", v === "settings");
       clear(gearBtn);
@@ -129,7 +126,6 @@ export function buildHeader(actions: ViewActions): ViewHost {
 
       tabHome.title = t("tabs.home");
       tabChat.title = t("tabs.chat");
-      tabDrop.title = t("tabs.drop");
       tabSystem.title = t("tabs.system");
       gearBtn.title = t("tabs.settings");
       soundBtn.title = t("tabs.mute");
@@ -516,9 +512,6 @@ export function buildViews(
   map.set("settings", buildSettings(actions));
   map.set("prompt", buildPrompt(onChatHeightChange));
   map.set("system", buildSystem());
-  map.set("upload", buildUpload());
-  map.set("uploading", buildUploading());
-  map.set("choose", buildChoose(actions));
   // Not in the Windows v1: sending a file by email, window attach + web result.
   map.set("mail", buildPlaceholder("overview.sendingByEmail"));
   map.set("searching", buildPlaceholder("overview.searching"));
