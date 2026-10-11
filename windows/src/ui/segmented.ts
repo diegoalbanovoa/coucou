@@ -29,27 +29,33 @@ export interface Segmented<T extends string> {
 export function segmented<T extends string>(opts: SegmentedOptions<T>): Segmented<T> {
   const size = opts.size ?? "md";
   let current = opts.value;
-  const el = h("div", { class: `ui-segmented ui-segmented-${size}`, role: "tablist", tabindex: 0 });
+  // Roving tabindex, the standard WAI-ARIA tablist pattern: the list itself
+  // is never a Tab stop, only the one active tab is — so a two-item control
+  // is one stop to reach and ←/→ to move inside, not three stops to Tab
+  // through.
+  const el = h("div", { class: `ui-segmented ui-segmented-${size}`, role: "tablist" });
 
-  function draw() {
+  function draw(focusActive = false) {
     clear(el);
     for (const item of opts.items) {
-      el.append(
-        h("button", {
-          class: current === item.value ? "ui-segment on" : "ui-segment",
-          role: "tab",
-          "aria-selected": current === item.value ? "true" : "false",
-          text: item.label,
-          onclick: () => select(item.value),
-        }),
-      );
+      const on = current === item.value;
+      const btn = h("button", {
+        class: on ? "ui-segment on" : "ui-segment",
+        role: "tab",
+        "aria-selected": on ? "true" : "false",
+        tabindex: on ? 0 : -1,
+        text: item.label,
+        onclick: () => select(item.value),
+      });
+      el.append(btn);
+      if (on && focusActive) btn.focus();
     }
   }
 
-  function select(value: T) {
+  function select(value: T, focusActive = false) {
     if (value === current) return;
     current = value;
-    draw();
+    draw(focusActive);
     opts.onChange(value);
   }
 
@@ -59,7 +65,7 @@ export function segmented<T extends string>(opts: SegmentedOptions<T>): Segmente
     e.preventDefault();
     const idx = opts.items.findIndex((i) => i.value === current);
     const step = key === "ArrowRight" ? 1 : -1;
-    select(opts.items[(idx + step + opts.items.length) % opts.items.length].value);
+    select(opts.items[(idx + step + opts.items.length) % opts.items.length].value, true);
   });
 
   draw();

@@ -5,6 +5,7 @@
 
 import { h } from "../views/dom";
 import { icon } from "../views/icons";
+import { t } from "../i18n/index";
 
 export interface SheetOptions {
   title: string;
@@ -17,7 +18,7 @@ export interface SheetOptions {
 export function sheet(opts: SheetOptions): HTMLElement {
   const closeBtn = h(
     "button",
-    { class: "ui-icon-btn", "aria-label": opts.closeLabel ?? "Close", onclick: opts.onClose },
+    { class: "ui-icon-btn", "aria-label": opts.closeLabel ?? t("common.cancel"), onclick: opts.onClose },
     icon("xmark", { size: 14 }),
   );
   const el = h(

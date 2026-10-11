@@ -27,9 +27,9 @@ export interface TileOptions {
 
 const BADGE_COLORS: Record<TileBadge, string> = {
   approval: "#F5A524",
-  finished: "#22C55E",
-  error: "#F4505E",
-  live: "#22C55E",
+  finished: "var(--c-green)",
+  error: "var(--c-red)",
+  live: "var(--c-green)",
 };
 // "live" has no icon — see tile()'s badge branch, which draws it as a
 // plain pulsing dot instead of an icon-in-a-circle, same mark as the
@@ -75,7 +75,10 @@ export function tile(opts: TileOptions): HTMLElement {
         ? h("i", { class: "pill-badge-live-dot", style: `background:${color}` })
         : h("i", { style: `background:${color}` }, icon(iconName!, { size: 6 }));
     const badgeEl = h("div", { class: "pill-badge" }, inner);
-    badgeEl.style.boxShadow = `0 0 4px ${color}99`;
+    // `color` may now be a `var(--c-*)` reference (BADGE_COLORS) rather than
+    // a literal hex — the old `${color}99` alpha suffix only worked on a
+    // literal, so the alpha has to be mixed in instead of appended.
+    badgeEl.style.boxShadow = `0 0 4px color-mix(in srgb, ${color} 60%, transparent)`;
     el.append(badgeEl);
   }
   return el;

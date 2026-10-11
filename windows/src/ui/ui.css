@@ -221,11 +221,6 @@
   gap: 2px;
 }
 
-.ui-segmented:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
-}
-
 .ui-segment {
   border: 0;
   border-radius: var(--r-xs);
@@ -236,6 +231,13 @@
   padding: 0 var(--s-2);
   transition: background var(--d-base) var(--ease-out), color var(--d-base) var(--ease-out),
     box-shadow var(--d-base) var(--ease-out);
+}
+
+/* The roving tabindex (src/ui/segmented.ts) makes the active tab itself the
+ * focus target, not the `.ui-segmented` wrapper — so the ring belongs here. */
+.ui-segment:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
 }
 
 .ui-segmented-sm .ui-segment {

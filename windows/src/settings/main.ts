@@ -31,7 +31,7 @@ function toggle(on: boolean, onChange: (v: boolean) => void): HTMLElement {
 }
 
 function statusDot(ok: boolean): HTMLElement {
-  return h("i", { class: "dot", style: `background:${ok ? "#22c55e" : "#f4505e"}` });
+  return h("i", { class: "dot", style: `background:var(${ok ? "--c-green" : "--c-red"})` });
 }
 
 function renderDiff(text: string): HTMLElement {
@@ -308,7 +308,7 @@ function integrationsSection(present: Record<string, boolean>): HTMLElement {
           present[field.key] = value.length > 0;
           input.value = "";
           input.placeholder = value ? t("settings.integrations.stored") : field.placeholder;
-          dotEl.style.background = value ? "#22c55e" : "#f4505e";
+          dotEl.style.background = value ? "var(--c-green)" : "var(--c-red)";
         } catch {
           dotEl.style.background = "#f5a524";
         }
@@ -365,7 +365,7 @@ function chatFolderSection(): HTMLElement {
     const state = (await Bridge.chatFolderState()) ?? { path: "", exists: false };
     const set = state.path !== "";
 
-    dot.style.background = !set ? "#6b7079" : state.exists ? "#22c55e" : "#f4505e";
+    dot.style.background = !set ? "#6b7079" : state.exists ? "var(--c-green)" : "var(--c-red)";
     where.textContent = set ? state.path : "none";
     where.title = state.path;
     choose.textContent = set ? t("settings.chatFolder.chooseAnother") : t("settings.chatFolder.choose");
@@ -419,7 +419,7 @@ function vaultSection(): HTMLElement {
     const info = (await Bridge.vaultState()) ?? { path: "", source: "none" as const, known: 0 };
     const found = info.source !== "none";
 
-    dot.style.background = found ? "#22c55e" : "#f4505e";
+    dot.style.background = found ? "var(--c-green)" : "var(--c-red)";
     where.textContent = info.path;
     where.title = info.path;
     choose.textContent = found ? t("settings.vault.chooseAnother") : t("settings.vault.choose");

@@ -64,13 +64,27 @@ function liveSessionRows(): HTMLElement[] {
 /** A service pill — the same ficha the overview used to build inline, now
  *  owned here so both panes of this card go through one `tile()` call site. */
 function servicePill(task: AgentTask, setFocus: (id: string) => void): HTMLElement {
-  return tile({
+  const el = tile({
     face: createMiniBot(task, 24),
     name: task.name,
     color: task.color,
     badge: task.pillBadge,
     onSelect: () => setFocus(task.id),
   });
+  // `tile()` itself is a plain, unfocusable `<div onclick>` — the console
+  // grid's own tiles only become reachable by Tab because
+  // `attachHoldAndDetail` happens to set `tabIndex`, which service pills
+  // never called. Theirs is simpler: no hold-to-open-detail, no right-click,
+  // just "this pill is a button" — Enter/Space activates it like one.
+  el.tabIndex = 0;
+  el.addEventListener("keydown", (e) => {
+    const ke = e as KeyboardEvent;
+    if (ke.key === "Enter" || ke.key === " ") {
+      e.preventDefault();
+      setFocus(task.id);
+    }
+  });
+  return el;
 }
 
 export interface HomeCardOptions {

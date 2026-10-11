@@ -12,6 +12,18 @@ import { registerHealthHandlers } from "./island/health";
 import { registerIntegrationHandlers, refreshConfigured } from "./island/integrations";
 import { setLocale, resolveLocale } from "./i18n/index";
 
+// Nothing else here can see a crash — there is no visible console in a
+// release build, and a silent exception mid-boot can take the rest of
+// `main()` down with it (whatever runs after the line that threw never
+// does). Logged to coucou.log, the one place a report of "it's not doing
+// anything" can be checked against after the fact.
+window.addEventListener("error", (e) => {
+  void Bridge.log(`[uncaught] ${e.message} @ ${e.filename}:${e.lineno}:${e.colno}`);
+});
+window.addEventListener("unhandledrejection", (e) => {
+  void Bridge.log(`[unhandled rejection] ${String(e.reason)}`);
+});
+
 async function main() {
   const root = document.getElementById("root");
   if (!root) return;
@@ -78,7 +90,14 @@ async function main() {
   });
 
   registerHookHandlers(island);
-  registerHealthHandlers(island);
+  // New this session (plan-v2.md § 7) — wrapped so that if it ever throws,
+  // it costs Mochi's mood and nothing else. Everything after it (the rest of
+  // boot, island.launch()) must run whether or not this does.
+  try {
+    registerHealthHandlers(island);
+  } catch (err) {
+    console.error("[health] registerHealthHandlers failed:", err);
+  }
   registerIntegrationHandlers(island);
 
   registerAgentHandlers(island);

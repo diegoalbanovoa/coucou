@@ -164,13 +164,18 @@ See `windows/tests/e2e/README.md`.
 ```
 windows/
   src/                 island front end (TypeScript, no framework)
-    mochi/             Mochi and the launch greeting, in Canvas 2D
-    island/            state machine, hooks, integrations
+    mochi/             Mochi, the launch greeting and its health moods, in Canvas 2D
+    island/            state machine, hooks, integrations, the health monitor's events
     views/             every island view
     settings/          the settings window
-  src-tauri/           Rust backend: window, named pipe, agent CLIs, pollers
+    ui/                the shared "Coucou HIG" components (gauge, sheet, segmented, …)
+    i18n/              the en/es dictionaries and t()/tn()
+    consoles/          the agent-CLI colour palette
+    dev/               mock mode: fixtures and the bridge it swaps in for Tauri
+  src-tauri/           Rust backend: window, named pipe, agent CLIs, pollers, the
+                       health monitor (health.rs), tray-menu/dialog strings (i18n.rs)
   hook/                coucou-hook.exe, the Claude Code relay
-  scripts/             icon generator
+  scripts/             icon generator, visual QA capture (shots.mjs)
   tests/               island tests, and the folder-picker E2E in tests/e2e/
 ```
 
