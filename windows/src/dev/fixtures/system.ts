@@ -19,7 +19,9 @@ export interface MockProcInfo {
   name: string;
   memory: number;
   protected: boolean;
-  startTime: number;
+  /** A string, matching the real `ProcInfo.startTime` — see its own note on
+   *  why a Windows FILETIME cannot cross the JS bridge as a JSON number. */
+  startTime: string;
 }
 
 export interface MockStats {
@@ -86,19 +88,19 @@ const MB = 1024 ** 2;
  *  (`MsMpEng.exe`) is protected, to prove the lock glyph has something to
  *  show in a screenshot rather than only in a unit test. */
 export const MOCK_PROCESSES: MockProcInfo[] = [
-  { pid: 10412, name: "claude.exe", memory: Math.round(1.36 * GB / 3), protected: false, startTime: 1001 },
-  { pid: 20072, name: "claude.exe", memory: Math.round(1.36 * GB / 3), protected: false, startTime: 1002 },
-  { pid: 13288, name: "claude.exe", memory: Math.round(1.36 * GB / 3), protected: false, startTime: 1003 },
-  { pid: 8841, name: "msedgewebview2.exe", memory: 372 * MB, protected: false, startTime: 1004 },
-  { pid: 9102, name: "msedgewebview2.exe", memory: 298 * MB, protected: false, startTime: 1005 },
-  { pid: 4410, name: "msedge.exe", memory: 309 * MB, protected: false, startTime: 1006 },
-  { pid: 4512, name: "msedge.exe", memory: 211 * MB, protected: false, startTime: 1007 },
-  { pid: 7781, name: "chrome.exe", memory: 239 * MB, protected: false, startTime: 1008 },
-  { pid: 7790, name: "chrome.exe", memory: 188 * MB, protected: false, startTime: 1009 },
-  { pid: 5521, name: "Obsidian.exe", memory: 420 * MB, protected: false, startTime: 1010 },
-  { pid: 6630, name: "rustc.exe", memory: 859 * MB, protected: false, startTime: 1011 },
-  { pid: 6631, name: "cargo.exe", memory: 100 * MB, protected: false, startTime: 1012 },
-  { pid: 2211, name: "node.exe", memory: 142 * MB, protected: false, startTime: 1013 },
-  { pid: 3301, name: "Code.exe", memory: 512 * MB, protected: false, startTime: 1014 },
-  { pid: 1428, name: "MsMpEng.exe", memory: 268 * MB, protected: true, startTime: 1015 },
+  { pid: 10412, name: "claude.exe", memory: Math.round(1.36 * GB / 3), protected: false, startTime: "1001" },
+  { pid: 20072, name: "claude.exe", memory: Math.round(1.36 * GB / 3), protected: false, startTime: "1002" },
+  { pid: 13288, name: "claude.exe", memory: Math.round(1.36 * GB / 3), protected: false, startTime: "1003" },
+  { pid: 8841, name: "msedgewebview2.exe", memory: 372 * MB, protected: false, startTime: "1004" },
+  { pid: 9102, name: "msedgewebview2.exe", memory: 298 * MB, protected: false, startTime: "1005" },
+  { pid: 4410, name: "msedge.exe", memory: 309 * MB, protected: false, startTime: "1006" },
+  { pid: 4512, name: "msedge.exe", memory: 211 * MB, protected: false, startTime: "1007" },
+  { pid: 7781, name: "chrome.exe", memory: 239 * MB, protected: false, startTime: "1008" },
+  { pid: 7790, name: "chrome.exe", memory: 188 * MB, protected: false, startTime: "1009" },
+  { pid: 5521, name: "Obsidian.exe", memory: 420 * MB, protected: false, startTime: "1010" },
+  { pid: 6630, name: "rustc.exe", memory: 859 * MB, protected: false, startTime: "1011" },
+  { pid: 6631, name: "cargo.exe", memory: 100 * MB, protected: false, startTime: "1012" },
+  { pid: 2211, name: "node.exe", memory: 142 * MB, protected: false, startTime: "1013" },
+  { pid: 3301, name: "Code.exe", memory: 512 * MB, protected: false, startTime: "1014" },
+  { pid: 1428, name: "MsMpEng.exe", memory: 268 * MB, protected: true, startTime: "1015" },
 ].sort((a, b) => b.memory - a.memory);

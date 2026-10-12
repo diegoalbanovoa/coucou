@@ -239,7 +239,7 @@ async function systemProcesses() {
   return MOCK_PROCESSES;
 }
 
-async function systemEndProcess(targets: { pid: number; startTime: number }[]) {
+async function systemEndProcess(targets: { pid: number; startTime: string }[]) {
   console.info("[mock] system_end_process", targets);
   return [] as number[];
 }

@@ -419,7 +419,15 @@ pub struct ProcInfo {
     pub protected: bool,
     /// Opaque outside this file — see `platform::RawProc`. The TS side
     /// carries it right back in an end request and nowhere else.
-    pub start_time: u64,
+    ///
+    /// A **string**, not a `u64`: on Windows this is a raw `FILETIME` (100ns
+    /// ticks since 1601), on the order of 1.3×10¹⁷ today — past
+    /// `Number.MAX_SAFE_INTEGER` (2^53 ≈ 9×10¹⁵). Sent as a JSON number, the
+    /// JS side's own float64 would silently round it to a *different*
+    /// integer, which `end_processes`' pid-reuse check would then always see
+    /// as a mismatch — every close request quietly refused, no exception
+    /// anywhere to say why. Decimal digits round-trip exactly; a float does not.
+    pub start_time: String,
 }
 
 fn protected(pid: u32, name: &str) -> bool {
@@ -457,7 +465,7 @@ fn rank(raw: &[platform::RawProc], coucou_pid: u32, limit: usize) -> Vec<ProcInf
             pid: p.pid,
             name: p.name.clone(),
             memory: p.memory,
-            start_time: p.start_time,
+            start_time: p.start_time.to_string(),
             protected: protected(p.pid, &p.name) || is_coucou_descendant(p.pid, raw, coucou_pid),
         })
         .collect();
@@ -475,12 +483,14 @@ pub fn top_processes(limit: usize) -> Vec<ProcInfo> {
 }
 
 /// One process an end request names — the pid a row's button was drawn for,
-/// and the start time it was drawn with.
+/// and the start time it was drawn with. `start_time` arrives as a string —
+/// see `ProcInfo.start_time`'s own note on why a `u64` cannot cross the JS
+/// bridge as a JSON number without losing precision.
 #[derive(serde::Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct EndTarget {
     pub pid: u32,
-    pub start_time: u64,
+    pub start_time: String,
 }
 
 /// The pure half of `end_processes`: which targets a given live snapshot
@@ -508,8 +518,10 @@ fn settle(
         }
         // A start time of 0 means it could not be read in the first place —
         // never treated as a match, since that is also what an inaccessible
-        // process reports.
-        if proc.start_time == 0 || proc.start_time != target.start_time {
+        // process reports. Compared as the decimal strings they both
+        // already are — parsing the target back to a u64 would just be
+        // undoing the precision-safety this string carries for no reason.
+        if proc.start_time == 0 || proc.start_time.to_string() != target.start_time {
             failed.push(target.pid);
             continue;
         }
@@ -679,12 +691,16 @@ mod tests {
         // A real process has this pid (the test binary), so a wrong start
         // time alone would also fail — the point of this test is that the
         // protected check catches it first regardless.
-        let failed = end_processes(&[EndTarget { pid: std::process::id(), start_time: 0 }]);
+        let failed = end_processes(&[end(std::process::id(), "0")]);
         assert_eq!(failed, vec![std::process::id()]);
     }
 
     fn raw(pid: u32, ppid: u32, name: &str, memory: u64, start_time: u64) -> platform::RawProc {
         platform::RawProc { pid, ppid, name: name.into(), memory, start_time }
+    }
+
+    fn end(pid: u32, start_time: &str) -> EndTarget {
+        EndTarget { pid, start_time: start_time.to_string() }
     }
 
     #[test]
@@ -727,13 +743,13 @@ mod tests {
         let tree = vec![raw(42, 0, "stale.exe", 1, 7)];
         // Same pid, a different start time — the row this click came from
         // was drawn for a process that pid no longer is.
-        let failed = settle(&tree, 999, &[EndTarget { pid: 42, start_time: 8 }], |_| true);
+        let failed = settle(&tree, 999, &[end(42, "8")], |_| true);
         assert_eq!(failed, vec![42]);
     }
 
     #[test]
     fn ending_a_process_that_is_no_longer_running_is_refused() {
-        let failed = settle(&[], 999, &[EndTarget { pid: 42, start_time: 1 }], |_| true);
+        let failed = settle(&[], 999, &[end(42, "1")], |_| true);
         assert_eq!(failed, vec![42]);
     }
 
@@ -741,11 +757,10 @@ mod tests {
     fn a_matching_target_actually_gets_killed() {
         let tree = vec![raw(42, 0, "ordinary.exe", 1, 7)];
         let mut asked = Vec::new();
-        let failed =
-            settle(&tree, 999, &[EndTarget { pid: 42, start_time: 7 }], |pid| {
-                asked.push(pid);
-                true
-            });
+        let failed = settle(&tree, 999, &[end(42, "7")], |pid| {
+            asked.push(pid);
+            true
+        });
         assert_eq!(failed, Vec::<u32>::new());
         assert_eq!(asked, vec![42]);
     }
@@ -753,7 +768,28 @@ mod tests {
     #[test]
     fn a_kill_the_platform_itself_refuses_is_reported_as_failed() {
         let tree = vec![raw(42, 0, "ordinary.exe", 1, 7)];
-        let failed = settle(&tree, 999, &[EndTarget { pid: 42, start_time: 7 }], |_| false);
+        let failed = settle(&tree, 999, &[end(42, "7")], |_| false);
         assert_eq!(failed, vec![42]);
+    }
+
+    #[test]
+    fn a_windows_filetime_start_time_past_js_safe_integer_still_matches() {
+        // ~1.3e17 — a real present-day Windows FILETIME, and well past
+        // `Number.MAX_SAFE_INTEGER` (2^53 ≈ 9e15). The whole point of
+        // `start_time` being a `String` rather than a `u64` on the wire is
+        // that a value like this round-trips through JS exactly; this test
+        // is what would have caught the bug if it had been written sooner.
+        let huge: u64 = 133_800_000_000_000_000;
+        let tree = vec![raw(42, 0, "real.exe", 1, huge)];
+        let failed = settle(&tree, 999, &[end(42, &huge.to_string())], |_| true);
+        assert_eq!(failed, Vec::<u32>::new(), "the exact decimal string must match");
+    }
+
+    #[test]
+    fn rank_reports_the_same_huge_start_time_settle_would_need_back() {
+        let huge: u64 = 133_800_000_000_000_000;
+        let tree = vec![raw(42, 0, "real.exe", 1, huge)];
+        let info = rank(&tree, 999, 10).into_iter().next().unwrap();
+        assert_eq!(info.start_time, huge.to_string());
     }
 }

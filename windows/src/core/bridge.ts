@@ -249,15 +249,20 @@ export interface ProcInfo {
   name: string;
   memory: number;
   protected: boolean;
-  /** Opaque — carried right back in an `EndTarget`, read nowhere else. */
-  startTime: number;
+  /** Opaque — carried right back in an `EndTarget`, read nowhere else.
+   *  A string, not a number: on Windows this is a raw FILETIME (~1.3e17
+   *  today), well past `Number.MAX_SAFE_INTEGER` (2^53 ≈ 9e15) — a JSON
+   *  number would silently round it to a different integer, and the
+   *  pid-reuse check on the way back would then refuse every close. See
+   *  `system.rs`'s own note on `ProcInfo.start_time`. */
+  startTime: string;
 }
 
 /** The pid and startTime a row's close button was drawn with — Rust refuses
  *  the request if a different process has since taken that pid. */
 export interface EndTarget {
   pid: number;
-  startTime: number;
+  startTime: string;
 }
 
 /** What one cleanable thing holds, as the preview reports it. */

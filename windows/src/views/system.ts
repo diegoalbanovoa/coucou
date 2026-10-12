@@ -112,7 +112,7 @@ export interface ProcGroup {
    *  executable name with an ordinary one in practice, so the group as a
    *  whole simply inherits it. */
   protected: boolean;
-  members: { pid: number; startTime: number; memory: number }[];
+  members: { pid: number; startTime: string; memory: number }[];
 }
 
 /** Groups a flat process list by executable name, heaviest group first. */

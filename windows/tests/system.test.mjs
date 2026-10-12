@@ -82,13 +82,13 @@ test("a sweep that removed nothing still says so", () => {
 
 // ── groupProcesses (plan-v2.md § 6.4) ──────────────────────────────────────
 
-const proc = (over = {}) => ({ pid: 1, name: "a.exe", memory: 100, protected: false, startTime: 1, ...over });
+const proc = (over = {}) => ({ pid: 1, name: "a.exe", memory: 100, protected: false, startTime: "1", ...over });
 
 test("processes with the same executable name fold into one group", () => {
   const groups = groupProcesses([
-    proc({ pid: 1, name: "claude.exe", memory: 100, startTime: 1 }),
-    proc({ pid: 2, name: "claude.exe", memory: 200, startTime: 2 }),
-    proc({ pid: 3, name: "chrome.exe", memory: 50, startTime: 3 }),
+    proc({ pid: 1, name: "claude.exe", memory: 100, startTime: "1" }),
+    proc({ pid: 2, name: "claude.exe", memory: 200, startTime: "2" }),
+    proc({ pid: 3, name: "chrome.exe", memory: 50, startTime: "3" }),
   ]);
 
   assert.equal(groups.length, 2);

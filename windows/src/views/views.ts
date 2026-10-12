@@ -262,7 +262,12 @@ function buildOverview(actions: ViewActions): ViewHost {
         }
       }
 
-      jump.style.display = detailOpen ? "none" : "";
+      // Claude Code has nowhere real to jump to — its own ↗ used to open
+      // VS Code as the closest thing, which read as a bug to click into
+      // ("why does this open an editor") rather than a feature. Hidden for
+      // it specifically; "Open Visual Studio Code" is still reachable from
+      // its own card (renderIntegrationCard) for whoever wants it.
+      jump.style.display = detailOpen || task?.id === "integration_claude" ? "none" : "";
       jump.title = t("tabs.openTarget");
 
       homeCard.sync();
