@@ -1255,7 +1255,8 @@ input[type="range"]::-webkit-slider-thumb {
 /* ── Processes pane ──────────────────────────────────────────────────────── */
 
 .proc-list,
-.drive-list {
+.drive-list,
+.agent-activity-list {
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
@@ -1264,6 +1265,25 @@ input[type="range"]::-webkit-slider-thumb {
   gap: 1px;
   scrollbar-width: thin;
   scrollbar-color: var(--c-fill) transparent;
+}
+
+/* ── Agent activity pane (openspec/changes/agent-activity-panel) ────────── */
+
+.agent-activity-card {
+  border-radius: var(--r-sm);
+  padding-bottom: var(--s-1);
+}
+
+.agent-activity-history {
+  padding: 0 var(--s-2) var(--s-1) 44px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.agent-activity-line {
+  font: 400 11px var(--font);
+  color: var(--dim-3);
 }
 
 .proc-row {

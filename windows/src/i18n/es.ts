@@ -119,6 +119,9 @@ export const es: Messages = {
 
     tabProcesses: "Procesos",
     tabStorage: "Almacenamiento",
+    // openspec/changes/agent-activity-panel — pestaña de actividad de subagentes.
+    tabAgents: "Agentes",
+    agentsEmpty: "Sin actividad de subagentes todavía en esta sesión",
     statusOk: "Tu equipo está bien",
     statusStrained: "Tu equipo está trabajando duro",
     statusSick: "Tu equipo necesita ayuda",

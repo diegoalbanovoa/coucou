@@ -131,6 +131,9 @@ export const en = {
     // processes/storage segmented pane, and the "Free up space…" sheet.
     tabProcesses: "Processes",
     tabStorage: "Storage",
+    // openspec/changes/agent-activity-panel — subagent activity pane.
+    tabAgents: "Agents",
+    agentsEmpty: "No subagent activity yet this session",
     statusOk: "Your machine is doing fine",
     statusStrained: "Your machine is working hard",
     statusSick: "Your machine needs help",

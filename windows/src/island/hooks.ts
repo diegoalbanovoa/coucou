@@ -7,6 +7,7 @@ import { Bridge, onEvent } from "../core/bridge";
 import { Sound } from "../core/sound";
 import { State } from "../core/state";
 import type { Island } from "./island";
+import { recordSubagentActivity } from "./subagentActivity";
 
 const CLAUDE_ID = "integration_claude";
 
@@ -43,6 +44,10 @@ interface HookPayload {
   term_program?: string;
   wt_session?: string;
   vscode_pid?: string;
+  /** Which subagent (Task-tool delegation) this event fired inside, if any. Claude Code 2.1.296+. */
+  agent_type?: string;
+  /** Unique id for that subagent instance. Claude Code 2.1.296+. */
+  agent_id?: string;
 }
 
 /** Same rule as HookServer.validateAgent on macOS. "claude" is reserved. */
@@ -181,7 +186,10 @@ function clearSession() {
 }
 
 export function registerHookHandlers(island: Island) {
-  void onEvent<HookPayload>("hook", (payload) => handleHook(island, payload));
+  void onEvent<HookPayload>("hook", (payload) => {
+    handleHook(island, payload);
+    recordSubagentActivity(payload);
+  });
 }
 
 function handleHook(island: Island, payload: HookPayload) {

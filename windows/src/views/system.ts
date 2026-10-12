@@ -26,6 +26,7 @@ import { iconButton } from "../ui/icon-button";
 import { toast } from "../ui/toast";
 import { stillMiniBot } from "../mochi/minibots";
 import { consoleColor } from "../consoles/palette";
+import { SubagentActivity } from "../island/subagentActivity";
 
 /** How often the headline, gauges and drive list refresh while the tab is
  *  open — one `system_stats` call covers all three, so there is only one
@@ -177,7 +178,7 @@ function avatarFor(name: string): HTMLElement {
   );
 }
 
-type Pane = "processes" | "storage";
+type Pane = "processes" | "storage" | "agents";
 type SheetStep = "closed" | "analyzing" | "results" | "cleaning" | "result";
 
 export function buildSystem() {
@@ -196,6 +197,7 @@ export function buildSystem() {
       items: [
         { value: "processes", label: t("system.tabProcesses") },
         { value: "storage", label: t("system.tabStorage") },
+        { value: "agents", label: t("system.tabAgents") },
       ],
       value: pane,
       onChange: (v) => {
@@ -234,6 +236,7 @@ export function buildSystem() {
 
   let statsTimer: number | null = null;
   let procsTimer: number | null = null;
+  let agentsUnsub: (() => void) | null = null;
   let shownLocale = getLocale();
 
   // ── Headline and gauges ─────────────────────────────────────────────────
@@ -316,7 +319,8 @@ export function buildSystem() {
 
   function drawPanel() {
     if (pane === "processes") drawProcesses();
-    else drawStorage();
+    else if (pane === "storage") drawStorage();
+    else drawAgents();
   }
 
   /** `key` → the row's last on-screen position, read just before this redraw
@@ -491,6 +495,39 @@ export function buildSystem() {
         button({ label: t("system.freeUpSpace"), variant: "primary", onClick: openSheet }),
       ),
     );
+  }
+
+  // ── Agent activity pane (openspec/changes/agent-activity-panel) ──────────
+  // Live only — no disk read, no persistence across restarts. Sourced from
+  // SubagentActivity, itself fed by the same "hook" event island/hooks.ts
+  // already listens to. See design.md for why this isn't a 4th header tab
+  // and doesn't read eventos.jsonl.
+
+  function drawAgents() {
+    clear(panel);
+    const agents = SubagentActivity.agents;
+    if (agents.length === 0) {
+      panel.append(h("div", { class: "int-empty", text: t("system.agentsEmpty") }));
+      return;
+    }
+    const list = h("div", { class: "agent-activity-list" });
+    for (const agent of agents) {
+      const entries = SubagentActivity.entriesFor(agent).slice().reverse(); // newest first
+      const latest = entries[0];
+      const subtitle = latest ? [latest.action, latest.result].filter(Boolean).join(" · ") : "";
+      const older = entries.slice(1, 6).map((e) =>
+        h("div", { class: "agent-activity-line", text: [e.action, e.result].filter(Boolean).join(" · ") }),
+      );
+      list.append(
+        h(
+          "div",
+          { class: "agent-activity-card" },
+          listRow({ title: agent, subtitle }),
+          older.length > 0 ? h("div", { class: "agent-activity-history" }, ...older) : null,
+        ),
+      );
+    }
+    panel.append(list);
   }
 
   // ── The cleanup sheet ────────────────────────────────────────────────────
@@ -711,6 +748,11 @@ export function buildSystem() {
       void refreshProcs();
       if (statsTimer == null) statsTimer = window.setInterval(() => void refresh(), STATS_POLL_MS);
       if (procsTimer == null) procsTimer = window.setInterval(() => void refreshProcs(), PROCS_POLL_MS);
+      if (agentsUnsub == null) {
+        agentsUnsub = SubagentActivity.subscribe(() => {
+          if (pane === "agents") drawAgents();
+        });
+      }
       if (State.systemOpenCleanupSheet) {
         State.systemOpenCleanupSheet = false;
         openSheet();
@@ -725,6 +767,10 @@ export function buildSystem() {
       if (procsTimer != null) {
         window.clearInterval(procsTimer);
         procsTimer = null;
+      }
+      if (agentsUnsub != null) {
+        agentsUnsub();
+        agentsUnsub = null;
       }
     },
   };
