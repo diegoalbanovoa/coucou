@@ -1,34 +1,36 @@
 # Tasks
 
+> **Punto de retomo (sesión interrumpida)**: el módulo `quick_assistant.rs` existe con las 4 herramientas, las listas de permitidos y el log, todo compilando y con 15 tests en verde — pero **nada está conectado a Tauri todavía** (sin comandos, sin plugin registrado, sin el loop de tool-calling). El siguiente paso concreto es la tarea 4.4: ya se investigó cómo reutilizar la tarjeta de aprobación existente (ver su nota), falta escribirlo. Ver la nota "Plan v3 — Fase 2" en el vault (`Sistema/`) para más contexto de la sesión completa.
+
 ## 1. Global shortcut
 
-- [ ] 1.1 Add `tauri-plugin-global-shortcut` to `windows/src-tauri/Cargo.toml` and register it in `lib.rs`. Verify: `cargo build` clean.
-- [ ] 1.2 A `quickAssistantShortcut: string | null` setting (default unset — the feature is inactive until configured), read on boot to attempt registration. On failure (already held by another app), surface the error rather than silently not registering. Verify: unit test for the settings round-trip; manual check for the conflict message (needs a real second app holding a hotkey — folded into 7.4).
-- [ ] 1.3 A shortcut picker in the settings window, showing the registration error inline when one occurs. Verify manually (7.4).
+- [x] 1.1 Added `tauri-plugin-global-shortcut` to `Cargo.toml` (resolved: `tauri-plugin-global-shortcut v2.4.0`, pulling in `global-hotkey`/`keyboard-types`). **Not yet registered in the Tauri builder's `.plugin(...)` chain** — the crate compiles, but nothing calls `tauri_plugin_global_shortcut::init()` yet. `cargo build` clean.
+- [ ] 1.2 Settings fields added (`quick_assistant_shortcut: Option<String>` plus `quick_assistant_profile`/`quick_assistant_folders`/`quick_assistant_apps` ahead of schedule, needed by groups 2-6 anyway) — see `settings.rs`. **Still pending**: actually attempting registration on boot and surfacing a conflict.
+- [ ] 1.3 Not started (depends on 1.2).
 
 ## 2. Allow-lists (folders and apps)
 
-- [ ] 2.1 A folder allow-list, stored in settings (a list of absolute paths), with add/remove/list Tauri commands. Verify: unit tests for add/remove/dedupe and for "is this path inside some allow-listed folder" (including a `..`-traversal attempt that resolves outside — refused, same shape as the abandoned `island-claude-agent` design's own `resolve_in_project` tests).
-- [ ] 2.2 An app allow-list: entries added by picking an executable (native file picker, `.exe` filter) or resolving a Start Menu shortcut to its target, stored as resolved absolute paths — never a user-typed string taken as-is. Verify: unit test that a non-executable or nonexistent path is refused at add-time, not deferred to launch-time.
+- [x] 2.1 Folder allow-list **logic** done in `quick_assistant.rs`: `is_allowed_path` (canonicalize-both-sides boundary, same shape as `files.rs`'s `inside_inbox`), `add_folder` (refuses a non-directory, dedupes), `remove_folder`. 6 unit tests passing, including a `..`-traversal attempt. **Tauri commands (add/remove/list) not yet written** — these are pure functions `lib.rs` hasn't wired to `remember()`/`shared_settings()` yet.
+- [x] 2.2 App allow-list logic done: `add_app` (refuses a non-file, resolves to canonical path, mints an id via `agent::uuid_v4()`), `remove_app`. 2 unit tests passing. **Deviates from the plan as written**: only "pick an executable directly" is implemented — resolving a Start Menu `.lnk` shortcut to its target was dropped for scope; the native file picker can still be pointed at an `.exe` directly. Tauri commands not yet written.
 
 ## 3. The four tools (Rust)
 
-- [ ] 3.1 `search_files(query, folder_id)`: scoped to one allow-listed folder (by its id, not a free-typed path), simple filename/content match, capped result count. Verify: unit tests for a match inside the folder, nothing outside it reachable even if named explicitly, and the cap holding on a large synthetic tree.
-- [ ] 3.2 `read_approved_folder(path)`: resolves `path` and confirms it is inside some allow-listed folder before reading; outside it, refuses outright (no approval card — approving wouldn't change where the path is). Verify: unit tests mirroring 3.1's boundary cases.
-- [ ] 3.3 `open_app(app_id)`: looks up `app_id` in the app allow-list (2.2) and launches it the same no-shell way `open_in_vscode` already does — never builds a command from a model-supplied string. Verify: unit test that an `app_id` not on the list is refused before any launch attempt.
-- [ ] 3.4 `query_vault(question)`: calls `vault::resolve`/`vault::briefing` unchanged, no new vault-access code. Verify: existing `vault.rs` tests unaffected; a thin test confirming this just forwards.
+- [x] 3.1 `search_files` done — scoped to one allow-listed folder (checked via `is_allowed_path`, not a free-typed path), filename substring match, capped at 50. 3 unit tests passing (inside-folder match, refused when the folder itself isn't allow-listed, cap holds at 60 synthetic files).
+- [x] 3.2 `read_approved_folder` done — refuses outright (plain `Err`, no approval path) when outside every allow-listed folder. 2 unit tests passing.
+- [x] 3.3 `open_app` done — looks up `app_id` in the allow-list, launches the already-resolved `exe` via `Command::new` with no arguments and no shell. 1 unit test passing (unknown id refused before any launch attempt).
+- [x] 3.4 `query_vault` done — thin forward to `vault::resolve`/`vault::briefing`, no new vault code.
 
 ## 4. Permission broker + pause gate
 
-- [ ] 4.1 `quick_assistant::Pending`: the same `HashMap<String, mpsc::Sender<Decision>>` shape as `pipe::Pending`, but its own type, used only by this module's four tools. Verify: unit test that two concurrent calls get independent ids and independent decisions.
-- [ ] 4.2 Wire `read_approved_folder` to skip the broker entirely when its target is inside the allow-list (auto-run); the other three always go through it. Verify: covered by 3.1-3.4's own tests plus a dedicated test that `read_approved_folder` inside the allow-list never creates a pending entry.
-- [ ] 4.3 Every tool call checks `State`'s pause flag (read via whatever `set_paused`'s existing command already stores) before doing anything else, refusing immediately if paused. Verify: unit test that a paused call never reaches the broker and never runs.
-- [ ] 4.4 Emit the quick-assistant's approval request on the same event/shape the island's existing hook-originated approval card renders, so no new frontend component is needed — only a new source feeding the existing one. Verify manually (7.4): a quick-assistant request shows the same card a hook `PermissionRequest` does.
+- [x] 4.1 **Partial.** The `Pending`/`Decision` types and `next_request_id()` exist in `quick_assistant.rs`, mirroring `pipe::Pending`'s shape. **Not yet wired**: no function actually registers a channel into `Pending`, awaits the response, or times out — `Pending` itself is still "never constructed" per `cargo build`'s own warning. This is the request/response plumbing 6.1's tool-calling loop will need to call into; it was not finished before this checkpoint.
+- [ ] 4.2 Not started — depends on 4.1's registration/await function existing.
+- [x] 4.3 `refused_while_paused(paused: bool) -> Option<String>` done and tested (2 unit tests) as a pure function. **Not yet wired to the real flag** — `integrations::PAUSED` (confirmed to be the actual shared pause flag both the tray and `handleHook`'s frontend check trace back to; `State.paused` on the TS side and `integrations::PAUSED` on the Rust side are kept in sync by `main.ts`, not two independent flags as design.md's wording implied — no design correction needed, just confirms where to read it from) needs to be the actual argument at each tool's call site, once those call sites exist.
+- [ ] 4.4 **Investigated, not implemented.** Found the exact reuse path: `handleHook`'s `PermissionRequest` branch (`island/hooks.ts` line ~349) builds `State.pendingApproval` from `payload.request_id`/`payload.tool_name`/`payload.tool_input` and *only* auto-declines when `isExternalAgent` is true (a `coucou_agent`-tagged payload) — so a quick-assistant request must emit a payload **without** a `coucou_agent` field (else it hits that auto-decline branch meant for other CLIs, not us) to get the real card. Plan: emit on the same `"hook"` event with a `qa-`-prefixed `request_id` (already what `next_request_id()` produces); have `approval_decision`/`approval_ack`/`approval_decline` in `lib.rs` branch on that prefix to route to `quick_assistant::` instead of `pipe::` — meaning **no new frontend command or component is needed at all**, exactly the goal this task states. None of this is written yet.
 
 ## 5. Action log
 
-- [ ] 5.1 Append-only JSON-lines log (timestamp, tool, target, outcome) at a new path under `config_dir()`, written after every tool call regardless of outcome. Verify: unit tests that a denied and a refused-while-paused call are both logged, not only approved ones.
-- [ ] 5.2 A Tauri command returning the last N log entries; a small view in the settings window listing them. Verify manually (7.4).
+- [x] 5.1 Append-only JSON-lines log done: `LogEntry`, `log_action` (never fails loudly), `recent_log` (caps to the requested count). 1 round-trip unit test (noted in its own comment: shares a real file across test runs, so it only checks the cap, not exact file contents).
+- [ ] 5.2 Tauri command and settings-window view not started.
 
 ## 6. The quick-ask loop (Rust + frontend)
 

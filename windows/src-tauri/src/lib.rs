@@ -13,6 +13,7 @@ mod log;
 mod pipe;
 mod platform;
 mod providers;
+mod quick_assistant;
 mod secrets;
 mod settings;
 mod system;

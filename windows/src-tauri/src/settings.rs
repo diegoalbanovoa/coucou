@@ -61,6 +61,36 @@ pub struct Settings {
     pub health_disk_threshold: f64,
     /// Whether worsening pops the collapsed island open for a few seconds.
     pub health_notify: bool,
+
+    // ── Quick assistant (openspec/changes/quick-assistant-tools) ──────────
+    /// The global hotkey, in `tauri-plugin-global-shortcut`'s own string
+    /// shape (e.g. "ctrl+shift+space"). Unset means the feature does not
+    /// try to register anything.
+    pub quick_assistant_shortcut: Option<String>,
+    /// Which Fase 1 provider profile (`providers::ProviderProfile.id`) the
+    /// quick assistant's tool-calling loop uses. Unset means configured-but-
+    /// no-model: the shortcut still opens, but every request is refused with
+    /// a "no model configured" message rather than failing some other way.
+    pub quick_assistant_profile: Option<String>,
+    /// Folders `search_files`/`read_approved_folder` may reach — absolute
+    /// paths, added by hand. Nothing outside this list is ever offered to
+    /// either tool, approval or not: see design.md decision 4.
+    pub quick_assistant_folders: Vec<String>,
+    /// Apps `open_app` may launch — resolved to their real executable at the
+    /// moment they are added, never a string the model supplies at call
+    /// time. See design.md decision 5.
+    pub quick_assistant_apps: Vec<AllowedApp>,
+}
+
+/// One entry in `Settings.quick_assistant_apps`. `exe` is already resolved
+/// and already confirmed to exist at add-time — see
+/// `quick_assistant::add_allowed_app`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct AllowedApp {
+    pub id: String,
+    pub label: String,
+    pub exe: String,
 }
 
 impl Default for Settings {
@@ -94,6 +124,10 @@ impl Default for Settings {
             health_include_disk: false,
             health_disk_threshold: 90.0,
             health_notify: true,
+            quick_assistant_shortcut: None,
+            quick_assistant_profile: None,
+            quick_assistant_folders: Vec::new(),
+            quick_assistant_apps: Vec::new(),
         }
     }
 }
@@ -365,7 +399,11 @@ mod tests {
   "healthThreshold": 60.0,
   "healthIncludeDisk": true,
   "healthDiskThreshold": 80.0,
-  "healthNotify": false
+  "healthNotify": false,
+  "quickAssistantShortcut": null,
+  "quickAssistantProfile": null,
+  "quickAssistantFolders": [],
+  "quickAssistantApps": []
 }"#;
 
     fn custom() -> Value {
@@ -694,6 +732,10 @@ mod tests {
                 "healthIncludeDisk",
                 "healthDiskThreshold",
                 "healthNotify",
+                "quickAssistantShortcut",
+                "quickAssistantProfile",
+                "quickAssistantFolders",
+                "quickAssistantApps",
             ]
         );
         let _ = std::fs::remove_dir_all(&dir);
