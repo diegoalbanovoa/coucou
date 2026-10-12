@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-10-07
+goal: Let the user type a prompt into Coucou's tiny chat box and get the same
+  agentic capability as the Claude Code CLI, with its own permission-review flow
