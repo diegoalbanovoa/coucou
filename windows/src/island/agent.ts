@@ -160,10 +160,22 @@ export async function pickProject() {
   }
 }
 
-/** Picks the agent the chat runs, and remembers the choice. */
+/** Picks the agent CLI the chat runs, and remembers the choice. Clears any
+ *  selected provider profile — exactly one backend answers a turn. */
 export function chooseProvider(id: string | null) {
   State.agentCli = id;
+  State.selectedProvider = null;
   void Bridge.agentSetCli(id);
+  State.notify();
+}
+
+/** Picks a chat-only provider profile (no tools) — clears any selected
+ *  agent CLI, the same mutual-exclusion `chooseProvider` enforces the other
+ *  way. Not remembered across restarts the way the CLI choice is: provider
+ *  profiles are a Fase 1 addition and that's outside this change's scope. */
+export function chooseProviderProfile(id: string | null) {
+  State.selectedProvider = id;
+  State.agentCli = null;
   State.notify();
 }
 

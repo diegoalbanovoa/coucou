@@ -264,9 +264,11 @@ pub fn display_path(path: &Path) -> String {
     s.strip_prefix(r"\\?\").unwrap_or(&s).to_string()
 }
 
-/// A v4 UUID from the OS random source. Only used for `--session-id`, which is
-/// why this is twenty lines rather than another dependency.
-fn uuid_v4() -> String {
+/// A v4 UUID from the OS random source. Twenty lines rather than another
+/// dependency — used for `--session-id` here, and for a provider profile's
+/// id in providers.rs (its hex-and-hyphens shape is already exactly the
+/// `[a-z0-9-]` charset secrets.rs's provider-profile key validation allows).
+pub(crate) fn uuid_v4() -> String {
     let mut b = [0u8; 16];
     getrandom::fill(&mut b).expect("the OS always has randomness");
     b[6] = (b[6] & 0x0f) | 0x40; // version 4
@@ -293,14 +295,18 @@ pub enum Turn {
 pub struct Cancel(Mutex<Option<Arc<AtomicBool>>>);
 
 impl Cancel {
-    /// A flag for the turn starting now, replacing any stale one.
-    fn arm(&self) -> Arc<AtomicBool> {
+    /// A flag for the turn starting now, replacing any stale one. `pub(crate)`
+    /// so providers.rs can arm the same shared `Cancel` state a CLI turn
+    /// uses — there is only ever one turn in flight regardless of which
+    /// backend answers it, so one cancel button for both is correct, not a
+    /// shortcut.
+    pub(crate) fn arm(&self) -> Arc<AtomicBool> {
         let flag = Arc::new(AtomicBool::new(false));
         *self.0.lock().unwrap() = Some(flag.clone());
         flag
     }
 
-    fn disarm(&self) {
+    pub(crate) fn disarm(&self) {
         *self.0.lock().unwrap() = None;
     }
 

@@ -200,8 +200,14 @@ class AppState {
   pendingApproval: ApprovalInfo | null = null;
   /** Folder the agent runs in, or null when nothing is attached. */
   attachedProject: string | null = null;
-  /** Which CLI the chat runs, or null for the API chat. */
+  /** Which CLI the chat runs, or null for none selected. Mutually exclusive
+   *  with `selectedProvider` — see `island/agent.ts`'s `chooseProvider` and
+   *  `chooseProviderProfile`, the only two places either is set. */
   agentCli: string | null = null;
+  /** Which chat-only provider profile (openspec/changes/provider-chat-profiles)
+   *  the chat runs through — no tools, ever. Mutually exclusive with
+   *  `agentCli`: exactly one backend answers a turn. */
+  selectedProvider: string | null = null;
   /** The reply being written, as the agent streams it. */
   chatDraft = "";
   /** What the turn in flight has done so far, newest last. */

@@ -7,6 +7,7 @@ import { calls, emit, replies, sent } from "./tauri.mjs";
 import {
   availableClis,
   chooseProvider,
+  chooseProviderProfile,
   keepConversation,
   loadAgentEnvironment,
   registerAgentHandlers,
@@ -46,6 +47,7 @@ beforeEach(() => {
   calls.length = 0;
   replies.clear();
   State.agentCli = null;
+  State.selectedProvider = null;
   State.attachedProject = null;
   State.chatHistory = [];
   State.chatDraft = "";
@@ -98,6 +100,20 @@ test("picking an agent remembers the choice", async () => {
   chooseProvider("gemini");
   assert.equal(State.agentCli, "gemini");
   assert.deepEqual(sent("agent_set_cli"), [{ cli: "gemini" }]);
+});
+
+test("picking an agent CLI and a provider profile are mutually exclusive", () => {
+  chooseProviderProfile("profile-1");
+  assert.equal(State.selectedProvider, "profile-1");
+  assert.equal(State.agentCli, null);
+
+  chooseProvider("gemini");
+  assert.equal(State.agentCli, "gemini");
+  assert.equal(State.selectedProvider, null, "choosing a CLI clears the provider profile");
+
+  chooseProviderProfile("profile-2");
+  assert.equal(State.selectedProvider, "profile-2");
+  assert.equal(State.agentCli, null, "choosing a provider profile clears the CLI");
 });
 
 test("the project Rust restored is what `/` is asked about", async () => {

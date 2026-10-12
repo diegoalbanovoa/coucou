@@ -12,6 +12,7 @@ mod island;
 mod log;
 mod pipe;
 mod platform;
+mod providers;
 mod secrets;
 mod settings;
 mod system;
@@ -23,7 +24,7 @@ use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_autostart::{ManagerExt, MacosLauncher};
 
@@ -721,10 +722,72 @@ fn forget_chat_folder(app: AppHandle) {
 }
 
 /// Stops the turn in flight. False when there was nothing to stop — the reply
-/// landed between the click and this call.
+/// landed between the click and this call. Shared with provider-profile
+/// turns: there is only ever one turn in flight regardless of which backend
+/// answers it (see providers.rs), so one stop button covers both and no
+/// separate `provider_cancel` command exists.
 #[tauri::command]
 fn agent_cancel(app: AppHandle) -> bool {
     app.state::<agent::Cancel>().stop()
+}
+
+// ── Chat-only provider profiles (openspec/changes/provider-chat-profiles) ──
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ProviderSaveInput {
+    /// Absent or empty creates a new profile; otherwise updates this one.
+    id: Option<String>,
+    label: String,
+    base_url: String,
+    model: String,
+}
+
+/// Every saved provider profile. The API key, if any, is never in here —
+/// the frontend checks/sets/clears it through the existing generic
+/// `secret_present`/`secret_set`/`secret_clear` commands with the key
+/// `providers.keyFor(id)` computes, the same way other secrets already work.
+#[tauri::command]
+fn provider_list() -> Vec<providers::ProviderProfileView> {
+    providers::list()
+}
+
+#[tauri::command]
+fn provider_save(input: ProviderSaveInput) -> Result<providers::ProviderProfileView, String> {
+    let profile = match input.id.filter(|id| !id.is_empty()) {
+        Some(id) => providers::update(&id, &input.label, &input.base_url, &input.model),
+        None => providers::create(&input.label, &input.base_url, &input.model),
+    }
+    .map_err(|e| e.to_string())?;
+    Ok(providers::to_view(profile))
+}
+
+/// Removes the profile and its stored key together — see providers::delete.
+#[tauri::command]
+fn provider_delete(id: String) -> Result<(), String> {
+    providers::delete(&id)
+}
+
+/// One turn through a provider profile — no tools, ever. Streams
+/// `agent::Turn::Text` on the same `"agent-turn"` event `agent_send` uses,
+/// so the chat's rendering code needs no new branch for where a chunk of
+/// text came from.
+#[tauri::command]
+async fn provider_send(app: AppHandle, profile_id: String, prompt: String) -> Result<String, String> {
+    let profile = providers::load(&profile_id).ok_or_else(|| "unknown provider profile".to_string())?;
+    let emitter = app.clone();
+    let on = move |turn: agent::Turn| {
+        let _ = emitter.emit("agent-turn", turn);
+    };
+    let cancel = app.state::<agent::Cancel>();
+    providers::send(&profile, &prompt, &cancel, &on).await.map_err(|e| e.message())
+}
+
+/// The models a local Ollama server has, or an empty list when none
+/// answers — checked only when the picker opens, never polled.
+#[tauri::command]
+async fn ollama_detect() -> Vec<providers::OllamaModel> {
+    providers::detect_ollama().await
 }
 
 /// Starts a fresh conversation with the CLI, leaving the project attached.
@@ -901,6 +964,11 @@ pub fn run() {
             pick_files,
             agent_send,
             agent_cancel,
+            provider_list,
+            provider_save,
+            provider_delete,
+            provider_send,
+            ollama_detect,
             system_stats,
             system_scan,
             system_clean,

@@ -122,8 +122,24 @@ export const Bridge = {
   /** One agent turn. Tool calls arrive separately, as ordinary hook events. */
   agentSend: (cli: string, prompt: string) =>
     callOrThrow<string>("agent_send", { cli, prompt }),
-  /** Stops the turn in flight. False when the reply had already landed. */
+  /** Stops the turn in flight — whichever backend, CLI or provider profile,
+   *  is answering it. False when the reply had already landed. */
   agentCancel: () => call<boolean>("agent_cancel"),
+  /** Every saved provider profile. */
+  providerList: () => call<ProviderProfile[]>("provider_list"),
+  /** Creates (no `id`) or updates (with one) a profile. The key is set
+   *  separately through `secretSet(providerKeyFor(id), ...)`. */
+  providerSave: (profile: { id?: string; label: string; baseUrl: string; model: string }) =>
+    callOrThrow<ProviderProfile>("provider_save", { input: profile }),
+  /** Deletes the profile and its stored key together. */
+  providerDelete: (id: string) => callOrThrow<void>("provider_delete", { id }),
+  /** One turn through a provider profile — no tools. Streams on the same
+   *  "agent-turn" event an agent-CLI turn uses. */
+  providerSend: (profileId: string, prompt: string) =>
+    callOrThrow<string>("provider_send", { profileId, prompt }),
+  /** The models a local Ollama server has, or an empty list if none
+   *  answers — checked only when the picker opens. */
+  ollamaDetect: () => call<OllamaModel[]>("ollama_detect"),
   /** The Obsidian vault the agent may read and write, and where it came from. */
   vaultState: () => call<VaultInfo>("vault_state"),
   /** Chooses the vault by hand. Null when the user cancelled the picker. */
@@ -293,6 +309,31 @@ export interface FolderState {
   path: string;
   /** False when it is set but no longer a folder. */
   exists: boolean;
+}
+
+/** A chat-only provider profile (OpenRouter, Ollama, LM Studio, LiteLLM,
+ *  any OpenAI-compatible endpoint) — no tools, ever. See
+ *  openspec/changes/provider-chat-profiles. `keySet` is whether a key is
+ *  stored, never the key itself. */
+export interface ProviderProfile {
+  id: string;
+  label: string;
+  baseUrl: string;
+  model: string;
+  keySet: boolean;
+}
+
+/** The OS-keychain key for a provider profile's own API key — pass to the
+ *  existing `secretPresent`/`secretSet`/`secretClear` (the same commands
+ *  the 9 fixed secrets already use); there is no provider-specific key
+ *  command. Must match `providers::key_for` in Rust exactly. */
+export function providerKeyFor(id: string): string {
+  return `provider-profile-${id}-api-key`;
+}
+
+/** A model Ollama has installed locally, from auto-detection. */
+export interface OllamaModel {
+  name: string;
 }
 
 /** The knowledge base the agent can reach. */
