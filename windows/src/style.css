@@ -963,6 +963,53 @@ input[type="range"]::-webkit-slider-thumb {
   flex: 0 0 auto;
 }
 
+/* openspec/changes/provider-chat-profiles — the provider/Ollama rows' icon
+   face, same box the CLI rows' .mini mini-bot already gets. */
+.chat-menu-face {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  color: var(--ink-2);
+}
+
+.provider-editor-fields {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+}
+
+.provider-editor-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font: 400 11px var(--font);
+  color: var(--ink-2);
+}
+
+.provider-editor-field input {
+  min-height: var(--hit-min, 32px);
+  padding: 0 var(--s-2);
+  border: 1px solid var(--c-fill);
+  border-radius: var(--r-sm);
+  background: var(--c-fill-2);
+  color: var(--ink);
+  font: 400 12.5px var(--font);
+}
+
+.provider-editor-field input:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.provider-editor-footer {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+}
+
 /* `/` autocomplete. Collapsed to nothing when there is nothing to show, so it
    never steals height from the log. */
 .slash-palette {

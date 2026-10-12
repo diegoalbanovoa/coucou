@@ -7,13 +7,22 @@
 // Coucou spawns runs the same hooks any terminal session does. See agent.rs.
 
 import { Bridge, onEvent } from "../core/bridge";
-import type { Console, KeptMessage, SlashCommand } from "../core/bridge";
+import type { Console, KeptMessage, OllamaModel, ProviderProfile, SlashCommand } from "../core/bridge";
 import { State } from "../core/state";
 import type { Island } from "./island";
 import { t } from "../i18n/index";
 
 /** CLIs found on this machine, loaded once at boot. */
 export let availableClis: Console[] = [];
+
+/** Saved chat-only provider profiles — openspec/changes/provider-chat-profiles.
+ *  Refreshed by `reloadProviders`, called whenever the chat's provider
+ *  picker opens (never polled — picking is rare, and Ollama's own probe is
+ *  explicitly on-demand, see design.md decision 6). */
+export let availableProviders: ProviderProfile[] = [];
+/** Models a local Ollama server reports right now, or empty if none
+ *  answers — absence, not a failure. Refreshed alongside `availableProviders`. */
+export let ollamaModels: OllamaModel[] = [];
 
 /** `/` targets for the current project. Refreshed whenever one is attached. */
 export let slashCommands: SlashCommand[] = [];
@@ -179,10 +188,21 @@ export function chooseProviderProfile(id: string | null) {
   State.notify();
 }
 
-/** The label shown in the chat header for the current agent. */
+/** Refreshes the saved provider profiles and the Ollama auto-detection —
+ *  called when the chat's provider picker opens, so a profile created or
+ *  removed elsewhere (or Ollama starting/stopping) shows up without a
+ *  restart. */
+export async function reloadProviders() {
+  availableProviders = (await Bridge.providerList()) ?? [];
+  ollamaModels = (await Bridge.ollamaDetect()) ?? [];
+}
+
+/** The label shown in the chat header for the current agent or provider. */
 export function providerLabel(): string {
   const cli = availableClis.find((c) => c.id === State.agentCli);
   if (cli) return cli.label;
+  const profile = availableProviders.find((p) => p.id === State.selectedProvider);
+  if (profile) return profile.label;
   return availableClis.length === 0 ? t("chat.noAgentFound") : t("chat.pickAgent");
 }
 

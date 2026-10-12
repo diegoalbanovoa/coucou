@@ -174,15 +174,17 @@ pub enum ProviderError {
 }
 
 impl ProviderError {
-    /// English by default; chat.ts maps this to the locale's own string —
-    /// this exists so a caller with no i18n in reach (a test, a log line)
-    /// still gets something readable.
+    /// A stable `<kind>:<detail>` string `provider_send`'s `Result<_, String>`
+    /// carries to the frontend, so chat.ts can pick the right i18n string
+    /// per kind instead of displaying English error text verbatim — the
+    /// kind is always one of the four tags below, never free text, so
+    /// splitting on the first `:` is safe.
     pub fn message(&self) -> String {
         match self {
-            ProviderError::InvalidKey => "the API key was rejected".to_string(),
-            ProviderError::NoNetwork => "could not reach the endpoint".to_string(),
-            ProviderError::RateLimited => "rate limited or out of quota".to_string(),
-            ProviderError::Endpoint(detail) => detail.clone(),
+            ProviderError::InvalidKey => "invalid-key:the API key was rejected".to_string(),
+            ProviderError::NoNetwork => "no-network:could not reach the endpoint".to_string(),
+            ProviderError::RateLimited => "rate-limited:rate limited or out of quota".to_string(),
+            ProviderError::Endpoint(detail) => format!("endpoint:{detail}"),
         }
     }
 }
@@ -418,6 +420,17 @@ mod tests {
             }
         }
         assert_eq!(assembled, "Hola, mundo");
+    }
+
+    #[test]
+    fn message_carries_a_stable_kind_prefix_chat_ts_can_split_on() {
+        assert!(ProviderError::InvalidKey.message().starts_with("invalid-key:"));
+        assert!(ProviderError::NoNetwork.message().starts_with("no-network:"));
+        assert!(ProviderError::RateLimited.message().starts_with("rate-limited:"));
+        assert_eq!(
+            ProviderError::Endpoint("unknown model gpt-9".into()).message(),
+            "endpoint:unknown model gpt-9"
+        );
     }
 
     #[test]

@@ -5,25 +5,67 @@ import { h, clear, copyToClipboard } from "./dom";
 import { icon, type IconName } from "./icons";
 import { render } from "./markdown";
 import { counter, findMatches, highlight, step, type Match } from "./search";
-import { Bridge, onEvent, type AgentTurn, type ChatAttachment, type DroppedFile } from "../core/bridge";
+import {
+  Bridge,
+  onEvent,
+  providerKeyFor,
+  type AgentTurn,
+  type ChatAttachment,
+  type DroppedFile,
+  type ProviderProfile,
+} from "../core/bridge";
 import { Sound } from "../core/sound";
 import { State, type ChatMessage } from "../core/state";
 import {
   availableClis,
+  availableProviders,
   chooseProvider,
+  chooseProviderProfile,
   detachProject,
   keepConversation,
   matchingCommands,
+  ollamaModels,
   pickProject,
   providerLabel,
+  reloadProviders,
   startFreshConversation,
 } from "../island/agent";
 import { orderConsoles } from "../consoles/order";
 import { consoleColor } from "../consoles/palette";
 import { stillMiniBot, createMiniBot, pruneMiniBots } from "../mochi/minibots";
 import { inlineConfirm } from "../ui/inline-confirm";
+import { sheet } from "../ui/sheet";
+import { button } from "../ui/button";
 import type { ViewHost } from "./views";
 import { t, tn, getLocale } from "../i18n/index";
+
+/** Ollama's own OpenAI-compatible endpoint — matches `OLLAMA_PROBE`'s host
+ *  in providers.rs, but the `/v1` chat path rather than `/api/tags`. */
+const OLLAMA_BASE_URL = "http://127.0.0.1:11434/v1";
+
+/** Maps providers.rs's stable `"<kind>:<detail>"` error string (see
+ *  `ProviderError::message`) to the locale's own text. An agent-CLI error
+ *  is never in this shape, so it falls through unchanged — this only ever
+ *  narrows what a provider-profile turn's error looks like, never widens
+ *  what a CLI turn's does. */
+function providerErrorMessage(raw: string): string {
+  const sep = raw.indexOf(":");
+  if (sep < 0) return raw;
+  const kind = raw.slice(0, sep);
+  const detail = raw.slice(sep + 1);
+  switch (kind) {
+    case "invalid-key":
+      return t("chat.providerErrorInvalidKey");
+    case "no-network":
+      return t("chat.providerErrorNoNetwork");
+    case "rate-limited":
+      return t("chat.providerErrorRateLimited");
+    case "endpoint":
+      return detail;
+    default:
+      return raw;
+  }
+}
 
 /**
  * The next message id. Counted off what is already in the log rather than from
@@ -319,6 +361,11 @@ function dashedFrame(): SVGSVGElement {
  * do what they expect, so it names the one blocker rather than a generic hint.
  */
 function placeholder(): string {
+  // A provider profile has no tools and needs no attached project — the
+  // "attach a project first" blocker only applies to an agent CLI turn.
+  if (State.selectedProvider) {
+    return State.chatHistory.length > 0 ? t("chat.placeholderContinue") : t("chat.placeholderAsk");
+  }
   if (!State.agentCli) return t("chat.placeholderNoCli");
   if (!State.attachedProject) return t("chat.placeholderNoProject");
   if (State.chatHistory.length > 0) return t("chat.placeholderContinue");
@@ -478,25 +525,25 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
   // anchoring here keeps the button above the log in both cases.
   const logWrap = h("div", { class: "log-wrap" }, log, dropOverlay, jump);
 
-  const el = h(
+  // Named so the provider-profile editor sheet (openspec/changes/
+  // provider-chat-profiles) has somewhere to mount — same role as
+  // system.ts's `content` for its own cleanup sheet.
+  const chatCard = h(
     "div",
-    { class: "view" },
+    { class: "card wash chat-card" },
     h(
       "div",
-      { class: "card wash chat-card" },
-      h(
-        "div",
-        { class: "chat-body" },
-        header,
-        findBar,
-        logWrap,
-        palette,
-        shotRow,
-        bar,
-      ),
+      { class: "chat-body" },
+      header,
+      findBar,
+      logWrap,
+      palette,
+      shotRow,
+      bar,
     ),
   );
-  (el.querySelector(".card") as HTMLElement).style.setProperty("--wash", "rgba(99,102,241,0.5)");
+  const el = h("div", { class: "view" }, chatCard);
+  chatCard.style.setProperty("--wash", "rgba(99,102,241,0.5)");
 
   el.addEventListener(
     "mousedown",
@@ -733,27 +780,144 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
     return row;
   }
 
-  provider.addEventListener("click", () => {
-    // Nothing to switch to — opening an empty popover would be worse than
-    // the click doing nothing, same as nextProvider() used to no-op here.
-    if (availableClis.length === 0) return;
-    toggleMenu(providerItem, providerMenu, () => {
-      // Same order as the Fase 3 console grid, so picking an agent here and
-      // picking one there never disagree about which comes first.
-      const ordered = orderConsoles(availableClis, State.agentCli, new Set());
-      for (const c of ordered) {
-        providerMenu.append(
-          menuRow(
-            c.label,
-            () => {
-              chooseProvider(c.id);
-              input.focus();
-            },
-            stillMiniBot(consoleColor(c.id), 14),
-          ),
-        );
-      }
+  // ── Provider-profile editor (openspec/changes/provider-chat-profiles) ───
+  //
+  // One sheet, mounted on `chatCard` the same way system.ts mounts its own
+  // cleanup sheet. Clicking a saved profile's row opens this (not an
+  // immediate switch) — "Use" inside it both saves and selects, so there is
+  // one click target per row instead of a trailing edit button nested
+  // inside a clickable row (invalid HTML, and two click handlers fighting
+  // over the same click).
+  let providerEditorEl: HTMLElement | null = null;
+
+  function closeProviderEditor() {
+    providerEditorEl?.remove();
+    providerEditorEl = null;
+  }
+
+  function openProviderEditor(profile?: ProviderProfile) {
+    closeProviderEditor();
+    const labelInput = h("input", { type: "text", value: profile?.label ?? "" }) as HTMLInputElement;
+    const urlInput = h("input", {
+      type: "text",
+      placeholder: "https://…",
+      value: profile?.baseUrl ?? "",
+    }) as HTMLInputElement;
+    const modelInput = h("input", { type: "text", value: profile?.model ?? "" }) as HTMLInputElement;
+    const keyInput = h("input", {
+      type: "password",
+      placeholder: profile?.keySet ? t("chat.providerKeyPlaceholder") : "",
+    }) as HTMLInputElement;
+
+    const field = (labelText: string, el: HTMLElement) =>
+      h("label", { class: "provider-editor-field" }, h("span", { text: labelText }), el);
+
+    const body = h(
+      "div",
+      { class: "provider-editor-fields" },
+      field(t("chat.providerLabelField"), labelInput),
+      field(t("chat.providerUrlField"), urlInput),
+      field(t("chat.providerModelField"), modelInput),
+      field(t("chat.providerKeyField"), keyInput),
+    );
+
+    async function save() {
+      const saved = await Bridge.providerSave({
+        id: profile?.id,
+        label: labelInput.value.trim(),
+        baseUrl: urlInput.value.trim(),
+        model: modelInput.value.trim(),
+      });
+      if (!saved) return;
+      // Written through the same generic secret commands the 9 fixed keys
+      // already use — there is no provider-specific key command. Blank
+      // means "keep the current key", not "clear it".
+      if (keyInput.value) await Bridge.secretSet(providerKeyFor(saved.id), keyInput.value);
+      await reloadProviders();
+      chooseProviderProfile(saved.id);
+      closeProviderEditor();
+      input.focus();
+    }
+
+    async function remove() {
+      if (!profile) return;
+      await Bridge.providerDelete(profile.id);
+      if (State.selectedProvider === profile.id) chooseProviderProfile(null);
+      await reloadProviders();
+      closeProviderEditor();
+      input.focus();
+    }
+
+    const footer = h(
+      "div",
+      { class: "provider-editor-footer" },
+      profile ? button({ label: t("chat.deleteProvider"), variant: "destructive", onClick: () => void remove() }) : null,
+      h("span", { class: "grow" }),
+      button({ label: t("chat.save"), variant: "primary", onClick: () => void save() }),
+    );
+
+    providerEditorEl = sheet({
+      title: profile ? t("chat.editProvider") : t("chat.addProvider"),
+      body,
+      footer,
+      onClose: () => {
+        closeProviderEditor();
+        input.focus();
+      },
     });
+    chatCard.append(providerEditorEl);
+  }
+
+  /** An auto-detected Ollama model has nothing to configure (no key, a
+   *  fixed local URL) — picking one creates its backing profile silently
+   *  the first time, then just selects it from then on. */
+  async function selectOllamaModel(modelName: string) {
+    const existing = availableProviders.find((p) => p.baseUrl === OLLAMA_BASE_URL && p.model === modelName);
+    const profile =
+      existing ?? (await Bridge.providerSave({ label: modelName, baseUrl: OLLAMA_BASE_URL, model: modelName }));
+    if (!profile) return;
+    if (!existing) await reloadProviders();
+    chooseProviderProfile(profile.id);
+    input.focus();
+  }
+
+  provider.addEventListener("click", () => {
+    void (async () => {
+      await reloadProviders();
+      // Nothing to switch to — opening an empty popover would be worse than
+      // the click doing nothing, same as nextProvider() used to no-op here.
+      if (availableClis.length === 0 && availableProviders.length === 0 && ollamaModels.length === 0) return;
+      toggleMenu(providerItem, providerMenu, () => {
+        // Same order as the Fase 3 console grid, so picking an agent here and
+        // picking one there never disagree about which comes first.
+        const ordered = orderConsoles(availableClis, State.agentCli, new Set());
+        for (const c of ordered) {
+          providerMenu.append(
+            menuRow(
+              c.label,
+              () => {
+                chooseProvider(c.id);
+                input.focus();
+              },
+              stillMiniBot(consoleColor(c.id), 14),
+            ),
+          );
+        }
+        const globeFace = () => h("span", { class: "chat-menu-face" }, icon("globe", { size: 14 }));
+        for (const p of availableProviders) {
+          providerMenu.append(menuRow(p.label, () => openProviderEditor(p), globeFace()));
+        }
+        for (const m of ollamaModels) {
+          // Already-saved Ollama models (picked before) show up in the loop
+          // above instead, as an ordinary profile — not listed twice here.
+          if (availableProviders.some((p) => p.baseUrl === OLLAMA_BASE_URL && p.model === m.name)) continue;
+          providerMenu.append(menuRow(m.name, () => void selectOllamaModel(m.name), globeFace()));
+        }
+        providerMenu.append(
+          menuRow(t("chat.addProvider"), () => openProviderEditor(), h("span", { class: "chat-menu-face" }, icon("plus", { size: 14 }))),
+        );
+      });
+    })();
   });
 
   projectBtn.addEventListener("click", () => {
@@ -935,12 +1099,16 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
     try {
       // The CLI runs the real agent — its own tools, skills and CLAUDE.md — and
       // reports what it does through the hooks, so the steps and the permission
-      // card show up in the island exactly as a terminal session's would.
+      // card show up in the island exactly as a terminal session's would. A
+      // provider profile (openspec/changes/provider-chat-profiles) never
+      // reaches a tool at all — the two are mutually exclusive in State.
       const text = State.agentCli
         ? await Bridge.agentSend(State.agentCli, prompt)
-        : await Promise.reject(
-            new Error("No agent CLI found. Install Claude Code, or another agent CLI, and Coucou will pick it up."),
-          );
+        : State.selectedProvider
+          ? await Bridge.providerSend(State.selectedProvider, prompt)
+          : await Promise.reject(
+              new Error("No agent CLI found. Install Claude Code, or another agent CLI, and Coucou will pick it up."),
+            );
       State.chatHistory.push({
         id: freshId(),
         role: "assistant",
@@ -956,7 +1124,7 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
       State.chatHistory.push({
         id: freshId(),
         role: "error",
-        content: String(err).replace(/^Error:\s*/, ""),
+        content: providerErrorMessage(String(err).replace(/^Error:\s*/, "")),
         at: Date.now(),
         steps: State.chatSteps.slice(),
       });
