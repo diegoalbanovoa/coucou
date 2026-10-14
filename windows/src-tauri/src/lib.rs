@@ -16,6 +16,7 @@ mod platform;
 mod providers;
 mod quick_assistant;
 mod quick_loop;
+mod redact;
 mod routines;
 mod secrets;
 mod sensitive;

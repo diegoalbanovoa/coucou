@@ -443,6 +443,7 @@ export const es: Messages = {
         refusedPaused: "rechazada (en pausa)",
         refusedScope: "rechazada (fuera de la lista)",
         refusedSensitive: "rechazada (archivo protegido)",
+        redacted: "secretos ocultados al modelo",
       },
     },
   },

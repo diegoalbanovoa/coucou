@@ -463,6 +463,7 @@ export const en = {
         refusedPaused: "refused (paused)",
         refusedScope: "refused (not on the allow-list)",
         refusedSensitive: "refused (protected file)",
+        redacted: "secrets hidden from the model",
       },
     },
   },

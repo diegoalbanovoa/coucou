@@ -17,7 +17,7 @@ use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::mpsc;
 
 use crate::settings::{AllowedApp, Settings};
-use crate::{integrations, island, log, platform, sensitive, skills, vault};
+use crate::{integrations, island, log, platform, redact, sensitive, skills, vault};
 
 // ── Folder allow-list ────────────────────────────────────────────────────
 
@@ -400,27 +400,64 @@ where
     F: FnOnce(&'static str, Value) -> Fut,
     Fut: std::future::Future<Output = Decision>,
 {
-    let tool: &'static str = match name {
-        "load_skill" => "load_skill",
-        "search_files" => "search_files",
-        "read_approved_folder" => "read_approved_folder",
-        "open_app" => "open_app",
-        "query_vault" => "query_vault",
-        other => {
-            record(other, "", "refused-scope");
-            return "Error: that is not one of the available tools.".to_string();
-        }
+    let Some(tool) = known_tool(name) else {
+        record(name, "", "refused-scope");
+        return "Error: that is not one of the available tools.".to_string();
     };
-    let target = match tool {
+    let target = target_for(tool, args);
+    let raw = gated(tool, &target, args, settings, paused, approve, load).await;
+    harden_output(tool, &target, raw)
+}
+
+fn known_tool(name: &str) -> Option<&'static str> {
+    match name {
+        "load_skill" => Some("load_skill"),
+        "search_files" => Some("search_files"),
+        "read_approved_folder" => Some("read_approved_folder"),
+        "open_app" => Some("open_app"),
+        "query_vault" => Some("query_vault"),
+        _ => None,
+    }
+}
+
+/// What the log and the card name for a call; an unknown tool has no target.
+fn target_for(tool: &str, args: &Value) -> String {
+    match tool {
         "search_files" => format!("{} in {}", str_arg(args, "query"), str_arg(args, "folder")),
         "read_approved_folder" => str_arg(args, "path").to_string(),
         "open_app" => str_arg(args, "app_id").to_string(),
         "load_skill" => str_arg(args, "name").to_string(),
-        _ => "vault".to_string(),
-    };
+        "query_vault" => "vault".to_string(),
+        _ => String::new(),
+    }
+}
 
+/// Everything a tool returns on its way to the model — its own errors
+/// included, so a file that starts with "Error:" gets no free pass.
+fn harden_output(tool: &str, target: &str, raw: String) -> String {
+    let red = redact::redact(&raw);
+    if red.count > 0 {
+        record(tool, target, "redacted");
+    }
+    red.text
+}
+
+/// The gates and the tool itself: pause, scope, approval, run, log.
+async fn gated<F, Fut>(
+    tool: &'static str,
+    target: &str,
+    args: &Value,
+    settings: &Settings,
+    paused: bool,
+    approve: F,
+    load: &(dyn Fn(&str) -> Option<skills::Skill> + Sync),
+) -> String
+where
+    F: FnOnce(&'static str, Value) -> Fut,
+    Fut: std::future::Future<Output = Decision>,
+{
     if refused_while_paused(paused).is_some() {
-        record(tool, &target, "refused-paused");
+        record(tool, target, "refused-paused");
         return "Error: Coucou is paused, so no action was taken.".to_string();
     }
 
@@ -437,19 +474,19 @@ where
         _ => true,
     };
     if !scoped {
-        record(tool, &target, "refused-scope");
+        record(tool, target, "refused-scope");
         return "Error: that target is not on the allow-list.".to_string();
     }
 
     // A protected file is refused with no card: approving would not make it
     // any less sensitive.
     if tool == "read_approved_folder" && sensitive::is_sensitive_path(Path::new(str_arg(args, "path"))) {
-        record(tool, &target, "refused-sensitive");
+        record(tool, target, "refused-sensitive");
         return format!("Error: {}.", sensitive::PROTECTED_ERR);
     }
 
     if tool == "load_skill" {
-        record(tool, &target, "auto-approved");
+        record(tool, target, "auto-approved");
         return match load(str_arg(args, "name")) {
             Some(skill) => skills::truncate_body(&skill.body),
             None => "Error: that skill could not be read.".to_string(),
@@ -457,7 +494,7 @@ where
     }
 
     if tool == "read_approved_folder" {
-        record(tool, &target, "auto-approved");
+        record(tool, target, "auto-approved");
         return read_approved_folder(str_arg(args, "path"), folders).unwrap_or_else(|e| format!("Error: {e}"));
     }
 
@@ -481,10 +518,10 @@ where
     };
 
     if approve(tool, input).await != Decision::Allow {
-        record(tool, &target, "denied");
+        record(tool, target, "denied");
         return "Error: the user denied this action.".to_string();
     }
-    record(tool, &target, "approved");
+    record(tool, target, "approved");
 
     match tool {
         "search_files" => match search_files(str_arg(args, "query"), str_arg(args, "folder"), folders) {
@@ -730,6 +767,22 @@ mod tests {
     #[cfg(windows)]
     fn link_dir(src: &Path, dst: &Path) -> bool {
         std::os::windows::fs::symlink_dir(src, dst).is_ok()
+    }
+
+    #[tokio::test]
+    async fn a_secret_in_a_file_is_hidden_and_the_log_never_holds_it() {
+        let dir = tempdir();
+        let t = token();
+        let key = format!("sk-{}", "a1B2".repeat(6));
+        std::fs::write(dir.join(format!("{t}.txt")), format!("my key is {key} ok")).unwrap();
+        let settings = settings_with(vec![dir.to_string_lossy().to_string()]);
+        let args = json!({ "path": dir.join(format!("{t}.txt")).to_string_lossy() });
+        let out = dispatch("read_approved_folder", &args, &settings, false, never).await;
+        assert!(out.contains("[REDACTED:openai_key]"));
+        assert!(!out.contains(&key));
+        assert_eq!(logged(&t).outcome, "redacted");
+        let log_text = std::fs::read_to_string(log_path()).unwrap();
+        assert!(!log_text.contains(&key));
     }
 
     #[test]
