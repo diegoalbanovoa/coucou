@@ -140,3 +140,42 @@ D7 no respondida: se hizo la fase (por defecto). D7b = correr si el retraso es �
   - [ ] Con `tools` activo y una pregunta que necesite `query_vault`, sale la tarjeta de aprobación; sin clic en 108 s se deniega y la rutina termina igual.
   - [ ] "Ejecutar ahora" funciona.
   - [ ] Revisor de diseño `coucou-design-reviewer` NO pasado (el constructor no lanza subagentes) sobre `digest.ts` y Ajustes → Rutinas.
+
+## Fase 8 (adaptada: sin las Fases 1 y 3)
+
+Las Fases 1 y 3 (OpenJarvis) no se ejecutaron: Diego no autorizó instalarlo (D1). Quedan `pendiente` en `estado.json`; las tareas de esta fase que dependen de ellas (selector con OpenJarvis, guardia (d) de rutas de OpenJarvis salvo lo comprobado abajo) se omiten. Fase 0 sigue en curso a la espera de las pruebas manuales A, B y C.
+
+### Verificaciones (regla 9) frente a la línea base de la Fase 0
+
+| Verificación | Línea base | Ahora |
+|---|---|---|
+| `cargo test --workspace` | 152 + 3 | 210 + 3 (6 ignorados), 0 fallos |
+| `cargo clippy --workspace --all-targets` | limpio | limpio |
+| `npm run test` | 190 | 213, 0 fallos |
+| `npx tsc --noEmit` | limpio | limpio |
+
+### Revisión de seguridad por código
+
+- (a) `secrets::get`: llamadores nuevos de v4 = `routines.rs` (clave del perfil, vive solo en la petición) y `lib.rs::summarize` (Fase 5, igual). Ningún valor llega al log ni a archivos; `memory.rs` no importa `secrets`. Los demás son los preexistentes (integraciones, `providers::send`, `quick_ask`).
+- (b) `Command::new`: v4 no añadió ninguno (`git diff af0d649` sin líneas nuevas con `Command::new`). Los existentes: `agent.rs`, `consoles.rs`, `lib.rs` (VS Code) y `quick_assistant::open_app` (ejecutable resuelto de la lista permitida).
+- (c) Toda herramienta pasa por `quick_assistant::dispatch`: `quick_ask` y `routines::run` usan `execute_tool`, que llama a `dispatch`; `load_skill` está dentro de `dispatch`.
+- (d) No hay ninguna cadena `"/agents"`, `"/memory"` o `"/skills"` en `src-tauri/src` (grep vacío); no hay código de OpenJarvis.
+- (e) `skills::import_to` copia solo `SKILL.md` (test `import_copies_only_skill_md_never_scripts`); `allowed-tools` se ignora.
+
+### Omitido o pendiente de humano
+
+- `npm run shots` completo NO corrido (lento y escribe en `windows/shots/`); `scripts/shots.mjs` no incluye aún Uso, digest, Memoria, Skills ni Rutinas. Se verificaron con Playwright aparte: panel Uso (Fase 4), digest en/es y Ajustes completo (sin errores de consola).
+- Revisor `coucou-design-reviewer` sobre todo `src/`: NO pasado (el constructor no lanza subagentes). Pendiente.
+- Medición de CPU con build real (`npx tauri build`, objetivo < 0,5 % con la isla colapsada y una rutina activa): NO hecha; requiere build real y un humano. Por código, con una rutina hay un único `setTimeout` de hasta 30 min y sin rutinas ninguno.
+- `windows/_prive/estado-actual.md` regenerado (ignorado por git, no se commitea).
+- README: sección "Layout" actualizada con los módulos nuevos.
+- Instalador y autostart: siguen diferidos (D13); no se ejecutó ningún instalador.
+
+### Checklist consolidada de pruebas manuales (Diego)
+
+- [ ] Fase 0: listas A, B y C (arriba).
+- [ ] Fase 2: con Ollama, "me llamo Diego" y luego "¿cómo me llamo?" responde Diego.
+- [ ] Fase 4: tres turnos (Claude Code, Ollama, asistente rápido) = tres filas; Claude Code con coste; reemplazar `RESULT_LINE` por una línea real.
+- [ ] Fase 5, 6 y 7: las listas de sus secciones.
+- [ ] Pasar el revisor de diseño por todo `src/`.
+- [ ] Medir CPU con la build real.
