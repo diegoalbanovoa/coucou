@@ -10,6 +10,7 @@ import { washRGBA, type IslandViewName, type Wash } from "../core/layout";
 import { buildPrompt } from "./chat";
 import { buildHomeRightCard } from "./consoles";
 import { buildSystem } from "./system";
+import { buildQuick } from "./quick";
 import { renderIntegrationCard, type IntegrationCardHooks } from "./integrations";
 import { t, getLocale } from "../i18n/index";
 import { healthTooltip } from "../island/health";
@@ -539,6 +540,7 @@ export function buildViews(
   map.set("settings", buildSettings(actions));
   map.set("prompt", buildPrompt(onChatHeightChange));
   map.set("system", buildSystem());
+  map.set("quick", buildQuick(actions));
   // Not in the Windows v1: sending a file by email, window attach + web result.
   map.set("mail", buildPlaceholder("overview.sendingByEmail"));
   map.set("searching", buildPlaceholder("overview.searching"));

@@ -75,6 +75,7 @@ export class Island {
   private confusedRecovery: number | null = null;
   private prevViewBeforeConfused: IslandViewName = "overview";
   private lastSyncedView: IslandViewName | null = null;
+  private lastQuickView = false;
 
   constructor(root: HTMLElement) {
     this.root = root;
@@ -778,6 +779,17 @@ export class Island {
         void Bridge.focusWindow(true);
         window.setTimeout(() => this.views.get("prompt")?.focus?.(), 120);
       } else if (wasChat) {
+        void Bridge.focusWindow(false);
+      }
+    }
+    // The quick-ask view is the other one with a text field, and it is the
+    // only other time the island may take keyboard focus.
+    if (this.lastQuickView !== (State.view === "quick")) {
+      this.lastQuickView = State.view === "quick";
+      if (this.lastQuickView) {
+        void Bridge.focusWindow(true);
+        window.setTimeout(() => this.views.get("quick")?.focus?.(), 120);
+      } else if (State.view !== "prompt") {
         void Bridge.focusWindow(false);
       }
     }

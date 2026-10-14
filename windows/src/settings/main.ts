@@ -456,6 +456,123 @@ function vaultSection(): HTMLElement {
   );
 }
 
+// ── Quick assistant section ──────────────────────────────────────────────────
+
+/** The log's outcome strings, as a translation key. */
+function outcomeLabel(outcome: string): string {
+  switch (outcome) {
+    case "approved": return t("quick.settings.outcome.approved");
+    case "denied": return t("quick.settings.outcome.denied");
+    case "auto-approved": return t("quick.settings.outcome.autoApproved");
+    case "refused-paused": return t("quick.settings.outcome.refusedPaused");
+    default: return t("quick.settings.outcome.refusedScope");
+  }
+}
+
+/**
+ * The global shortcut, the model it talks to, the two allow-lists, and the log
+ * of what it did. Every list change goes through its own Rust command, which
+ * validates it (a folder must be a folder, an app a file) before storing it.
+ */
+function quickSection(): HTMLElement {
+  const body = h("div", { style: "display:flex;flex-direction:column;gap:12px" });
+  const dot = statusDot(false);
+
+  async function draw() {
+    const [info, profiles, folders, apps, log] = await Promise.all([
+      Bridge.quickShortcutStatus(),
+      Bridge.providerList(),
+      Bridge.quickFolders(),
+      Bridge.quickApps(),
+      Bridge.quickLog(30),
+    ]);
+    clear(body);
+
+    // Shortcut
+    const shortcutInput = h("input", {
+      type: "text",
+      placeholder: t("quick.settings.shortcutPlaceholder"),
+      value: info?.shortcut ?? settings.quickAssistantShortcut ?? "",
+    }) as HTMLInputElement;
+    const apply = async (value: string | null) => {
+      await Bridge.quickShortcutSet(value);
+      await draw();
+    };
+    const shortcutNote = !info || !info.shortcut
+      ? h("div", { class: "hint", text: t("quick.settings.shortcutNone") })
+      : info.registered
+        ? h("div", { class: "notice ok", text: t("quick.settings.shortcutOk", { shortcut: info.shortcut }) })
+        : h("div", {
+            class: "notice err",
+            text: t("quick.settings.shortcutConflict", { shortcut: info.shortcut, error: info.error ?? "" }),
+          });
+    dot.style.background = info?.registered ? "var(--c-green)" : "#6b7079";
+
+    // Model
+    const select = h("select", {}) as HTMLSelectElement;
+    select.append(h("option", { value: "", text: t("quick.settings.profileNone") }));
+    for (const p of profiles ?? []) select.append(h("option", { value: p.id, text: p.label }));
+    select.value = settings.quickAssistantProfile ?? "";
+    select.addEventListener("change", () => {
+      settings.quickAssistantProfile = select.value || null;
+      void save();
+    });
+
+    const list = (items: { key: string; text: string }[], empty: string, remove: (key: string) => Promise<void>) =>
+      h("div", { style: "display:flex;flex-direction:column;gap:6px" },
+        ...(items.length === 0
+          ? [h("div", { class: "hint", text: empty })]
+          : items.map((item) =>
+              h("div", { class: "row" },
+                h("code", { class: "path", text: item.text, title: item.text }),
+                h("button", {
+                  text: t("quick.settings.remove"),
+                  onclick: async () => { await remove(item.key); await draw(); },
+                }),
+              ))),
+      );
+
+    body.append(
+      h("div", { class: "hint", text: t("quick.settings.intro") }),
+      h("div", { class: "row" },
+        h("label", { text: t("quick.settings.shortcut") }),
+        shortcutInput,
+        h("button", { class: "primary", text: t("quick.settings.apply"), onclick: () => void apply(shortcutInput.value.trim() || null) }),
+        h("button", { text: t("quick.settings.clear"), onclick: () => void apply(null) }),
+      ),
+      shortcutNote,
+      h("div", { class: "row" }, h("label", { text: t("quick.settings.profile") }), select),
+      h("div", { class: "hint", text: t("quick.settings.profileHint") }),
+      h("div", { class: "row" },
+        h("label", { text: t("quick.settings.folders") }),
+        h("button", { text: t("quick.settings.addFolder"), onclick: async () => { await Bridge.quickFolderAdd(); await draw(); } }),
+      ),
+      list((folders ?? []).map((f) => ({ key: f, text: f })), t("quick.settings.noFolders"), (k) => Bridge.quickFolderRemove(k) as Promise<void>),
+      h("div", { class: "row" },
+        h("label", { text: t("quick.settings.apps") }),
+        h("button", { text: t("quick.settings.addApp"), onclick: async () => { await Bridge.quickAppAdd(); await draw(); } }),
+      ),
+      list((apps ?? []).map((a) => ({ key: a.id, text: `${a.label} — ${a.exe}` })), t("quick.settings.noApps"), (k) => Bridge.quickAppRemove(k) as Promise<void>),
+      h("div", { class: "row" },
+        h("label", { text: t("quick.settings.log") }),
+        h("button", { text: t("quick.settings.refreshLog"), onclick: () => void draw() }),
+      ),
+      h("div", { style: "display:flex;flex-direction:column;gap:4px" },
+        ...((log ?? []).length === 0
+          ? [h("div", { class: "hint", text: t("quick.settings.noLog") })]
+          : [...(log ?? [])].reverse().map((e) =>
+              h("div", { class: "hint" },
+                `${new Date(e.at).toLocaleString(resolveLocale(settings.language))} · ${e.tool} · ${e.target} · ${outcomeLabel(e.outcome)}`,
+              ))),
+      ),
+    );
+  }
+
+  void draw();
+
+  return h("section", {}, h("h2", {}, dot, h("span", { text: t("quick.settings.title") })), body);
+}
+
 // ── General section ───────────────────────────────────────────────────────────
 
 function generalSection(): HTMLElement {
@@ -612,6 +729,7 @@ function render() {
     agentsSection(),
     chatFolderSection(),
     vaultSection(),
+    quickSection(),
     generalSection(),
     healthSection(),
     integrationsSection(secretsPresent),

@@ -5,7 +5,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
-import type { Settings } from "./state";
+import type { AllowedApp, Settings } from "./state";
 
 export const IS_TAURI =
   typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -197,6 +197,26 @@ export const Bridge = {
 
   /** Tray → Pause. Stops the integration pollers, not just the island. */
   setPaused: (paused: boolean) => call<void>("set_paused", { paused }),
+
+  // ── Quick assistant (openspec/changes/quick-assistant-tools) ──────────────
+  /** One quick-ask turn. Rejects with a `<kind>:<detail>` string. Tool calls
+   *  show their approval card through the ordinary "hook" event. */
+  quickAsk: (prompt: string) => callOrThrow<string>("quick_ask", { prompt }),
+  /** Whether the global shortcut took, and why not when it did not. */
+  quickShortcutStatus: () => call<ShortcutInfo>("quick_shortcut_status"),
+  /** Stores and registers the shortcut; null clears it. A conflict comes back
+   *  in the result (`registered: false`), not as a rejection. */
+  quickShortcutSet: (shortcut: string | null) => call<ShortcutInfo>("quick_shortcut_set", { shortcut }),
+  quickFolders: () => call<string[]>("quick_folders"),
+  /** Opens the folder picker and allow-lists the choice. Null on cancel. */
+  quickFolderAdd: () => call<string | null>("quick_folder_add"),
+  quickFolderRemove: (path: string) => call<void>("quick_folder_remove", { path }),
+  quickApps: () => call<AllowedApp[]>("quick_apps"),
+  /** Opens the file picker on an executable and allow-lists it. Null on cancel. */
+  quickAppAdd: () => call<AllowedApp | null>("quick_app_add"),
+  quickAppRemove: (id: string) => call<void>("quick_app_remove", { id }),
+  /** The newest action-log entries, oldest first. */
+  quickLog: (limit?: number) => call<QuickLogEntry[]>("quick_log", { limit }),
 };
 
 export interface IntegrationUpdate {
@@ -329,6 +349,23 @@ export interface ProviderProfile {
  *  command. Must match `providers::key_for` in Rust exactly. */
 export function providerKeyFor(id: string): string {
   return `provider-profile-${id}-api-key`;
+}
+
+/** What the settings window shows about the quick assistant's shortcut. */
+export interface ShortcutInfo {
+  shortcut: string | null;
+  registered: boolean;
+  error: string | null;
+}
+
+/** One line of the quick assistant's local action log. */
+export interface QuickLogEntry {
+  /** Milliseconds since the epoch. */
+  at: number;
+  tool: string;
+  target: string;
+  /** "approved" | "denied" | "auto-approved" | "refused-paused" | "refused-scope" */
+  outcome: string;
 }
 
 /** A model Ollama has installed locally, from auto-detection. */

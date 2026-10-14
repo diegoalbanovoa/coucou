@@ -321,6 +321,52 @@ export const es: Messages = {
     footer: "Sin telemetría. Las peticiones de red solo van a los servicios que configures tú mismo.",
   },
 
+  // openspec/changes/quick-assistant-tools — la consulta rápida con atajo
+  // global y sus ajustes. Los nombres de herramienta (search_files…) son
+  // identificadores y se muestran tal cual.
+  quick: {
+    placeholder: "Pregunta a Coucou…",
+    send: "Enviar",
+    working: "Trabajando…",
+    emptyReply: "Sin respuesta.",
+    noModel: "No hay modelo configurado. Elige un perfil de proveedor para el asistente rápido en Ajustes.",
+    errInvalidKey: "Se rechazó la clave de API.",
+    errNoNetwork: "No se pudo contactar con el modelo.",
+    errRateLimited: "Límite de uso alcanzado o sin cuota.",
+    errEndpoint: "El modelo falló: {detail}",
+    settings: {
+      title: "Asistente rápido",
+      intro: "Un atajo global abre una entrada en blanco. Solo puede buscar y leer en las carpetas que permitas, abrir solo las apps que permitas y consultar tu vault. Apruebas cada acción, salvo leer dentro de una carpeta permitida.",
+      shortcut: "Atajo",
+      shortcutPlaceholder: "ctrl+shift+space",
+      apply: "Aplicar",
+      clear: "Quitar",
+      shortcutNone: "Sin atajo.",
+      shortcutOk: "{shortcut} está registrado.",
+      shortcutConflict: "No se pudo registrar {shortcut}: puede que otra app ya lo use. {error}",
+      profile: "Modelo",
+      profileNone: "Ninguno",
+      profileHint: "Un perfil de proveedor del selector del chat. Sin uno, el asistente rápido no responde.",
+      folders: "Carpetas permitidas",
+      noFolders: "Aún no hay carpetas: buscar y leer no tienen dónde mirar.",
+      addFolder: "Añadir carpeta…",
+      apps: "Apps permitidas",
+      noApps: "Aún no hay apps.",
+      addApp: "Añadir app…",
+      remove: "Quitar",
+      log: "Acciones recientes",
+      noLog: "Nada todavía.",
+      refreshLog: "Actualizar",
+      outcome: {
+        approved: "aprobada",
+        denied: "denegada",
+        autoApproved: "permitida (carpeta permitida)",
+        refusedPaused: "rechazada (en pausa)",
+        refusedScope: "rechazada (fuera de la lista)",
+      },
+    },
+  },
+
   common: {
     cancel: "Cancelar",
     done: "Listo",

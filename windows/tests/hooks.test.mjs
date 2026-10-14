@@ -492,6 +492,28 @@ test("a declined permission request leaves the stop timer running", () => {
   assert.equal(task().state, "idle");
 });
 
+test("a quick-assistant request (qa- id, no coucou_agent) gets the real card and the ack", () => {
+  hook({
+    hook_event_name: "PermissionRequest",
+    request_id: "qa-1",
+    session_id: "quick-assistant",
+    tool_name: "search_files",
+    tool_input: { query: "report — C:\Users\me\docs" },
+  });
+  assert.equal(State.pendingApproval.requestId, "qa-1");
+  assert.equal(State.pendingApproval.tool, "search_files");
+  assert.equal(State.pendingApproval.command, "search_files · report — C:\Users\me\docs");
+  assert.deepEqual(sent("approval_ack"), [{ requestId: "qa-1" }]);
+  assert.deepEqual(sent("approval_decline"), []);
+});
+
+test("a paused island declines a quick-assistant request too", () => {
+  State.paused = true;
+  hook({ hook_event_name: "PermissionRequest", request_id: "qa-2", tool_name: "open_app" });
+  assert.deepEqual(sent("approval_decline"), [{ requestId: "qa-2" }]);
+  assert.equal(State.pendingApproval, null);
+});
+
 // ── Where the session runs ───────────────────────────────────────────────────
 //
 // The relay forwards the terminal's environment on every event. The pill used

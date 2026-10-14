@@ -7,6 +7,7 @@ import { State, type Settings } from "./core/state";
 import { Island } from "./island/island";
 import { loadAgentEnvironment, registerAgentHandlers } from "./island/agent";
 import { rescanOnFocus } from "./views/consoles";
+import { resetQuickAsk } from "./views/quick";
 import { registerHookHandlers } from "./island/hooks";
 import { registerHealthHandlers } from "./island/health";
 import { registerIntegrationHandlers, refreshConfigured } from "./island/integrations";
@@ -68,6 +69,15 @@ async function main() {
         else island.reveal();
         break;
     }
+  });
+
+  // The global shortcut. Paused means paused, like a file drag: nothing opens.
+  // Always a blank input, and kept open (pinned) while the user types.
+  await onEvent<null>("quick-ask", () => {
+    if (State.paused) return;
+    resetQuickAsk();
+    State.isPinned = true;
+    island.alert("quick");
   });
 
   await onEvent<null>("screen-changed", () => {

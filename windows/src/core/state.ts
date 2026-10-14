@@ -128,6 +128,22 @@ export interface Settings {
   healthDiskThreshold: number;
   /** Whether worsening briefly reveals the collapsed island. */
   healthNotify: boolean;
+
+  /** Global shortcut that opens the quick assistant, e.g. "ctrl+shift+space". Null for none. */
+  quickAssistantShortcut: string | null;
+  /** The provider profile (id) the quick assistant talks to. Null means no model. */
+  quickAssistantProfile: string | null;
+  /** Folders search_files / read_approved_folder may reach. */
+  quickAssistantFolders: string[];
+  /** Apps open_app may launch. */
+  quickAssistantApps: AllowedApp[];
+}
+
+/** One entry of the quick assistant's app allow-list. */
+export interface AllowedApp {
+  id: string;
+  label: string;
+  exe: string;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -156,6 +172,10 @@ export const DEFAULT_SETTINGS: Settings = {
   healthIncludeDisk: false,
   healthDiskThreshold: 90,
   healthNotify: true,
+  quickAssistantShortcut: null,
+  quickAssistantProfile: null,
+  quickAssistantFolders: [],
+  quickAssistantApps: [],
 };
 
 type Listener = () => void;

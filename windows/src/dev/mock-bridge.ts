@@ -392,6 +392,21 @@ export const Bridge = {
   refreshIntegration: noop("refresh_integration"),
   openN8n: noop("open_n8n"),
   setPaused: noop("set_paused"),
+
+  // Quick assistant: nothing to run in a browser, so these answer empty.
+  quickAsk: async (prompt: string): Promise<string> => {
+    console.info("[mock] quick_ask", prompt);
+    return "";
+  },
+  quickShortcutStatus: async () => ({ shortcut: null, registered: false, error: null }),
+  quickShortcutSet: async (shortcut: string | null) => ({ shortcut, registered: shortcut != null, error: null }),
+  quickFolders: async (): Promise<string[]> => [],
+  quickFolderAdd: async (): Promise<string | null> => null,
+  quickFolderRemove: noop("quick_folder_remove"),
+  quickApps: async () => [],
+  quickAppAdd: async () => null,
+  quickAppRemove: noop("quick_app_remove"),
+  quickLog: async () => [],
 };
 
 // ── events ────────────────────────────────────────────────────────────────────
