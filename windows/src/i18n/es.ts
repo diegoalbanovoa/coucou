@@ -444,6 +444,7 @@ export const es: Messages = {
         refusedScope: "rechazada (fuera de la lista)",
         refusedSensitive: "rechazada (archivo protegido)",
         redacted: "secretos ocultados al modelo",
+        flaggedInjection: "instrucciones sospechosas señaladas",
       },
     },
   },

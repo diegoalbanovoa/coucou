@@ -6,6 +6,7 @@ mod consoles;
 mod files;
 mod health;
 mod hooks;
+mod injection;
 mod i18n;
 mod integrations;
 mod island;
