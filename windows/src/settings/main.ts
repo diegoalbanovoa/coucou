@@ -590,6 +590,7 @@ function skillsBlock(): HTMLElement {
   const box = h("div", { style: "display:flex;flex-direction:column;gap:8px;margin-top:12px" });
   const leftOut = new Map<string, string[]>();
   let message: HTMLElement | null = null;
+  let removingSkill: string | null = null;
 
   async function doImport(replace: boolean) {
     message = null;
@@ -642,9 +643,19 @@ function skillsBlock(): HTMLElement {
             toggle(s.enabled, (v) => { void Bridge.skillSetEnabled(s.name, v); }),
             h("button", {
               text: t("settings.skills.remove"),
-              onclick: async () => { await Bridge.skillDelete(s.name); leftOut.delete(s.name); await draw(); },
+              onclick: () => { removingSkill = s.name; void draw(); },
             }),
           ),
+          ...(removingSkill === s.name
+            ? [inlineConfirm({
+                message: t("settings.skills.removeConfirm"),
+                confirmLabel: t("settings.skills.remove"),
+                cancelLabel: t("settings.skills.neverMind"),
+                destructive: true,
+                onConfirm: async () => { removingSkill = null; await Bridge.skillDelete(s.name); leftOut.delete(s.name); await draw(); },
+                onCancel: () => { removingSkill = null; void draw(); },
+              })]
+            : []),
           h("div", { class: "hint", text: s.description.length > 90 ? `${s.description.slice(0, 89)}…` : s.description }),
           ...notes,
         ),

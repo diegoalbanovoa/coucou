@@ -179,3 +179,18 @@ Las Fases 1 y 3 (OpenJarvis) no se ejecutaron: Diego no autorizó instalarlo (D1
 - [ ] Fase 5, 6 y 7: las listas de sus secciones.
 - [ ] Pasar el revisor de diseño por todo `src/`.
 - [ ] Medir CPU con la build real.
+
+### Revisión de diseño (Fase 8, `coucou-design-reviewer`)
+
+Capturas reales del modo mock (Playwright, servidor mock en el puerto 1520 para no tocar el `tauri dev` en 1420; script ad hoc, no se commitea): Uso (en/es, 1x y 1.5x), digest y digest con error (en/es, 1x y 1.5x), Ajustes completo (en/es). Memoria en chat y el editor de rutinas se revisaron solo por código.
+
+| Severidad | Archivo | Problema | Estado |
+|---|---|---|---|
+| Alta | `settings/main.ts` (skillsBlock) | "Quitar" skill borraba sin confirmación (patrón 8) | Corregido: `inlineConfirm` destructivo, cadena `settings.skills.removeConfirm` en en/es |
+| Media | `views/system.ts` drawUsage | El botón "Borrar" ocupaba una fila fija y dejaba ~1,5 filas visibles en Uso | Corregido: va dentro de la lista con scroll |
+| Media | `style.css` `.digest-*` | Tipografía, colores y espacios con px/`--ink`/`--dim-3` en vez de tokens | Corregido: `--t-*`, `--c-label*`, `--s-*` |
+| Media | `settings.css` `.routine-*`, `input[type=time]` | rgba y px sueltos, estilo del editor de rutinas | Pendiente: la ventana de Ajustes usa su propio sistema (no tokens); migrarla es restyle de lo existente |
+| Baja | `settings/main.ts` memoria | Borrar una nota individual sin confirmación | Pendiente (reversible a mano; "Borrar todo" sí confirma) |
+| Baja | Uso | Con la altura de la vista solo caben ~2 filas; depende del scroll interno (thin) | Pendiente |
+
+Sin hallazgos Alta restantes. No cambiaron los ficheros de fixtures ni se añadieron dependencias. Verificación tras los arreglos: cargo test 210+3, npm test 213, tsc y clippy limpios.

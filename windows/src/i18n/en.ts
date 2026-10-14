@@ -363,6 +363,7 @@ export const en = {
       replaceConfirm: "A skill with that name is already installed. Replace it?",
       replace: "Replace",
       neverMind: "Never mind",
+      removeConfirm: "Remove this skill? Its copy in Coucou is deleted.",
       failed: "That folder could not be imported: {detail}",
     },
     memory: {

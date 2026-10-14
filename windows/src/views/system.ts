@@ -633,8 +633,7 @@ export function buildSystem() {
           : undefined;
       list.append(listRow({ title: parts.title, subtitle: parts.subtitle, trailing }));
     }
-    panel.append(list);
-    panel.append(
+    list.append(
       h(
         "div",
         { class: "usage-actions" },
@@ -666,6 +665,7 @@ export function buildSystem() {
             }),
       ),
     );
+    panel.append(list);
   }
 
   // ── The cleanup sheet ────────────────────────────────────────────────────

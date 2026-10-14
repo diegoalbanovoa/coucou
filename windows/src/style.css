@@ -2916,8 +2916,8 @@ mark.hit.on {
   height: 100%;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 40px 16px 12px;
+  gap: var(--s-2);
+  padding: 40px var(--s-4) var(--s-3);
   min-height: 0;
 }
 
@@ -2928,34 +2928,35 @@ mark.hit.on {
 }
 
 .digest-title {
-  font: 600 13px var(--font);
-  color: var(--ink);
+  font: var(--t-headline);
+  color: var(--c-label);
 }
 
 .digest-when {
-  font: 400 11px var(--font);
-  color: var(--dim-3);
+  font: var(--t-footnote);
+  color: var(--c-label-2);
 }
 
 .digest-text {
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
-  font: 400 13px/18px var(--font);
-  color: var(--ink);
+  font: var(--t-subhead);
+  font-weight: 400;
+  color: var(--c-label);
   user-select: text;
   scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
+  scrollbar-color: var(--c-fill) transparent;
 }
 
 .digest-empty {
-  color: var(--dim-3);
+  color: var(--c-label-2);
 }
 
 .digest-footer {
   display: flex;
   justify-content: flex-end;
-  gap: 8px;
+  gap: var(--s-2);
 }
 
 /* ── Quick-ask view (views/quick.ts) ────────────────────────────────────── */

@@ -342,6 +342,7 @@ export const es: Messages = {
       replaceConfirm: "Ya hay una skill con ese nombre. ¿Reemplazarla?",
       replace: "Reemplazar",
       neverMind: "Mejor no",
+      removeConfirm: "¿Quitar esta skill? Se borra su copia en Coucou.",
       failed: "No se pudo importar esa carpeta: {detail}",
     },
     memory: {
