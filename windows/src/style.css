@@ -2910,6 +2910,54 @@ mark.hit.on {
   padding-top: 8px;
 }
 
+/* ── Routine digest (views/digest.ts) ───────────────────────────────────── */
+
+.digest-body {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 40px 16px 12px;
+  min-height: 0;
+}
+
+.digest-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.digest-title {
+  font: 600 13px var(--font);
+  color: var(--ink);
+}
+
+.digest-when {
+  font: 400 11px var(--font);
+  color: var(--dim-3);
+}
+
+.digest-text {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  font: 400 13px/18px var(--font);
+  color: var(--ink);
+  user-select: text;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
+}
+
+.digest-empty {
+  color: var(--dim-3);
+}
+
+.digest-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 /* ── Quick-ask view (views/quick.ts) ────────────────────────────────────── */
 
 .quick-body {

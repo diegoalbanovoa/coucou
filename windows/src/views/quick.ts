@@ -20,7 +20,7 @@ export function resetQuickAsk() {
 }
 
 /** `<kind>:<detail>` from Rust → the message the user reads. */
-function errorText(raw: unknown): string {
+export function errorText(raw: unknown): string {
   const text = String(raw).replace(/^Error:\s*/, "");
   const cut = text.indexOf(":");
   const kind = cut > 0 ? text.slice(0, cut) : "";

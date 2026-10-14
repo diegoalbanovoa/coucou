@@ -313,3 +313,44 @@ code.path {
   direction: rtl;
   text-align: left;
 }
+
+/* Routines (settings/main.ts routinesSection) */
+.routine-prompt {
+  font: 400 12.5px var(--font);
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  color: var(--ink);
+  padding: 6px 8px;
+  resize: vertical;
+}
+
+.routine-prompt:focus,
+input[type="time"]:focus {
+  outline: none;
+  border-color: rgba(255, 255, 255, 0.28);
+}
+
+input[type="time"] {
+  font: 400 12.5px var(--font);
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  color: var(--ink);
+  padding: 5px 8px;
+  color-scheme: dark;
+}
+
+.routine-days {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.routine-day {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font: 400 12px var(--font);
+  color: var(--dim);
+}

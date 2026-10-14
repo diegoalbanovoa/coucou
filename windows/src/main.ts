@@ -9,6 +9,7 @@ import { loadAgentEnvironment, registerAgentHandlers } from "./island/agent";
 import { rescanOnFocus } from "./views/consoles";
 import { resetQuickAsk } from "./views/quick";
 import { registerHookHandlers } from "./island/hooks";
+import { startRoutineScheduler } from "./island/routines";
 import { registerHealthHandlers } from "./island/health";
 import { registerIntegrationHandlers, refreshConfigured } from "./island/integrations";
 import { setLocale, resolveLocale } from "./i18n/index";
@@ -122,6 +123,14 @@ async function main() {
   window.addEventListener("focus", () => rescanOnFocus());
 
   island.launch();
+
+  // Routines (plan v4, Fase 7): the webview schedules, Rust runs. No timer at
+  // all while no routine is switched on.
+  startRoutineScheduler(island);
+  // Mock mode only: `?view=digest` (or `digest-error`) opens the digest view.
+  if (!IS_TAURI && /^digest/.test(new URLSearchParams(location.search).get("view") ?? "")) {
+    window.setTimeout(() => island.alert("digest"), 7500);
+  }
 
   // In a plain browser there is no wake strip behind the cursor: make the whole
   // page wake the island so the visuals can be checked with `npm run dev`.

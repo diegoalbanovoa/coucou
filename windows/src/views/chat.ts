@@ -1081,6 +1081,7 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
     highlighted = 0;
     syncPalette();
     sending = true;
+    State.chatSending = true;
     Sound.play("send");
 
     // The agent is told where things are rather than handed their bytes: it
@@ -1155,6 +1156,7 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
       State.chatDraft = "";
       State.chatSteps = [];
       sending = false;
+      State.chatSending = false;
       // However the turn ended, this is the conversation the next run resumes.
       keepConversation();
       State.notify();

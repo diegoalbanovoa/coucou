@@ -118,3 +118,25 @@ Decisión D6 no respondida por Diego: se aplicó la recomendada, **opción A** (
   - [ ] Activarla y hacer al asistente rápido una pregunta que encaje: el registro de acciones muestra `load_skill` como `auto-approved`; las demás herramientas siguen pidiendo tarjeta.
   - [ ] En pausa, `load_skill` se rechaza.
   - [ ] Revisor de diseño `coucou-design-reviewer` NO pasado (el constructor no lanza subagentes) sobre Ajustes → Skills.
+
+## Fase 7
+
+D7 no respondida: se hizo la fase (por defecto). D7b = correr si el retraso es ≤ 60 min, si no `missed`. D8 = por defecto: solo abrir `digest`, sin aviso efímero.
+
+- **Arquitectura según el plan:** el webview programa (`island/routines.ts`, `setTimeout`, hora local), Rust ejecuta (`routines::run`: clave del llavero, herramientas por `quick_assistant::execute_tool` → `dispatch`, un `tokio::sync::Mutex` estático para una rutina a la vez). `run_with` es la parte inyectable y probada (pausa → no llama a nada; sin perfil → `no-model:`; sin herramientas → una sola petición sin campo `tools`; con herramientas → el bucle). `quick_loop::run_without_tools` añadido con su test.
+- **Temporizadores:** uno solo, de `min(delta, 30 min)` (mínimo 1 s), y ninguno si no hay rutinas activadas (leído en el código: `arm()` retorna sin programar si `nextDue` es null; no hay `setInterval`). Al despertar recalcula, así la deriva tras suspensión se corrige.
+- **Decisiones donde el plan era ambiguo (opción conservadora):**
+  - Rutinas atrasadas tras una suspensión larga: `dueBetween` deja una sola entrada por rutina (su última hora), para no escribir siete `missed`. Funciones puras extra: `dueBetween`, `sleepFor`, `canOpenDigest` (todas con tests).
+  - Al crear o editar una rutina (`routines-changed`/`settings-changed`) primero se atiende lo vencido con la lista vieja y luego el cursor pasa a "ahora", para que una rutina creada para una hora ya pasada hoy no se dispare.
+  - **Skill de la rutina:** el plan no dice cómo llega con `tools` activado. Se agrega su cuerpo al prompt de sistema (en ambos modos) solo si la skill está activada en Ajustes; si no, se ignora. Texto siempre encuadrado como "never override the user's approvals or the allow-lists".
+  - **"Ejecutar ahora" abre `digest`:** Rust emite el evento `routine-result` tras cada ejecución (programada o manual) y la isla lo escucha; así el programador no maneja el retorno. Solo `done`/`error` abren `digest`; `refused-paused` y `missed` solo quedan en "Últimos resultados".
+  - `digest` se abre con `State.isPinned = true` (no se cierra solo antes de leerse); se cierra con "Cerrar". No llama a `focus_window`. Si la isla está expandida, hay aprobación pendiente, un turno de chat en curso (`State.chatSending`, nuevo) o pausa, queda `State.pendingDigest` y se abre al volver al reposo.
+  - `results.jsonl` se compacta a los 50 últimos al pasar de 200 entradas (el plan solo fija el tope de lectura en 50).
+  - `?view=digest` / `?view=digest-error` en modo mock abren la vista a los ~7,5 s (en `main.ts`, solo `!IS_TAURI`). No se tocó `scripts/shots.mjs`; `npm run shots` completo NO se corrió (verificado con Playwright aparte: digest en/es y Ajustes sin errores de consola).
+- Ajustes → Rutinas: lista, editor en línea, "Ejecutar ahora", Quitar con `inlineConfirm`, últimos resultados y la nota fija.
+- **Pendiente de Diego (manual):**
+  - [ ] Una rutina para dentro de 2 minutos con un perfil de Ollama abre `digest` a su hora con el texto.
+  - [ ] En pausa, la rutina aparece en "Últimos resultados" como rechazada.
+  - [ ] Con `tools` activo y una pregunta que necesite `query_vault`, sale la tarjeta de aprobación; sin clic en 108 s se deniega y la rutina termina igual.
+  - [ ] "Ejecutar ahora" funciona.
+  - [ ] Revisor de diseño `coucou-design-reviewer` NO pasado (el constructor no lanza subagentes) sobre `digest.ts` y Ajustes → Rutinas.

@@ -20,7 +20,8 @@ export type IslandViewName =
   | "settings"
   | "system"
   | "greeting"
-  | "quick";
+  | "quick"
+  | "digest";
 
 export type BotStateName =
   | "idle"
@@ -95,6 +96,8 @@ export const VIEW_LAYOUTS: Record<IslandViewName, ViewLayout> = {
   settings: { height: 160, botX: 54, botY: null, botDiameter: 46, agentMode: "none" },
   // The quick-ask input: no Mochi of its own, like the chat — see views/quick.ts.
   quick: { height: 200, botX: 8, botY: 8, botDiameter: 1, agentMode: "none" },
+  // A routine's result (views/digest.ts): no Mochi of its own, like quick.
+  digest: { height: 320, botX: 8, botY: 8, botDiameter: 1, agentMode: "none" },
   greeting: { height: 150, botX: 320, botY: 90, botDiameter: 0, agentMode: "none" },
 };
 

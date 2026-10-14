@@ -16,6 +16,7 @@ mod platform;
 mod providers;
 mod quick_assistant;
 mod quick_loop;
+mod routines;
 mod secrets;
 mod skills;
 mod settings;
@@ -1076,6 +1077,48 @@ fn quick_app_remove(app: AppHandle, id: String) {
     remember(&app, |s| quick_assistant::remove_app(&mut s.quick_assistant_apps, &id));
 }
 
+// ── Routines (plan v4, Fase 7) ───────────────────────────────────────────────
+
+#[tauri::command]
+fn routine_list() -> Vec<routines::Routine> {
+    routines::list()
+}
+
+#[tauri::command]
+fn routine_save(app: AppHandle, input: routines::RoutineInput) -> Result<routines::Routine, String> {
+    let saved = routines::save(input)?;
+    let _ = app.emit("routines-changed", ());
+    Ok(saved)
+}
+
+#[tauri::command]
+fn routine_delete(app: AppHandle, id: String) -> Result<(), String> {
+    routines::delete(&id)?;
+    let _ = app.emit("routines-changed", ());
+    Ok(())
+}
+
+/// Runs a routine now (the scheduler's hour, or "Run now"). Rust runs it: the
+/// webview only says which one. Everything goes through `dispatch`.
+#[tauri::command]
+async fn routine_run(app: AppHandle, id: String) -> Result<routines::RoutineResult, String> {
+    let routine = routines::load(&id).ok_or_else(|| "unknown routine".to_string())?;
+    let settings = shared_settings(&app);
+    Ok(routines::run(&app, &settings, &routine).await)
+}
+
+#[tauri::command]
+fn routine_results(limit: Option<usize>) -> Vec<routines::RoutineResult> {
+    routines::recent_results(limit.unwrap_or(10))
+}
+
+/// Writes a `missed` result and nothing else: the hour passed while the app was
+/// suspended for longer than the window allows.
+#[tauri::command]
+fn routine_mark_missed(id: String) -> Option<routines::RoutineResult> {
+    routines::mark_missed(&id)
+}
+
 // ── Skills (plan v4, Fase 6) ─────────────────────────────────────────────────
 
 /// A skill folder whose import stopped at `exists:<name>`, kept (in memory, as
@@ -1375,6 +1418,12 @@ pub fn run() {
             quick_app_add,
             quick_app_remove,
             quick_log,
+            routine_list,
+            routine_save,
+            routine_delete,
+            routine_run,
+            routine_results,
+            routine_mark_missed,
             skill_list,
             skill_import,
             skill_delete,

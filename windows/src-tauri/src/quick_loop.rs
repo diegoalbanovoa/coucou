@@ -150,6 +150,32 @@ pub fn parse_completion(body: &Value) -> Result<Completion, String> {
     Ok(Completion { message, text, calls })
 }
 
+/// One round with no `tools` field at all: what a routine without the tools
+/// permission runs. The model cannot ask for anything, so nothing needs a click.
+pub async fn run_without_tools<P, PF>(
+    system: String,
+    prompt: &str,
+    model: &str,
+    mut post: P,
+) -> Result<(String, Usage), String>
+where
+    P: FnMut(Value) -> PF,
+    PF: Future<Output = Result<Value, String>>,
+{
+    let body = json!({
+        "model": model,
+        "messages": [
+            {"role": "system", "content": system},
+            {"role": "user", "content": prompt},
+        ],
+        "stream": false,
+    });
+    let answer = post(body).await?;
+    let usage = usage::from_openai_usage(&answer).unwrap_or_default();
+    let completion = parse_completion(&answer)?;
+    Ok((completion.text, usage))
+}
+
 /// The loop. `post` sends a request body and returns the parsed answer;
 /// `exec` runs one tool call and returns the text to hand back. Returns the
 /// model's final plain-text reply, with the tokens (and cost, if reported)
@@ -315,6 +341,25 @@ mod tests {
         assert_eq!(last["role"], "tool");
         assert_eq!(last["tool_call_id"], "c1");
         assert_eq!(last["content"], "briefing text");
+    }
+
+    #[tokio::test]
+    async fn a_run_without_tools_sends_no_tools_field_and_one_request() {
+        let sent = RefCell::new(Vec::new());
+        let answer = json!({"choices": [{"message": {"content": "digest"}}], "usage": {"prompt_tokens": 5, "completion_tokens": 2}});
+        let out = run_without_tools("sys".into(), "go", "m", |body| {
+            sent.borrow_mut().push(body);
+            let a = answer.clone();
+            async move { Ok(a) }
+        })
+        .await
+        .unwrap();
+        assert_eq!(out.0, "digest");
+        assert_eq!(out.1.input_tokens, Some(5));
+        let sent = sent.borrow();
+        assert_eq!(sent.len(), 1);
+        assert!(sent[0].get("tools").is_none());
+        assert_eq!(sent[0]["messages"][0]["role"], "system");
     }
 
     #[tokio::test]

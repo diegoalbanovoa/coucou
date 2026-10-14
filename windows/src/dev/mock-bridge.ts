@@ -17,6 +17,7 @@ import { State } from "../core/state";
 import { MOCK_CONSOLES, MOCK_LIVE_SESSIONS } from "./fixtures/consoles";
 import { MOCK_ACTIVE_INTEGRATIONS, MOCK_INTEGRATION_DATA } from "./fixtures/integrations";
 import { MOCK_CHAT_MESSAGES } from "./fixtures/chat";
+import { MOCK_ROUTINES, MOCK_ROUTINE_RESULTS } from "./fixtures/routines";
 import { MOCK_CPU, MOCK_PROCESSES, MOCK_SCENARIOS, MOCK_USAGE, type MockScenario } from "./fixtures/system";
 
 export const IS_TAURI = false;
@@ -296,6 +297,53 @@ async function memoryClear() {
   mockNotes = [];
 }
 
+let mockRoutines = [...MOCK_ROUTINES];
+let mockResults = [...MOCK_ROUTINE_RESULTS];
+
+// `?view=digest` shows the digest view with the "done" fixture (main.ts opens it).
+if (params.get("view") === "digest") State.lastRoutineResult = MOCK_ROUTINE_RESULTS[0];
+if (params.get("view") === "digest-error") State.lastRoutineResult = MOCK_ROUTINE_RESULTS[1];
+
+async function routineList() {
+  return mockRoutines;
+}
+
+async function routineSave(input: Record<string, unknown>) {
+  const id = (input.id as string | undefined) || `r-${Date.now()}`;
+  const saved = { ...input, id } as (typeof mockRoutines)[number];
+  mockRoutines = [...mockRoutines.filter((r) => r.id !== id), saved];
+  return saved;
+}
+
+async function routineDelete(id: string) {
+  mockRoutines = mockRoutines.filter((r) => r.id !== id);
+}
+
+async function routineRun(id: string) {
+  const routine = mockRoutines.find((r) => r.id === id);
+  const result = {
+    routineId: id,
+    label: routine?.label ?? id,
+    at: Date.now(),
+    ok: true,
+    outcome: "done",
+    text: "Mock digest: nothing ran for real.",
+  };
+  mockResults = [result, ...mockResults];
+  return result;
+}
+
+async function routineResults(limit: number) {
+  return mockResults.slice(0, limit);
+}
+
+async function routineMarkMissed(id: string) {
+  const routine = mockRoutines.find((r) => r.id === id);
+  const result = { routineId: id, label: routine?.label ?? id, at: Date.now(), ok: false, outcome: "missed", text: "" };
+  mockResults = [result, ...mockResults];
+  return result;
+}
+
 let mockSkills: { name: string; description: string; enabled: boolean; ignored: string[] }[] = [
   { name: "meeting-notes", description: "Turn rough meeting notes into decisions and action items.", enabled: true, ignored: [] },
 ];
@@ -322,7 +370,7 @@ async function skillSetEnabled(name: string, enabled: boolean) {
 }
 
 async function memoryPath() {
-  return "C:\Users\diego\AppData\Local\Coucou\memory";
+  return "C:/Users/diego/AppData/Local/Coucou/memory";
 }
 
 async function systemEndProcess(targets: { pid: number; startTime: string }[]) {
@@ -470,6 +518,12 @@ export const Bridge = {
   memoryDelete,
   memoryClear,
   memoryPath,
+  routineList,
+  routineSave,
+  routineDelete,
+  routineRun,
+  routineResults,
+  routineMarkMissed,
   skillList,
   skillImport,
   skillDelete,

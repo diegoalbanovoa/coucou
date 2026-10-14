@@ -2,7 +2,7 @@
 
 import type { BotEmoteName, BotStateName, IslandMode, IslandViewName } from "./layout";
 import type { EyeShape } from "../mochi/engine";
-import type { ChatAttachment, DroppedFile, HealthEvent } from "./bridge";
+import type { ChatAttachment, DroppedFile, HealthEvent, RoutineResult } from "./bridge";
 
 export type AgentSource = "claudeCode" | "n8n" | "agent";
 export type PillBadge = "approval" | "finished" | "error";
@@ -258,6 +258,14 @@ class AppState {
    *  images; kindOf() in views/chat.ts sorts a dropped/picked/pasted one into
    *  the right tray glyph. Not sent until the message is. */
   chatAttachments: DroppedFile[] = [];
+
+  /** Whether a chat turn is in flight (views/chat.ts sets it). A routine's
+   *  digest never opens over one. */
+  chatSending = false;
+  /** The last routine result that ran to an end (plan v4, Fase 7). */
+  lastRoutineResult: RoutineResult | null = null;
+  /** A digest is waiting for the island to be collapsed and idle. */
+  pendingDigest = false;
 
   integrations: Record<string, IntegrationInfo> = {};
 

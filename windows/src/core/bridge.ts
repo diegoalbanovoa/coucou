@@ -158,6 +158,16 @@ export const Bridge = {
    *  (kept in memory by Rust, never written anywhere). */
   usageSummary: () => call<BackendSummary[]>("usage_summary"),
   usageReset: () => call<void>("usage_reset"),
+  // ── Routines (plan v4, Fase 7) ────────────────────────────────────────────
+  routineList: () => call<Routine[]>("routine_list"),
+  routineSave: (input: RoutineInput) => callOrThrow<Routine>("routine_save", { input }),
+  routineDelete: (id: string) => callOrThrow<void>("routine_delete", { id }),
+  /** Rust runs it (key, tools, approvals); the webview only says which one.
+   *  The result also arrives on the "routine-result" event. */
+  routineRun: (id: string) => callOrThrow<RoutineResult>("routine_run", { id }),
+  routineResults: (limit: number) => call<RoutineResult[]>("routine_results", { limit }),
+  /** Writes a `missed` result and nothing else. */
+  routineMarkMissed: (id: string) => call<RoutineResult | null>("routine_mark_missed", { id }),
   /** Imported skills — instructions only; nothing in them is ever run. */
   skillList: () => call<SkillView[]>("skill_list"),
   /** Picks a skill folder and imports its SKILL.md. Null when cancelled; rejects
@@ -287,6 +297,34 @@ export interface MemoryNote {
   id: string;
   at: number;
   text: string;
+}
+
+/** A scheduled routine (routines.rs's `Routine`). `days` is 0 (Sunday) to 6, as
+ *  `Date.getDay()`; `time` is "HH:MM" local, 24 h. */
+export interface Routine {
+  id: string;
+  label: string;
+  prompt: string;
+  profileId: string;
+  time: string;
+  days: number[];
+  tools: boolean;
+  skill: string | null;
+  enabled: boolean;
+}
+
+/** What the settings window sends: no `id` creates. */
+export type RoutineInput = Omit<Routine, "id"> & { id?: string };
+
+/** `outcome` is "done", "error", "refused-paused" or "missed". For an error,
+ *  `text` is a `<kind>:<detail>` string, as quick-ask's. */
+export interface RoutineResult {
+  routineId: string;
+  label: string;
+  at: number;
+  ok: boolean;
+  text: string;
+  outcome: string;
 }
 
 /** An imported skill (skills.rs's `SkillView`). `ignored` lists what the source

@@ -3,10 +3,10 @@
 // integrations land here too in a later stage.
 
 import "./settings.css";
-import { Bridge, onEvent, type HookStatus } from "../core/bridge";
+import { Bridge, onEvent, type HookStatus, type Routine, type RoutineResult } from "../core/bridge";
 import { DEFAULT_SETTINGS, type Settings } from "../core/state";
 import { h, clear } from "../views/dom";
-import { t, tn, fmtPercent, setLocale, resolveLocale, type LocaleSetting } from "../i18n/index";
+import { t, tn, fmtPercent, fmtRelative, setLocale, resolveLocale, type LocaleSetting } from "../i18n/index";
 import { segmented } from "../ui/segmented";
 import { inlineConfirm } from "../ui/inline-confirm";
 
@@ -738,6 +738,186 @@ function memorySection(): HTMLElement {
   return h("section", {}, h("h2", {}, h("span", { text: t("settings.memory.title") })), body);
 }
 
+// ── Routines section ─────────────────────────────────────────────────────────
+
+/** The result's outcome, as the words the user reads. */
+function routineOutcomeLabel(outcome: string): string {
+  switch (outcome) {
+    case "done": return t("settings.routines.outcomeDone");
+    case "error": return t("settings.routines.outcomeError");
+    case "refused-paused": return t("settings.routines.outcomePaused");
+    default: return t("settings.routines.outcomeMissed");
+  }
+}
+
+/** Short weekday names for 0 (Sunday) to 6, in the interface language. 1 Jan
+ *  2023 was a Sunday. */
+function weekdayNames(): string[] {
+  const fmt = new Intl.DateTimeFormat(resolveLocale(settings.language), { weekday: "short" });
+  return [0, 1, 2, 3, 4, 5, 6].map((d) => fmt.format(new Date(2023, 0, 1 + d)));
+}
+
+/**
+ * Scheduled routines: a prompt, a provider profile, a time and some days. They
+ * only run while Coucou is open (the webview schedules, Rust runs). The editor
+ * is inline, not a window; "tools" is off by default and every action it asks
+ * for still shows its approval card.
+ */
+function routinesSection(): HTMLElement {
+  const body = h("div", { style: "display:flex;flex-direction:column;gap:12px" });
+  let editing: Partial<Routine> | null = null;
+  let removing: string | null = null;
+  let running: string | null = null;
+  let error: string | null = null;
+
+  async function persist(routine: Routine) {
+    try {
+      await Bridge.routineSave(routine);
+      error = null;
+    } catch (err) {
+      error = String(err).replace(/^Error:\s*/, "");
+    }
+  }
+
+  function editor(profiles: { id: string; label: string }[], skills: string[]): HTMLElement {
+    const draft = editing!;
+    const label = h("input", { type: "text", value: draft.label ?? "", placeholder: t("settings.routines.label") }) as HTMLInputElement;
+    const prompt = h("textarea", { rows: "4", placeholder: t("settings.routines.prompt"), class: "routine-prompt" }) as HTMLTextAreaElement;
+    prompt.value = draft.prompt ?? "";
+    const profile = h("select", {}) as HTMLSelectElement;
+    profile.append(h("option", { value: "", text: t("settings.routines.profileNone") }));
+    for (const p of profiles) profile.append(h("option", { value: p.id, text: p.label }));
+    profile.value = draft.profileId ?? "";
+    const time = h("input", { type: "time", value: draft.time ?? "08:00" }) as HTMLInputElement;
+    const chosenDays = new Set<number>(draft.days ?? [1, 2, 3, 4, 5]);
+    const dayBoxes = weekdayNames().map((name, d) => {
+      const box = h("input", { type: "checkbox" }) as HTMLInputElement;
+      box.checked = chosenDays.has(d);
+      box.addEventListener("change", () => {
+        if (box.checked) chosenDays.add(d);
+        else chosenDays.delete(d);
+      });
+      return h("label", { class: "routine-day" }, box, h("span", { text: name }));
+    });
+    const skill = h("select", {}) as HTMLSelectElement;
+    skill.append(h("option", { value: "", text: t("settings.routines.skillNone") }));
+    for (const s of skills) skill.append(h("option", { value: s, text: s }));
+    skill.value = draft.skill ?? "";
+    let tools = draft.tools ?? false;
+
+    const save = async () => {
+      await persist({
+        id: draft.id ?? "",
+        label: label.value,
+        prompt: prompt.value,
+        profileId: profile.value,
+        time: time.value,
+        days: [...chosenDays].sort(),
+        tools,
+        skill: skill.value || null,
+        enabled: draft.enabled ?? true,
+      });
+      if (!error) editing = null;
+      await draw();
+    };
+
+    return h("div", { style: "display:flex;flex-direction:column;gap:8px" },
+      h("div", { class: "row" }, h("label", { text: t("settings.routines.label") }), label),
+      prompt,
+      h("div", { class: "row" }, h("label", { text: t("settings.routines.profile") }), profile),
+      h("div", { class: "row" }, h("label", { text: t("settings.routines.time") }), time),
+      h("div", { class: "row" }, h("label", { text: t("settings.routines.days") }), h("div", { class: "routine-days" }, ...dayBoxes)),
+      h("div", { class: "row" }, h("label", { text: t("settings.routines.skill") }), skill),
+      h("div", { class: "row" },
+        h("label", { text: t("settings.routines.tools") }),
+        toggle(tools, (v) => { tools = v; }),
+      ),
+      h("div", { class: "hint", text: t("settings.routines.toolsHint") }),
+      ...(error ? [h("div", { class: "notice err", text: error })] : []),
+      h("div", { class: "row" },
+        h("button", { class: "primary", text: t("settings.routines.save"), onclick: () => void save() }),
+        h("button", { text: t("settings.routines.cancel"), onclick: () => { editing = null; error = null; void draw(); } }),
+      ),
+    );
+  }
+
+  function resultLine(r: RoutineResult): HTMLElement {
+    return h("div", { class: "hint" },
+      `${r.label} · ${routineOutcomeLabel(r.outcome)} · ${fmtRelative(r.at, resolveLocale(settings.language))}`);
+  }
+
+  async function draw() {
+    const [routines, profiles, skills, results] = await Promise.all([
+      Bridge.routineList(),
+      Bridge.providerList(),
+      Bridge.skillList(),
+      Bridge.routineResults(10),
+    ]);
+    clear(body);
+    const names = weekdayNames();
+    const profileList = (profiles ?? []).map((p) => ({ id: p.id, label: p.label }));
+    const enabledSkills = (skills ?? []).filter((s) => s.enabled).map((s) => s.name);
+
+    const rows = (routines ?? []).map((r) => {
+      const confirm = removing === r.id
+        ? inlineConfirm({
+            message: t("settings.routines.removeConfirm"),
+            confirmLabel: t("settings.routines.remove"),
+            cancelLabel: t("settings.routines.cancel"),
+            destructive: true,
+            onConfirm: async () => { removing = null; await Bridge.routineDelete(r.id); await draw(); },
+            onCancel: () => { removing = null; void draw(); },
+          })
+        : null;
+      return h("div", { style: "display:flex;flex-direction:column;gap:4px" },
+        h("div", { class: "row" },
+          h("code", { class: "path", text: r.label, title: r.prompt }),
+          h("span", { class: "hint", text: `${r.time} · ${r.days.map((d) => names[d]).join(" ")}` }),
+          toggle(r.enabled, (v) => { void persist({ ...r, enabled: v }).then(draw); }),
+        ),
+        h("div", { class: "row" },
+          h("button", {
+            text: running === r.id ? t("settings.routines.running") : t("settings.routines.runNow"),
+            disabled: running !== null,
+            onclick: async () => {
+              running = r.id;
+              await draw();
+              try { await Bridge.routineRun(r.id); } catch { /* the result list shows it */ }
+              running = null;
+              await draw();
+            },
+          }),
+          h("button", { text: t("settings.routines.edit"), onclick: () => { editing = { ...r }; error = null; void draw(); } }),
+          h("button", { text: t("settings.routines.remove"), onclick: () => { removing = r.id; void draw(); } }),
+        ),
+        ...(confirm ? [confirm] : []),
+      );
+    });
+
+    body.append(
+      h("div", { class: "hint", text: t("settings.routines.note") }),
+      ...(rows.length === 0 && !editing ? [h("div", { class: "hint", text: t("settings.routines.none") })] : rows),
+      ...(editing
+        ? [editor(profileList, enabledSkills)]
+        : [h("div", { class: "row" }, h("button", {
+            text: t("settings.routines.add"),
+            onclick: () => { editing = {}; error = null; void draw(); },
+          }))]),
+      h("div", { class: "row" }, h("label", { text: t("settings.routines.results") })),
+      ...((results ?? []).length === 0
+        ? [h("div", { class: "hint", text: t("settings.routines.noResults") })]
+        : (results ?? []).map(resultLine)),
+    );
+  }
+
+  void draw();
+  // A routine saved or run elsewhere shows up without reopening the window.
+  void onEvent<null>("routines-changed", () => void draw());
+  void onEvent<RoutineResult>("routine-result", () => void draw());
+
+  return h("section", {}, h("h2", {}, h("span", { text: t("settings.routines.title") })), body);
+}
+
 // ── General section ───────────────────────────────────────────────────────────
 
 function generalSection(): HTMLElement {
@@ -896,6 +1076,7 @@ function render() {
     vaultSection(),
     quickSection(),
     memorySection(),
+    routinesSection(),
     generalSection(),
     healthSection(),
     integrationsSection(secretsPresent),
