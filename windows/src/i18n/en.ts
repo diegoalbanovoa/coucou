@@ -437,7 +437,7 @@ export const en = {
     errEndpoint: "The model failed: {detail}",
     settings: {
       title: "Quick assistant",
-      intro: "A global shortcut opens a blank input. It can search and read only the folders you allow, open only the apps you allow, and check your vault. You approve each action, except reading inside an allowed folder.",
+      intro: "A global shortcut opens a blank input. It can search and read only the folders you allow, open only the apps you allow, and check your vault. You approve each action, except reading inside an allowed folder. Files that usually hold secrets (.env, keys) are never read, and credentials are hidden before they reach the model.",
       shortcut: "Shortcut",
       shortcutPlaceholder: "ctrl+shift+space",
       apply: "Apply",

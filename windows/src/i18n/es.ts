@@ -417,7 +417,7 @@ export const es: Messages = {
     errEndpoint: "El modelo falló: {detail}",
     settings: {
       title: "Asistente rápido",
-      intro: "Un atajo global abre una entrada en blanco. Solo puede buscar y leer en las carpetas que permitas, abrir solo las apps que permitas y consultar tu vault. Apruebas cada acción, salvo leer dentro de una carpeta permitida.",
+      intro: "Un atajo global abre una entrada en blanco. Solo puede buscar y leer en las carpetas que permitas, abrir solo las apps que permitas y consultar tu vault. Apruebas cada acción, salvo leer dentro de una carpeta permitida. Los archivos que suelen guardar secretos (.env, claves) nunca se leen, y las credenciales se ocultan antes de llegar al modelo.",
       shortcut: "Atajo",
       shortcutPlaceholder: "ctrl+shift+space",
       apply: "Aplicar",
