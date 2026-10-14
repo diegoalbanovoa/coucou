@@ -10,6 +10,7 @@ mod i18n;
 mod integrations;
 mod island;
 mod log;
+mod memory;
 mod pipe;
 mod platform;
 mod providers;
@@ -618,6 +619,7 @@ fn chat_keep(messages: Vec<transcript::Message>) {
 fn chat_forget(app: AppHandle) {
     app.state::<agent::Session>().reset();
     transcript::clear();
+    memory::forget_summary();
     remember(&app, |s| s.agent_session = None);
 }
 
@@ -818,11 +820,92 @@ async fn provider_send(
         let _ = emitter.emit("agent-turn", turn);
     };
     let cancel = app.state::<agent::Cancel>();
-    let result = providers::send(&profile, &history.unwrap_or_default(), &prompt, &cancel, &on).await;
+    let history = history.unwrap_or_default();
+    let memory = memory_context(&app, &profile, &history, &prompt).await;
+    let result = providers::send(&profile, &history, memory.as_ref(), &prompt, &cancel, &on).await;
     let used = result.as_ref().map(|r| r.usage.clone()).unwrap_or_default();
     app.state::<usage::Ledger>()
         .record(clock.record(format!("provider:{}", profile.id), profile.label.clone(), used, result.is_ok()));
     result.map(|reply| reply.text).map_err(|e| e.message())
+}
+
+/// What memory adds to a provider turn, or `None` when it is off (the default:
+/// the request is then exactly the one without memory). Notes are retrieved by
+/// keyword; with the automatic summary on, the part of the conversation that
+/// does not fit is summarized by one non-streaming call to the same profile,
+/// cached until what it covers changes. A failed summary is logged and skipped.
+async fn memory_context(
+    app: &AppHandle,
+    profile: &providers::ProviderProfile,
+    history: &[providers::HistoryMessage],
+    prompt: &str,
+) -> Option<providers::MemoryContext> {
+    let settings = shared_settings(app);
+    if !settings.memory_enabled {
+        return None;
+    }
+    let notes = memory::retrieve(&memory::list_notes(), prompt, memory::RETRIEVE_K, memory::RETRIEVE_MAX_CHARS)
+        .into_iter()
+        .map(|n| n.text)
+        .collect();
+    let mut summary = None;
+    if settings.memory_auto_summary {
+        let dropped = providers::dropped_by_fit(history, providers::HISTORY_BUDGET_CHARS);
+        if !dropped.is_empty() {
+            let covered: Vec<(String, String)> = dropped.iter().map(|m| (m.role.clone(), m.content.clone())).collect();
+            summary = match memory::cached_summary(&covered) {
+                Some(cached) => Some(cached),
+                None => {
+                    let clock = usage::Clock::start();
+                    let result = summarize(profile, &dropped).await;
+                    let used = result.as_ref().map(|(_, u)| u.clone()).unwrap_or_default();
+                    app.state::<usage::Ledger>().record(clock.record(
+                        format!("provider:{}", profile.id),
+                        format!("{} (summary)", profile.label),
+                        used,
+                        result.is_ok(),
+                    ));
+                    match result {
+                        Ok((text, _)) if !text.trim().is_empty() => {
+                            memory::store_summary(&covered, &text);
+                            Some(text)
+                        }
+                        Ok(_) => None,
+                        Err(err) => {
+                            log::line(format!("memory: the conversation summary failed ({err}) — sending without it"));
+                            None
+                        }
+                    }
+                }
+            };
+        }
+    }
+    Some(providers::MemoryContext { notes, summary })
+}
+
+/// One non-streaming call that condenses the dropped messages.
+async fn summarize(
+    profile: &providers::ProviderProfile,
+    dropped: &[providers::HistoryMessage],
+) -> Result<(String, usage::Usage), String> {
+    let transcript: String = dropped
+        .iter()
+        .map(|m| format!("{}: {}", m.role, m.content))
+        .collect::<Vec<_>>()
+        .join("
+");
+    let body = serde_json::json!({
+        "model": profile.model,
+        "messages": [
+            {"role": "system", "content": "Summarize the following conversation in at most 150 words. Keep names, decisions and open questions. Output only the summary."},
+            {"role": "user", "content": transcript},
+        ],
+    });
+    let key = secrets::get(&providers::key_for(&profile.id));
+    let reply = quick_loop::post_completion(profile, key.as_deref(), body).await?;
+    let text = reply["choices"][0]["message"]["content"].as_str().unwrap_or_default().to_string();
+    let used = usage::from_openai_usage(&reply).unwrap_or_default();
+    Ok((text, used))
 }
 
 /// The models a local Ollama server has, or an empty list when none
@@ -877,6 +960,34 @@ async fn quick_ask(app: AppHandle, prompt: String) -> Result<String, String> {
 #[tauri::command]
 fn usage_summary(ledger: State<usage::Ledger>) -> Vec<usage::BackendSummary> {
     ledger.summary()
+}
+
+// ── Memory (plan v4, Fase 5) ──────────────────────────────────────────────────
+
+#[tauri::command]
+fn memory_notes() -> Vec<memory::Note> {
+    memory::list_notes()
+}
+
+#[tauri::command]
+fn memory_add(text: String) -> Result<memory::Note, String> {
+    memory::add_note(&text)
+}
+
+#[tauri::command]
+fn memory_delete(id: String) -> Result<(), String> {
+    memory::delete_note(&id)
+}
+
+#[tauri::command]
+fn memory_clear() -> Result<(), String> {
+    memory::clear_notes()
+}
+
+/// Where the notes live, shown as plain text in Settings.
+#[tauri::command]
+fn memory_path() -> String {
+    memory::dir().display().to_string()
 }
 
 #[tauri::command]
@@ -1149,6 +1260,11 @@ pub fn run() {
             ollama_detect,
             usage_summary,
             usage_reset,
+            memory_notes,
+            memory_add,
+            memory_delete,
+            memory_clear,
+            memory_path,
             system_stats,
             system_scan,
             system_clean,

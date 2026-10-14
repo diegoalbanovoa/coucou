@@ -158,6 +158,13 @@ export const Bridge = {
    *  (kept in memory by Rust, never written anywhere). */
   usageSummary: () => call<BackendSummary[]>("usage_summary"),
   usageReset: () => call<void>("usage_reset"),
+  /** Pinned notes for the provider chat. Stored by Rust, never a key. */
+  memoryNotes: () => call<MemoryNote[]>("memory_notes"),
+  memoryAdd: (text: string) => callOrThrow<MemoryNote>("memory_add", { text }),
+  memoryDelete: (id: string) => callOrThrow<void>("memory_delete", { id }),
+  memoryClear: () => callOrThrow<void>("memory_clear"),
+  /** The folder the notes live in, shown as plain text. */
+  memoryPath: () => call<string>("memory_path"),
   /** Ends the named ones. Refused in Rust, not only hidden here, for anything
    *  protected or whose startTime no longer matches the pid. Returns the
    *  pids that could not be ended. */
@@ -266,6 +273,13 @@ export interface HealthEvent {
   cpu: number;
   memory: number;
   disk: number;
+}
+
+/** A note the user pinned for the provider chat (memory.rs's `Note`). */
+export interface MemoryNote {
+  id: string;
+  at: number;
+  text: string;
 }
 
 /** One backend's row of the Usage pane (usage.rs's `BackendSummary`). A field

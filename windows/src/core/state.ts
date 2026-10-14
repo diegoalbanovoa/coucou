@@ -137,6 +137,11 @@ export interface Settings {
   quickAssistantFolders: string[];
   /** Apps open_app may launch. */
   quickAssistantApps: AllowedApp[];
+
+  /** Memory for the provider chat (plan v4, Fase 5). Off by default. */
+  memoryEnabled: boolean;
+  /** One extra model call when the conversation outgrows the context budget. */
+  memoryAutoSummary: boolean;
 }
 
 /** One entry of the quick assistant's app allow-list. */
@@ -176,6 +181,8 @@ export const DEFAULT_SETTINGS: Settings = {
   quickAssistantProfile: null,
   quickAssistantFolders: [],
   quickAssistantApps: [],
+  memoryEnabled: false,
+  memoryAutoSummary: false,
 };
 
 type Listener = () => void;

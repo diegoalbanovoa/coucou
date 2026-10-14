@@ -85,3 +85,19 @@ Hecho: línea base, notas, listas de prueba, regeneración de `windows/_prive/es
 - **Revisor de diseño (`coucou-design-reviewer`): NO pasado.** El constructor no puede lanzar subagentes. Revisión manual: solo tokens de `tokens.css` (`--c-label`, `--c-label-2`, `--t-footnote`, `--s-1`), sin iconos nuevos, sin `alert/confirm`, `inlineConfirm` para borrar, sin animaciones nuevas. **Pendiente:** pasar el revisor.
 - **Prueba manual pendiente de Diego:** un turno con Claude Code, uno con Ollama y uno con el asistente rápido aparecen como tres filas con cifras plausibles, y la de Claude Code muestra coste.
 
+
+## Fase 5
+
+Decisión D5 no respondida por Diego: se aplicó el valor por defecto del plan (solo chat de proveedor, apagada por defecto, notas fijadas + autorresumen opcional + búsqueda por palabras clave, sin crates; D5b embeddings diferido a después de v4).
+
+- **Módulo `memory.rs`** en `local_dir()/memory/` (`notes.jsonl`, `summary.json`). Funciones puras `normalize`, `tokens`, `retrieve` (TF-IDF, `idf = ln(1 + N/df)`), tabla de reemplazo de diacríticos sin crates; ~40 stopwords en/es. Empates de puntuación: gana la nota más nueva.
+- **Sin memoria (por defecto) el cuerpo es idéntico al de la Fase 2**: `build_messages(history, None, prompt)`; test que lo comprueba (`memory_adds_one_system_message_first_and_none_leaves_the_body_alone`).
+- **Resumen:** `lib.rs::memory_context` + `summarize` (una llamada sin streaming con `quick_loop::post_completion`), registrada en el ledger como `provider:<id>` / `<label> (summary)`. Caché por hash (`DefaultHasher`) de los mensajes cubiertos; solo cubre lo que `fit_history` descartó (`providers::dropped_by_fit`). El resumen se regenera entero si cambia lo cubierto (no incremental): ambigüedad del plan, opción más simple y reversible.
+- **Desviación menor:** "Recordar" da feedback en el propio botón (icono check y tooltip `chat.remembered`) en vez de `toast(...)`, porque `replyActions` no tiene un contenedor de toast a mano. La acción aparece solo con `memoryEnabled` y un perfil de proveedor seleccionado.
+- **Ambigüedad:** el plan dice que "Recordar" guarda `content` del mensaje; se guarda el texto de la respuesta (recortado a 2000 caracteres en Rust). Un mensaje vacío se rechaza.
+- `chat_forget` borra `summary.json`; las notas solo se borran desde Ajustes. Añadido el comando auxiliar `memory_path` para mostrar la carpeta.
+- **Pendiente de Diego (manual):**
+  - [ ] Fijar "mi perro se llama Toby", abrir Nuevo chat y preguntar a un perfil "¿cómo se llama mi perro?" → "Toby".
+  - [ ] Con autorresumen activo, una conversación de más de 24 000 caracteres sigue recordando un nombre del principio.
+  - [ ] `Select-String` sobre `%LOCALAPPDATA%\Coucou\memory` no encuentra ninguna clave.
+  - [ ] Revisión visual de Ajustes → Memoria y de la estrella "Recordar" (revisor `coucou-design-reviewer` NO pasado: el constructor no lanza subagentes).

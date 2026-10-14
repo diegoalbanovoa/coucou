@@ -8,6 +8,7 @@ import { DEFAULT_SETTINGS, type Settings } from "../core/state";
 import { h, clear } from "../views/dom";
 import { t, tn, fmtPercent, setLocale, resolveLocale, type LocaleSetting } from "../i18n/index";
 import { segmented } from "../ui/segmented";
+import { inlineConfirm } from "../ui/inline-confirm";
 
 let settings: Settings = { ...DEFAULT_SETTINGS };
 let version = "";
@@ -573,6 +574,88 @@ function quickSection(): HTMLElement {
   return h("section", {}, h("h2", {}, dot, h("span", { text: t("quick.settings.title") })), body);
 }
 
+// ── Memory section ───────────────────────────────────────────────────────────
+
+const NOTE_PREVIEW_CHARS = 80;
+
+/** A note, cut to one line's worth for the list. */
+function notePreview(text: string): string {
+  const flat = text.replace(/\s+/g, " ").trim();
+  return flat.length > NOTE_PREVIEW_CHARS ? `${flat.slice(0, NOTE_PREVIEW_CHARS - 1)}…` : flat;
+}
+
+/**
+ * Memory for the provider chat: two switches (both off), the pinned notes and
+ * where they live. The summary switch is disabled while the first is off.
+ */
+function memorySection(): HTMLElement {
+  const body = h("div", { style: "display:flex;flex-direction:column;gap:12px" });
+  let confirming = false;
+
+  async function draw() {
+    const [notes, path] = await Promise.all([Bridge.memoryNotes(), Bridge.memoryPath()]);
+    clear(body);
+
+    const summaryRow = h("div", { class: "row" },
+      h("label", { text: t("settings.memory.autoSummary") }),
+      toggle(settings.memoryAutoSummary, (v) => { settings.memoryAutoSummary = v; void save(); }),
+      h("span", { class: "hint", text: t("settings.memory.autoSummaryHint") }),
+    );
+    if (!settings.memoryEnabled) {
+      summaryRow.style.opacity = "0.5";
+      summaryRow.style.pointerEvents = "none";
+      summaryRow.setAttribute("aria-disabled", "true");
+    }
+
+    const list = h("div", { style: "display:flex;flex-direction:column;gap:6px" },
+      ...((notes ?? []).length === 0
+        ? [h("div", { class: "hint", text: t("settings.memory.none") })]
+        : (notes ?? []).map((n) =>
+            h("div", { class: "row" },
+              h("code", { class: "path", text: notePreview(n.text), title: n.text }),
+              h("button", {
+                text: t("settings.memory.remove"),
+                onclick: async () => { await Bridge.memoryDelete(n.id); await draw(); },
+              }),
+            ))),
+    );
+
+    const clearAll = confirming
+      ? inlineConfirm({
+          message: t("settings.memory.clearConfirm"),
+          confirmLabel: t("settings.memory.clearAll"),
+          cancelLabel: t("settings.memory.neverMind"),
+          destructive: true,
+          onConfirm: async () => { confirming = false; await Bridge.memoryClear(); await draw(); },
+          onCancel: () => { confirming = false; void draw(); },
+        })
+      : h("button", {
+          text: t("settings.memory.clearAll"),
+          onclick: () => { confirming = true; void draw(); },
+        });
+
+    body.append(
+      h("div", { class: "hint", text: t("settings.memory.intro") }),
+      h("div", { class: "row" },
+        h("label", { text: t("settings.memory.enabled") }),
+        toggle(settings.memoryEnabled, (v) => { settings.memoryEnabled = v; void save(); void draw(); }),
+      ),
+      summaryRow,
+      h("div", { class: "row" }, h("label", { text: t("settings.memory.notes") })),
+      list,
+      ...((notes ?? []).length > 0 ? [h("div", { class: "row" }, clearAll)] : []),
+      h("div", { class: "row" },
+        h("label", { text: t("settings.memory.folder") }),
+        h("code", { class: "path", text: path ?? "", title: path ?? "" }),
+      ),
+    );
+  }
+
+  void draw();
+
+  return h("section", {}, h("h2", {}, h("span", { text: t("settings.memory.title") })), body);
+}
+
 // ── General section ───────────────────────────────────────────────────────────
 
 function generalSection(): HTMLElement {
@@ -730,6 +813,7 @@ function render() {
     chatFolderSection(),
     vaultSection(),
     quickSection(),
+    memorySection(),
     generalSection(),
     healthSection(),
     integrationsSection(secretsPresent),

@@ -115,7 +115,8 @@ function stepsRow(steps: string[], live: boolean): HTMLElement | null {
   return h("div", { class: "steps" }, head, list);
 }
 
-/** Copy — the one thing worth doing to a reply that is already on screen. */
+/** Copy — the one thing worth doing to a reply that is already on screen —
+ *  and, with memory on and a provider profile chatting, "Remember". */
 function replyActions(content: string): HTMLElement {
   const copy = h("button", { class: "msg-btn", title: t("chat.copyReply") }, icon("copy", { size: 10 }));
   copy.addEventListener("click", () => {
@@ -130,7 +131,26 @@ function replyActions(content: string): HTMLElement {
       }, 1400);
     });
   });
-  return h("div", { class: "msg-actions" }, copy);
+  const actions = h("div", { class: "msg-actions" }, copy);
+  if (State.settings.memoryEnabled && State.selectedProvider) {
+    const remember = h("button", { class: "msg-btn", title: t("chat.remember") }, icon("star", { size: 10 }));
+    remember.addEventListener("click", () => {
+      void Bridge.memoryAdd(content).then(
+        () => {
+          clear(remember);
+          remember.append(icon("check", { size: 10 }));
+          remember.title = t("chat.remembered");
+        },
+        () => {
+          clear(remember);
+          remember.append(icon("bang", { size: 10 }));
+          remember.title = t("chat.rememberFailed");
+        },
+      );
+    });
+    actions.append(remember);
+  }
+  return actions;
 }
 
 /** The reply text, folded down when it is long enough to bury the question. */

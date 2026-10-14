@@ -274,6 +274,32 @@ async function usageReset() {
   usageRows = [];
 }
 
+let mockNotes: { id: string; at: number; text: string }[] = [
+  { id: "n1", at: 1, text: "Mi perro se llama Toby" },
+];
+
+async function memoryNotes() {
+  return mockNotes;
+}
+
+async function memoryAdd(text: string) {
+  const note = { id: `n${mockNotes.length + 1}-${Date.now()}`, at: Date.now(), text: text.slice(0, 2000) };
+  mockNotes = [...mockNotes, note];
+  return note;
+}
+
+async function memoryDelete(id: string) {
+  mockNotes = mockNotes.filter((n) => n.id !== id);
+}
+
+async function memoryClear() {
+  mockNotes = [];
+}
+
+async function memoryPath() {
+  return "C:\Users\diego\AppData\Local\Coucou\memory";
+}
+
 async function systemEndProcess(targets: { pid: number; startTime: string }[]) {
   console.info("[mock] system_end_process", targets);
   return [] as number[];
@@ -414,6 +440,11 @@ export const Bridge = {
   systemProcesses,
   usageSummary,
   usageReset,
+  memoryNotes,
+  memoryAdd,
+  memoryDelete,
+  memoryClear,
+  memoryPath,
   systemEndProcess,
   systemOpenDiskCleanup,
   healthState,

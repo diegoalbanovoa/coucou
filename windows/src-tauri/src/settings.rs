@@ -80,6 +80,11 @@ pub struct Settings {
     /// moment they are added, never a string the model supplies at call
     /// time. See design.md decision 5.
     pub quick_assistant_apps: Vec<AllowedApp>,
+
+    // ── Memory (plan v4, Fase 5). Both off: nothing is remembered unless the
+    // user turns it on, and the summary costs one more model call.
+    pub memory_enabled: bool,
+    pub memory_auto_summary: bool,
 }
 
 /// One entry in `Settings.quick_assistant_apps`. `exe` is already resolved
@@ -128,6 +133,8 @@ impl Default for Settings {
             quick_assistant_profile: None,
             quick_assistant_folders: Vec::new(),
             quick_assistant_apps: Vec::new(),
+            memory_enabled: false,
+            memory_auto_summary: false,
         }
     }
 }
@@ -403,7 +410,9 @@ mod tests {
   "quickAssistantShortcut": null,
   "quickAssistantProfile": null,
   "quickAssistantFolders": [],
-  "quickAssistantApps": []
+  "quickAssistantApps": [],
+  "memoryEnabled": true,
+  "memoryAutoSummary": true
 }"#;
 
     fn custom() -> Value {
@@ -736,6 +745,8 @@ mod tests {
                 "quickAssistantProfile",
                 "quickAssistantFolders",
                 "quickAssistantApps",
+                "memoryEnabled",
+                "memoryAutoSummary",
             ]
         );
         let _ = std::fs::remove_dir_all(&dir);
