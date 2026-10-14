@@ -14,6 +14,7 @@ import {
   overallTone,
   size,
   sweptLine,
+  usageRowParts,
 } from "../src/views/system.ts";
 
 const found = (over = {}) => ({
@@ -153,4 +154,48 @@ test("a known agent CLI is recognised with or without the .exe", () => {
 test("an ordinary process is not mistaken for an agent", () => {
   assert.ok(!isAgentProcess("chrome.exe"));
   assert.ok(!isAgentProcess("claude-but-not-really.exe"));
+});
+
+// ── usageRowParts (plan v4, Fase 4) ─────────────────────────────────────────
+
+const usage = (over = {}) => ({
+  backend: "cli:claude",
+  label: "Claude Code",
+  turns: 12,
+  errors: 0,
+  p50FirstTextMs: 2300,
+  p50TotalMs: 14800,
+  inputTokens: 184200,
+  outputTokens: 9120,
+  costUsd: 1.37,
+  ...over,
+});
+
+test("a row with everything reported shows turns, timings, tokens and cost", () => {
+  const parts = usageRowParts(usage(), "en-US");
+  assert.equal(parts.title, "Claude Code");
+  assert.equal(parts.subtitle, "12 turns · first text 2.3 s · total 14.8 s");
+  assert.equal(parts.tokens, "184,200 in · 9,120 out");
+  assert.equal(parts.cost, "$1.37");
+});
+
+test("what the source never reported is left out, not shown as zero", () => {
+  const parts = usageRowParts(usage({ turns: 1, p50FirstTextMs: null, p50TotalMs: 420, inputTokens: null, outputTokens: null, costUsd: null }), "en-US");
+  assert.equal(parts.subtitle, "1 turn · total 420 ms");
+  assert.equal(parts.tokens, null);
+  assert.equal(parts.cost, null);
+});
+
+test("a single reported token count is shown on its own", () => {
+  assert.equal(usageRowParts(usage({ outputTokens: null }), "en-US").tokens, "184,200 in");
+  assert.equal(usageRowParts(usage({ inputTokens: null }), "en-US").tokens, "9,120 out");
+});
+
+test("a tiny cost keeps its precision and the currency follows the locale", () => {
+  assert.equal(usageRowParts(usage({ costUsd: 0.0004 }), "en-US").cost, "$0.0004");
+  assert.match(usageRowParts(usage({ costUsd: 1.37 }), "es-ES").cost, /1,37/);
+});
+
+test("durations use the locale's decimal separator", () => {
+  assert.match(usageRowParts(usage(), "es-ES").subtitle, /first text 2,3 s/);
 });

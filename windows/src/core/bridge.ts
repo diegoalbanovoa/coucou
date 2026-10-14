@@ -154,6 +154,10 @@ export const Bridge = {
   systemClean: (ids: string[]) => call<Swept[]>("system_clean", { ids }),
   /** The heaviest processes right now, ungrouped — see `groupProcesses`. */
   systemProcesses: () => call<ProcInfo[]>("system_processes"),
+  /** Turns, latency, tokens and reported cost per backend, this session only
+   *  (kept in memory by Rust, never written anywhere). */
+  usageSummary: () => call<BackendSummary[]>("usage_summary"),
+  usageReset: () => call<void>("usage_reset"),
   /** Ends the named ones. Refused in Rust, not only hidden here, for anything
    *  protected or whose startTime no longer matches the pid. Returns the
    *  pids that could not be ended. */
@@ -262,6 +266,22 @@ export interface HealthEvent {
   cpu: number;
   memory: number;
   disk: number;
+}
+
+/** One backend's row of the Usage pane (usage.rs's `BackendSummary`). A field
+ *  that is `null` was never reported by the source: it is omitted from the
+ *  row, never shown as zero. */
+export interface BackendSummary {
+  /** `cli:<id>`, `provider:<id>` or `quick:<id>`. */
+  backend: string;
+  label: string;
+  turns: number;
+  errors: number;
+  p50FirstTextMs: number | null;
+  p50TotalMs: number;
+  inputTokens: number | null;
+  outputTokens: number | null;
+  costUsd: number | null;
 }
 
 /** What the System tab reads. */

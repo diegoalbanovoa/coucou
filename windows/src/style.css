@@ -1303,6 +1303,7 @@ input[type="range"]::-webkit-slider-thumb {
 
 .proc-list,
 .drive-list,
+.usage-list,
 .agent-activity-list {
   flex: 1 1 auto;
   min-height: 0;
@@ -1312,6 +1313,29 @@ input[type="range"]::-webkit-slider-thumb {
   gap: 1px;
   scrollbar-width: thin;
   scrollbar-color: var(--c-fill) transparent;
+}
+
+/* ── Usage pane (plan v4, Fase 4) ──────────────────────────────────────── */
+
+.usage-trailing {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  font: var(--t-footnote);
+  color: var(--c-label-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.usage-trailing .usage-cost {
+  color: var(--c-label);
+}
+
+.usage-actions {
+  flex: 0 0 auto;
+  display: flex;
+  justify-content: flex-end;
+  padding-top: var(--s-1);
 }
 
 /* ── Agent activity pane (openspec/changes/agent-activity-panel) ────────── */

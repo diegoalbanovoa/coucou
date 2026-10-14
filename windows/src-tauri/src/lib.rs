@@ -20,6 +20,7 @@ mod settings;
 mod system;
 mod transcript;
 mod tray;
+mod usage;
 mod vault;
 
 use std::process::Command;
@@ -545,6 +546,16 @@ async fn agent_send(app: AppHandle, cli: String, prompt: String) -> Result<Strin
         let _ = emitter.emit("agent-turn", turn);
     };
     let settings = shared_settings(&app);
+    let clock = usage::Clock::start();
+    let on = {
+        let clock = clock.clone();
+        move |turn: agent::Turn| {
+            if matches!(turn, agent::Turn::Text { .. }) {
+                clock.mark_text();
+            }
+            on(turn);
+        }
+    };
 
     // Nothing attached, but a default folder set: the chat runs there. Attached
     // rather than used for this turn alone, so the chip says where it is
@@ -569,12 +580,15 @@ async fn agent_send(app: AppHandle, cli: String, prompt: String) -> Result<Strin
         let found = vault::resolve(settings.vault_path.as_deref());
         agent::Knowledge { briefing: vault::briefing(found.as_deref()), vault: found }
     };
+    let mut used = usage::Usage::default();
     let result = {
         let project = app.state::<agent::Project>();
         let session = app.state::<agent::Session>();
         let cancel = app.state::<agent::Cancel>();
-        agent::send(&project, &session, &cancel, &cli, prompt, &knowledge, &on).await
+        agent::send_measured(&project, &session, &cancel, &cli, prompt, &knowledge, &on, &mut used).await
     };
+    let label = consoles::spec(&cli).map(|s| s.label.to_string()).unwrap_or_else(|| cli.clone());
+    app.state::<usage::Ledger>().record(clock.record(format!("cli:{cli}"), label, used, result.is_ok()));
     // The id is minted inside the first turn, and a resume that failed clears
     // it. Either way, what the next boot should continue has just changed.
     let after = app.state::<agent::Session>().current();
@@ -795,11 +809,20 @@ async fn provider_send(
 ) -> Result<String, String> {
     let profile = providers::load(&profile_id).ok_or_else(|| "unknown provider profile".to_string())?;
     let emitter = app.clone();
+    let clock = usage::Clock::start();
+    let timer = clock.clone();
     let on = move |turn: agent::Turn| {
+        if matches!(turn, agent::Turn::Text { .. }) {
+            timer.mark_text();
+        }
         let _ = emitter.emit("agent-turn", turn);
     };
     let cancel = app.state::<agent::Cancel>();
-    providers::send(&profile, &history.unwrap_or_default(), &prompt, &cancel, &on).await.map_err(|e| e.message())
+    let result = providers::send(&profile, &history.unwrap_or_default(), &prompt, &cancel, &on).await;
+    let used = result.as_ref().map(|r| r.usage.clone()).unwrap_or_default();
+    app.state::<usage::Ledger>()
+        .record(clock.record(format!("provider:{}", profile.id), profile.label.clone(), used, result.is_ok()));
+    result.map(|reply| reply.text).map_err(|e| e.message())
 }
 
 /// The models a local Ollama server has, or an empty list when none
@@ -827,7 +850,8 @@ async fn quick_ask(app: AppHandle, prompt: String) -> Result<String, String> {
     let key = secrets::get(&providers::key_for(&profile.id));
     let system = quick_loop::system_prompt(&settings.quick_assistant_folders, &settings.quick_assistant_apps);
     let post_profile = profile.clone();
-    quick_loop::run(
+    let clock = usage::Clock::start();
+    let result = quick_loop::run(
         system,
         &prompt,
         &profile.model,
@@ -842,7 +866,22 @@ async fn quick_ask(app: AppHandle, prompt: String) -> Result<String, String> {
             async move { quick_assistant::execute_tool(&app, &call.name, &call.args, &settings).await }
         },
     )
-    .await
+    .await;
+    let used = result.as_ref().map(|(_, u)| u.clone()).unwrap_or_default();
+    app.state::<usage::Ledger>()
+        .record(clock.record(format!("quick:{}", profile.id), profile.label.clone(), used, result.is_ok()));
+    result.map(|(text, _)| text)
+}
+
+/// One row per backend that has answered this session. Memory only.
+#[tauri::command]
+fn usage_summary(ledger: State<usage::Ledger>) -> Vec<usage::BackendSummary> {
+    ledger.summary()
+}
+
+#[tauri::command]
+fn usage_reset(ledger: State<usage::Ledger>) {
+    ledger.reset();
 }
 
 #[tauri::command]
@@ -1074,6 +1113,7 @@ pub fn run() {
         .manage(agent::Project::default())
         .manage(agent::Session::default())
         .manage(agent::Cancel::default())
+        .manage(usage::Ledger::default())
         .invoke_handler(tauri::generate_handler![
             boot,
             screen_info,
@@ -1107,6 +1147,8 @@ pub fn run() {
             provider_delete,
             provider_send,
             ollama_detect,
+            usage_summary,
+            usage_reset,
             system_stats,
             system_scan,
             system_clean,

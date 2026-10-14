@@ -71,3 +71,17 @@ Hecho: línea base, notas, listas de prueba, regeneración de `windows/_prive/es
 
 - El historial que recibe un perfil de proveedor incluye también los turnos que respondió una CLI, porque la conversación visible es una sola (D10 por defecto: 24 000 caracteres e incluirlos).
 - El tipo de mensaje del chat es `ChatMessage` en `src/core/state.ts` (roles `user | assistant | error`).
+
+## Fase 4
+
+- **Fixture de la línea `result` de Claude Code: NO verificado contra una línea real.** El plan pide pegar una línea capturada con `claude -p "di hola" --output-format stream-json --verbose`. No se ejecutó (gasta cuota y no hubo permiso explícito de Diego). El test `the_result_line_reports_tokens_and_cost` de `agent.rs` usa la forma documentada (`usage.input_tokens`, `cache_creation_input_tokens`, `cache_read_input_tokens`, `output_tokens`, `total_cost_usd`). **Pendiente:** que Diego (o el constructor con su permiso) capture una línea real y reemplace la constante `RESULT_LINE`.
+- **Salida de `usage` desde `agent::send`:** se eligió una función nueva `agent::send_measured(..., usage_out: &mut Usage)`; `send` la envuelve con un `Usage` descartable. Así no cambia ningún llamador existente (el comando `agent_send` usa `send_measured`; los tests de `agent.rs` siguen con `send`, que queda con `#[cfg_attr(not(test), allow(dead_code))]`). El `Result<String, String>` del comando no cambia.
+- **Asistente rápido:** `quick_loop::run` ahora devuelve `Result<(String, Usage), String>`; los dos tests existentes se ajustaron. No hay streaming en esa ruta, así que su fila solo tiene latencia total (`first_text_ms` queda en `None`).
+- **Reintento de `stream_options`:** `send` repite la petición una sola vez sin `stream_options` si llega 400/422 y recuerda el perfil en `NO_USAGE` (solo memoria, `OnceLock<Mutex<HashSet>>`).
+- **D11:** el ledger vive solo en memoria (tope 500 turnos).
+- **D12 / espacio:** medido con Playwright sobre `npm run dev:mock` a 1x y 1.5x, en en y es: "Procesos · Almacenamiento · Agentes · Uso" cabe sin cortarse (ningún segmento con `scrollWidth > clientWidth`, la barra ocupa exactamente el ancho del contenido). D12 no se activa. Las filas de la lista no desbordan; con más de 1-2 filas la lista hace scroll vertical dentro del alto fijo de 380 px de la vista Sistema (`layout.ts`), igual que la lista de procesos.
+- **`npm run shots` completo no se corrió** (lento y escribe en `windows/shots/`); se usó un script equivalente en el scratchpad solo para el panel Uso.
+- **Hallazgo y arreglo en el mock:** `npm run dev:mock` no cargaba desde `provider-chat-profiles` (`chat.ts` importa `providerKeyFor` y el mock no lo exportaba; tampoco tenía `providerList/Save/Delete`, `ollamaDetect`). Se añadieron solo esos mínimos (sin proveedores guardados, sin Ollama) para poder verificar la UI. Se anota que `npm run shots` llevaba roto desde v3 por esto.
+- **Revisor de diseño (`coucou-design-reviewer`): NO pasado.** El constructor no puede lanzar subagentes. Revisión manual: solo tokens de `tokens.css` (`--c-label`, `--c-label-2`, `--t-footnote`, `--s-1`), sin iconos nuevos, sin `alert/confirm`, `inlineConfirm` para borrar, sin animaciones nuevas. **Pendiente:** pasar el revisor.
+- **Prueba manual pendiente de Diego:** un turno con Claude Code, uno con Ollama y uno con el asistente rápido aparecen como tres filas con cifras plausibles, y la de Claude Code muestra coste.
+

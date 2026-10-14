@@ -7,14 +7,17 @@
 // built around one HTTP POST and a hand-rolled SSE reader — no new crate,
 // no new reqwest feature (`Response::chunk()` needs neither).
 
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::atomic::Ordering;
+use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::agent::{self, Turn};
+use crate::usage::{self, Usage};
 use crate::{platform, secrets};
 
 /// A turn through a provider profile may take a while to start producing
@@ -248,28 +251,43 @@ pub async fn send(
     prompt: &str,
     cancel: &agent::Cancel,
     on: &(dyn Fn(Turn) + Send + Sync),
-) -> Result<String, ProviderError> {
+) -> Result<Reply, ProviderError> {
     let key = secrets::get(&key_for(&profile.id));
     let url = format!("{}/chat/completions", profile.base_url);
-    let body = serde_json::json!({
-        "model": profile.model,
-        "messages": build_messages(history, prompt),
-        "stream": true,
-    });
-
     let client = client(REQUEST_TIMEOUT);
-    let mut request = client.post(&url).json(&body);
-    if let Some(key) = &key {
-        request = request.bearer_auth(key);
-    }
-
     let stop = cancel.arm();
-    let response = match request.send().await {
-        Ok(r) => r,
-        Err(err) => {
-            cancel.disarm();
-            return Err(classify_transport_error(&err));
+
+    // Asks for token counts at the end of the stream. An endpoint that does
+    // not know `stream_options` may answer 400/422: then the same turn is
+    // sent once more without it, and the profile is remembered for the
+    // session so later turns do not pay the retry.
+    let mut sent_usage = !skips_usage(&profile.id);
+    let response = loop {
+        let mut body = serde_json::json!({
+            "model": profile.model,
+            "messages": build_messages(history, prompt),
+            "stream": true,
+        });
+        if sent_usage {
+            body["stream_options"] = serde_json::json!({"include_usage": true});
         }
+        let mut request = client.post(&url).json(&body);
+        if let Some(key) = &key {
+            request = request.bearer_auth(key);
+        }
+        let response = match request.send().await {
+            Ok(r) => r,
+            Err(err) => {
+                cancel.disarm();
+                return Err(classify_transport_error(&err));
+            }
+        };
+        if should_retry_without_usage(response.status().as_u16(), sent_usage) {
+            remember_no_usage(&profile.id);
+            sent_usage = false;
+            continue;
+        }
+        break response;
     };
 
     if let Some(err) = classify_status(&response) {
@@ -283,6 +301,7 @@ pub async fn send(
     let mut resp = response;
     let mut buffer = String::new();
     let mut full_text = String::new();
+    let mut usage = Usage::default();
 
     loop {
         if stop.load(Ordering::SeqCst) {
@@ -296,6 +315,10 @@ pub async fn send(
                         full_text.push_str(&text);
                         on(Turn::Text { text });
                     }
+                    // The count rides on the last chunk; it is the whole turn's.
+                    if let Some(found) = parse_sse_usage(&line) {
+                        usage = found;
+                    }
                 }
             }
             Ok(None) => break,
@@ -303,7 +326,45 @@ pub async fn send(
         }
     }
     cancel.disarm();
-    Ok(full_text)
+    Ok(Reply { text: full_text, usage })
+}
+
+/// What a provider turn returns: the text, and whatever the endpoint reported
+/// about tokens and cost (nothing, for many endpoints).
+pub struct Reply {
+    pub text: String,
+    pub usage: Usage,
+}
+
+/// Profiles whose endpoint refused `stream_options` this session.
+static NO_USAGE: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+
+fn no_usage() -> &'static Mutex<HashSet<String>> {
+    NO_USAGE.get_or_init(Default::default)
+}
+
+fn skips_usage(profile_id: &str) -> bool {
+    no_usage().lock().unwrap().contains(profile_id)
+}
+
+fn remember_no_usage(profile_id: &str) {
+    no_usage().lock().unwrap().insert(profile_id.to_string());
+}
+
+/// 400 and 422 are what an endpoint that dislikes an unknown field answers
+/// with. Retried only if the field was actually sent, so it happens once.
+fn should_retry_without_usage(status: u16, sent_usage: bool) -> bool {
+    sent_usage && (status == 400 || status == 422)
+}
+
+/// The `usage` of one SSE `data: ...` line, if it carries one.
+fn parse_sse_usage(line: &str) -> Option<Usage> {
+    let data = line.strip_prefix("data:")?.trim();
+    if data == "[DONE]" || data.is_empty() {
+        return None;
+    }
+    let value: Value = serde_json::from_str(data).ok()?;
+    usage::from_openai_usage(&value)
 }
 
 /// Splits complete `\n`-terminated lines off the front of `buf`, leaving any
@@ -405,6 +466,37 @@ mod tests {
 
     fn hm(role: &str, content: &str) -> HistoryMessage {
         HistoryMessage { role: role.into(), content: content.into() }
+    }
+
+    #[test]
+    fn a_usage_chunk_is_read_and_an_ordinary_one_is_not() {
+        let last = r#"data: {"choices":[],"usage":{"prompt_tokens":9,"completion_tokens":4,"cost":0.001}}"#;
+        assert_eq!(
+            parse_sse_usage(last),
+            Some(Usage { input_tokens: Some(9), output_tokens: Some(4), cost_usd: Some(0.001) })
+        );
+        assert_eq!(parse_sse_usage(r#"data: {"choices":[{"delta":{"content":"hi"}}]}"#), None);
+        assert_eq!(parse_sse_usage(r#"data: {"choices":[{"delta":{}}],"usage":null}"#), None);
+        assert_eq!(parse_sse_usage("data: [DONE]"), None);
+        assert_eq!(parse_sse_usage("garbage"), None);
+    }
+
+    #[test]
+    fn the_usage_retry_happens_only_for_400_and_422_and_only_once() {
+        assert!(should_retry_without_usage(400, true));
+        assert!(should_retry_without_usage(422, true));
+        assert!(!should_retry_without_usage(400, false), "already sent without it");
+        assert!(!should_retry_without_usage(401, true));
+        assert!(!should_retry_without_usage(500, true));
+        assert!(!should_retry_without_usage(200, true));
+    }
+
+    #[test]
+    fn a_profile_that_refused_usage_is_remembered() {
+        let id = agent::uuid_v4();
+        assert!(!skips_usage(&id));
+        remember_no_usage(&id);
+        assert!(skips_usage(&id));
     }
 
     #[test]

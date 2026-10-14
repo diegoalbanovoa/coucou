@@ -13,7 +13,7 @@
 
 import { h, clear, dot } from "./dom";
 import { icon } from "./icons";
-import { Bridge, type EndTarget, type Found, type ProcInfo, type Stats, type Swept } from "../core/bridge";
+import { Bridge, type BackendSummary, type EndTarget, type Found, type ProcInfo, type Stats, type Swept } from "../core/bridge";
 import { t, tn, getLocale } from "../i18n/index";
 import { State } from "../core/state";
 import { gauge, toneFor, DISK_THRESHOLDS, type GaugeTone } from "../ui/gauge";
@@ -178,7 +178,56 @@ function avatarFor(name: string): HTMLElement {
   );
 }
 
-type Pane = "processes" | "storage" | "agents";
+type Pane = "processes" | "storage" | "agents" | "usage";
+
+/** A duration as a person reads it: "340 ms", "2.3 s". */
+function duration(ms: number, locale: string): string {
+  if (ms < 1000) return `${Math.round(ms)} ms`;
+  const seconds = new Intl.NumberFormat(locale, { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+  return `${seconds.format(ms / 1000)} s`;
+}
+
+/** What one Usage row says. Anything the source never reported is left out,
+ *  neither a "0" nor a dash, so a local model with no token counts shows
+ *  just its turns and its timings. */
+export interface UsageRowParts {
+  title: string;
+  subtitle: string;
+  tokens: string | null;
+  cost: string | null;
+}
+
+export function usageRowParts(s: BackendSummary, locale: string): UsageRowParts {
+  const subtitle = [
+    tn("system.usageTurns", s.turns),
+    s.p50FirstTextMs != null ? t("system.usageFirst", { ms: duration(s.p50FirstTextMs, locale) }) : null,
+    t("system.usageTotal", { ms: duration(s.p50TotalMs, locale) }),
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
+  const numbers = new Intl.NumberFormat(locale);
+  let tokens: string | null = null;
+  if (s.inputTokens != null && s.outputTokens != null) {
+    tokens = t("system.usageTokens", { in: numbers.format(s.inputTokens), out: numbers.format(s.outputTokens) });
+  } else if (s.inputTokens != null) {
+    tokens = t("system.usageTokensIn", { n: numbers.format(s.inputTokens) });
+  } else if (s.outputTokens != null) {
+    tokens = t("system.usageTokensOut", { n: numbers.format(s.outputTokens) });
+  }
+
+  const cost =
+    s.costUsd != null
+      ? new Intl.NumberFormat(locale, {
+          style: "currency",
+          currency: "USD",
+          minimumFractionDigits: 2,
+          maximumFractionDigits: s.costUsd < 0.1 ? 4 : 2,
+        }).format(s.costUsd)
+      : null;
+
+  return { title: s.label, subtitle, tokens, cost };
+}
 type SheetStep = "closed" | "analyzing" | "results" | "cleaning" | "result";
 
 export function buildSystem() {
@@ -198,6 +247,7 @@ export function buildSystem() {
         { value: "processes", label: t("system.tabProcesses") },
         { value: "storage", label: t("system.tabStorage") },
         { value: "agents", label: t("system.tabAgents") },
+        { value: "usage", label: t("system.tabUsage") },
       ],
       value: pane,
       onChange: (v) => {
@@ -237,6 +287,9 @@ export function buildSystem() {
   let statsTimer: number | null = null;
   let procsTimer: number | null = null;
   let agentsUnsub: (() => void) | null = null;
+  let usageRows: BackendSummary[] = [];
+  let usageTimer: number | null = null;
+  let usageConfirming = false;
   let shownLocale = getLocale();
 
   // ── Headline and gauges ─────────────────────────────────────────────────
@@ -318,8 +371,12 @@ export function buildSystem() {
   // ── Processes pane ───────────────────────────────────────────────────────
 
   function drawPanel() {
+    // The usage numbers are polled only while their own pane is on screen.
+    if (pane === "usage") startUsagePoll();
+    else stopUsagePoll();
     if (pane === "processes") drawProcesses();
     else if (pane === "storage") drawStorage();
+    else if (pane === "usage") drawUsage();
     else drawAgents();
   }
 
@@ -528,6 +585,87 @@ export function buildSystem() {
       );
     }
     panel.append(list);
+  }
+
+  // ── Usage pane (plan v4, Fase 4) ─────────────────────────────────────────
+  // Turns, latency, tokens and, only when the source reports one, cost, per
+  // backend. Held in memory by Rust for the session; nothing leaves the PC.
+
+  async function refreshUsage() {
+    const rows = await Bridge.usageSummary();
+    if (!rows) return;
+    usageRows = rows;
+    if (pane === "usage") drawUsage();
+  }
+
+  function startUsagePoll() {
+    if (usageTimer != null) return;
+    void refreshUsage();
+    usageTimer = window.setInterval(() => void refreshUsage(), STATS_POLL_MS);
+  }
+
+  function stopUsagePoll() {
+    if (usageTimer == null) return;
+    window.clearInterval(usageTimer);
+    usageTimer = null;
+  }
+
+  function drawUsage() {
+    clear(panel);
+    if (usageRows.length === 0) {
+      usageConfirming = false;
+      panel.append(h("div", { class: "int-empty", text: t("system.usageEmpty") }));
+      return;
+    }
+    const list = h("div", { class: "usage-list" });
+    for (const row of usageRows) {
+      const parts = usageRowParts(row, getLocale());
+      const trailing =
+        parts.tokens || parts.cost
+          ? h(
+              "span",
+              { class: "usage-trailing" },
+              parts.tokens ? h("span", { text: parts.tokens }) : null,
+              parts.cost
+                ? h("span", { class: "usage-cost", text: parts.cost, title: t("system.usageCostReported") })
+                : null,
+            )
+          : undefined;
+      list.append(listRow({ title: parts.title, subtitle: parts.subtitle, trailing }));
+    }
+    panel.append(list);
+    panel.append(
+      h(
+        "div",
+        { class: "usage-actions" },
+        usageConfirming
+          ? inlineConfirm({
+              message: t("system.usageResetConfirm"),
+              confirmLabel: t("system.usageReset"),
+              cancelLabel: t("system.neverMind"),
+              destructive: true,
+              onConfirm: async () => {
+                usageConfirming = false;
+                await Bridge.usageReset();
+                usageRows = [];
+                drawUsage();
+              },
+              onCancel: () => {
+                usageConfirming = false;
+                drawUsage();
+              },
+            })
+          : button({
+              label: t("system.usageReset"),
+              variant: "plain",
+              size: "sm",
+              onClick: () => {
+                usageConfirming = true;
+                drawUsage();
+              },
+            }),
+      ),
+    );
   }
 
   // ── The cleanup sheet ────────────────────────────────────────────────────
@@ -746,6 +884,7 @@ export function buildSystem() {
       }
       void refresh();
       void refreshProcs();
+      if (pane === "usage") startUsagePoll();
       if (statsTimer == null) statsTimer = window.setInterval(() => void refresh(), STATS_POLL_MS);
       if (procsTimer == null) procsTimer = window.setInterval(() => void refreshProcs(), PROCS_POLL_MS);
       if (agentsUnsub == null) {
@@ -772,6 +911,7 @@ export function buildSystem() {
         agentsUnsub();
         agentsUnsub = null;
       }
+      stopUsagePoll();
     },
   };
 }

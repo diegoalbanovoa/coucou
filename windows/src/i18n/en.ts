@@ -151,6 +151,18 @@ export const en = {
     // openspec/changes/agent-activity-panel — subagent activity pane.
     tabAgents: "Agents",
     agentsEmpty: "No subagent activity yet this session",
+    // Plan v4, Fase 4: the Usage pane. Local only, nothing here leaves the machine.
+    tabUsage: "Usage",
+    usageEmpty: "No turns yet this session",
+    usageTurns: { one: "{n} turn", other: "{n} turns" },
+    usageFirst: "first text {ms}",
+    usageTotal: "total {ms}",
+    usageTokens: "{in} in · {out} out",
+    usageTokensIn: "{n} in",
+    usageTokensOut: "{n} out",
+    usageCostReported: "Reported by the source; with a subscription it is an estimate",
+    usageReset: "Clear",
+    usageResetConfirm: "Clear the usage numbers?",
     statusOk: "Your machine is doing fine",
     statusStrained: "Your machine is working hard",
     statusSick: "Your machine needs help",

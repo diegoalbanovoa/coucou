@@ -136,6 +136,18 @@ export const es: Messages = {
     // openspec/changes/agent-activity-panel — pestaña de actividad de subagentes.
     tabAgents: "Agentes",
     agentsEmpty: "Sin actividad de subagentes todavía en esta sesión",
+    // Plan v4, Fase 4: la pestaña Uso. Solo local, nada de esto sale del equipo.
+    tabUsage: "Uso",
+    usageEmpty: "Aún no hay turnos en esta sesión",
+    usageTurns: { one: "{n} turno", other: "{n} turnos" },
+    usageFirst: "primer texto {ms}",
+    usageTotal: "total {ms}",
+    usageTokens: "{in} ent. · {out} sal.",
+    usageTokensIn: "{n} ent.",
+    usageTokensOut: "{n} sal.",
+    usageCostReported: "Reportado por la fuente; con suscripción es una estimación",
+    usageReset: "Borrar",
+    usageResetConfirm: "¿Borrar las cifras de uso?",
     statusOk: "Tu equipo está bien",
     statusStrained: "Tu equipo está trabajando duro",
     statusSick: "Tu equipo necesita ayuda",

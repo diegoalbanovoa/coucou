@@ -17,7 +17,7 @@ import { State } from "../core/state";
 import { MOCK_CONSOLES, MOCK_LIVE_SESSIONS } from "./fixtures/consoles";
 import { MOCK_ACTIVE_INTEGRATIONS, MOCK_INTEGRATION_DATA } from "./fixtures/integrations";
 import { MOCK_CHAT_MESSAGES } from "./fixtures/chat";
-import { MOCK_CPU, MOCK_PROCESSES, MOCK_SCENARIOS, type MockScenario } from "./fixtures/system";
+import { MOCK_CPU, MOCK_PROCESSES, MOCK_SCENARIOS, MOCK_USAGE, type MockScenario } from "./fixtures/system";
 
 export const IS_TAURI = false;
 
@@ -244,6 +244,36 @@ async function systemProcesses() {
   return MOCK_PROCESSES;
 }
 
+// Provider profiles: none saved and no Ollama in the browser. The mock stopped
+// loading when chat.ts began importing `providerKeyFor` (provider-chat-profiles)
+// without the mock exporting it; see docs/plan-v4-notas.md, Fase 4.
+export function providerKeyFor(id: string): string {
+  return `provider-profile-${id}-api-key`;
+}
+
+async function providerList() {
+  return [] as { id: string; label: string; baseUrl: string; model: string; keySet: boolean }[];
+}
+
+async function providerSave(profile: { id?: string; label: string; baseUrl: string; model: string }) {
+  console.info("[mock] provider_save", profile.label);
+  return { id: profile.id ?? "mock-profile", ...profile, keySet: false };
+}
+
+async function ollamaDetect() {
+  return [] as { name: string }[];
+}
+
+let usageRows = [...MOCK_USAGE];
+
+async function usageSummary() {
+  return usageRows;
+}
+
+async function usageReset() {
+  usageRows = [];
+}
+
 async function systemEndProcess(targets: { pid: number; startTime: string }[]) {
   console.info("[mock] system_end_process", targets);
   return [] as number[];
@@ -370,6 +400,10 @@ export const Bridge = {
   detachProject,
   agentSend,
   providerSend,
+  providerList,
+  providerSave,
+  providerDelete: noop("provider_delete"),
+  ollamaDetect,
   agentCancel,
   vaultState,
   pickVault,
@@ -378,6 +412,8 @@ export const Bridge = {
   systemScan,
   systemClean,
   systemProcesses,
+  usageSummary,
+  usageReset,
   systemEndProcess,
   systemOpenDiskCleanup,
   healthState,

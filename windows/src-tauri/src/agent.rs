@@ -29,6 +29,7 @@ use tokio::process::Command;
 use crate::agents;
 use crate::consoles;
 use crate::platform;
+use crate::usage::Usage;
 
 /// How often a quiet turn is checked for a cancel or the deadline. Short
 /// enough that Stop feels immediate, long enough to cost nothing.
@@ -335,6 +336,8 @@ pub struct Stream {
     text: String,
     result: Option<String>,
     failed: bool,
+    /// What the `result` line reported about tokens and cost.
+    usage: Usage,
 }
 
 impl Stream {
@@ -384,6 +387,7 @@ impl Stream {
                 let errored = value["is_error"].as_bool().unwrap_or(false);
                 let subtype = value["subtype"].as_str().unwrap_or("success");
                 self.failed = errored || subtype != "success";
+                self.usage = result_usage(&value);
                 Vec::new()
             }
             _ => Vec::new(),
@@ -393,6 +397,11 @@ impl Stream {
     fn keep(&mut self, text: &str) -> Turn {
         self.text.push_str(text);
         Turn::Text { text: text.to_string() }
+    }
+
+    /// The tokens and cost the `result` line reported.
+    pub fn usage(&self) -> &Usage {
+        &self.usage
     }
 
     /// Whether the `result` line said the turn failed. The CLI exits zero
@@ -405,6 +414,22 @@ impl Stream {
     /// fallback for a turn that ended without one.
     pub fn finish(self) -> String {
         self.result.unwrap_or(self.text)
+    }
+}
+
+/// The `result` line's own account of the turn: input tokens are the plain
+/// ones plus the cache-creation and cache-read ones (whichever are present),
+/// and the cost is `total_cost_usd`. Anything missing stays `None`.
+fn result_usage(result: &Value) -> Usage {
+    let usage = &result["usage"];
+    let parts: Vec<u64> = ["input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens"]
+        .iter()
+        .filter_map(|k| usage.get(*k).and_then(Value::as_u64))
+        .collect();
+    Usage {
+        input_tokens: if parts.is_empty() { None } else { Some(parts.iter().sum()) },
+        output_tokens: usage.get("output_tokens").and_then(Value::as_u64),
+        cost_usd: result.get("total_cost_usd").and_then(Value::as_f64),
     }
 }
 
@@ -439,6 +464,7 @@ pub struct Knowledge {
     pub briefing: Option<String>,
 }
 
+#[cfg_attr(not(test), allow(dead_code))] // the app calls `send_measured`; the tests use this
 pub async fn send(
     project: &Project,
     session: &Session,
@@ -447,6 +473,24 @@ pub async fn send(
     prompt: String,
     knowledge: &Knowledge,
     on: &(dyn Fn(Turn) + Send + Sync),
+) -> Result<String, String> {
+    send_measured(project, session, cancel, cli_id, prompt, knowledge, on, &mut Usage::default()).await
+}
+
+/// `send`, plus what the CLI reported about tokens and cost, written to
+/// `usage_out` (left as it was for a CLI that reports none). An out-parameter
+/// rather than a changed return type, so `send` and its callers stay as they
+/// were.
+#[allow(clippy::too_many_arguments)]
+pub async fn send_measured(
+    project: &Project,
+    session: &Session,
+    cancel: &Cancel,
+    cli_id: &str,
+    prompt: String,
+    knowledge: &Knowledge,
+    on: &(dyn Fn(Turn) + Send + Sync),
+    usage_out: &mut Usage,
 ) -> Result<String, String> {
     let Some(spec) = consoles::spec(cli_id) else {
         return Err(format!("Unknown agent `{cli_id}`."));
@@ -533,7 +577,7 @@ pub async fn send(
 
     let timeout = config.turn_timeout();
     if spec.streams {
-        stream_turn(cmd, cancel, session, resumed.is_some(), spec.label, timeout, on).await
+        stream_turn(cmd, cancel, session, resumed.is_some(), spec.label, timeout, on, usage_out).await
     } else {
         one_shot(cmd, session, resumed.is_some(), spec.label, timeout).await
     }
@@ -554,6 +598,7 @@ async fn stream_turn(
     label: &str,
     timeout: Duration,
     on: &(dyn Fn(Turn) + Send + Sync),
+    usage_out: &mut Usage,
 ) -> Result<String, String> {
     cmd.stdout(Stdio::piped());
     cmd.stderr(Stdio::piped());
@@ -638,6 +683,7 @@ async fn stream_turn(
     // The CLI exited zero, which only means it ran. Whether the turn worked is
     // what the result line says.
     let failed = stream.failed();
+    *usage_out = stream.usage().clone();
     let reply = first_chars(&stream.finish(), MAX_OUTPUT);
     if failed {
         // The session is not reset: it is the turn that failed, not the
@@ -1046,6 +1092,30 @@ mod tests {
             turns.extend(stream.line(line));
         }
         (turns, stream.finish())
+    }
+
+    // The shape of a Claude Code `result` line (documented stream-json
+    // format, trimmed to what Coucou reads). NOT yet checked against a line
+    // captured from a live `claude -p ... --output-format stream-json
+    // --verbose`: see docs/plan-v4-notas.md, Fase 4.
+    const RESULT_LINE: &str = r#"{"type":"result","subtype":"success","is_error":false,"duration_ms":2412,"result":"Hola.","session_id":"s","total_cost_usd":0.0432,"usage":{"input_tokens":6,"cache_creation_input_tokens":1200,"cache_read_input_tokens":300,"output_tokens":42}}"#;
+
+    #[test]
+    fn the_result_line_reports_tokens_and_cost() {
+        let mut stream = Stream::default();
+        stream.line(RESULT_LINE);
+        assert_eq!(
+            stream.usage(),
+            &Usage { input_tokens: Some(1506), output_tokens: Some(42), cost_usd: Some(0.0432) }
+        );
+        assert_eq!(stream.finish(), "Hola.");
+    }
+
+    #[test]
+    fn a_result_line_with_no_usage_leaves_it_empty() {
+        let mut stream = Stream::default();
+        stream.line(r#"{"type":"result","subtype":"success","result":"ok"}"#);
+        assert_eq!(stream.usage(), &Usage::default());
     }
 
     #[test]

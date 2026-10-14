@@ -83,6 +83,44 @@ export const MOCK_SCENARIOS: Record<MockScenario, MockStats> = {
 
 const MB = 1024 ** 2;
 
+/** What the Usage pane shows in mock mode: Claude Code with a reported cost, a
+ *  local Ollama profile that reports no tokens, and a cloud profile that does. */
+export const MOCK_USAGE = [
+  {
+    backend: "cli:claude",
+    label: "Claude Code",
+    turns: 12,
+    errors: 1,
+    p50FirstTextMs: 2300,
+    p50TotalMs: 14800,
+    inputTokens: 184200,
+    outputTokens: 9120,
+    costUsd: 1.37,
+  },
+  {
+    backend: "provider:mock-ollama",
+    label: "Ollama · llama3.2",
+    turns: 5,
+    errors: 0,
+    p50FirstTextMs: 420,
+    p50TotalMs: 3100,
+    inputTokens: null,
+    outputTokens: null,
+    costUsd: null,
+  },
+  {
+    backend: "provider:mock-openrouter",
+    label: "OpenRouter · gpt-4o-mini",
+    turns: 3,
+    errors: 0,
+    p50FirstTextMs: 650,
+    p50TotalMs: 2400,
+    inputTokens: 3180,
+    outputTokens: 744,
+    costUsd: null,
+  },
+];
+
 /** 15 processes with repeats, as `system_processes` would hand them back —
  *  already heaviest-first, the way the real command sorts them. One
  *  (`MsMpEng.exe`) is protected, to prove the lock glyph has something to

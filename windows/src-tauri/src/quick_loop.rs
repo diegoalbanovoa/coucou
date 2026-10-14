@@ -13,6 +13,7 @@ use std::time::Duration;
 use serde_json::{json, Value};
 
 use crate::providers::{ProviderError, ProviderProfile};
+use crate::usage::{self, Usage};
 use crate::settings::AllowedApp;
 
 /// More rounds than this and the model is going in circles.
@@ -130,14 +131,15 @@ pub fn parse_completion(body: &Value) -> Result<Completion, String> {
 
 /// The loop. `post` sends a request body and returns the parsed answer;
 /// `exec` runs one tool call and returns the text to hand back. Returns the
-/// model's final plain-text reply.
+/// model's final plain-text reply, with the tokens (and cost, if reported)
+/// the rounds added up to.
 pub async fn run<P, PF, X, XF>(
     system: String,
     prompt: &str,
     model: &str,
     mut post: P,
     mut exec: X,
-) -> Result<String, String>
+) -> Result<(String, Usage), String>
 where
     P: FnMut(Value) -> PF,
     PF: Future<Output = Result<Value, String>>,
@@ -148,6 +150,7 @@ where
         json!({"role": "system", "content": system}),
         json!({"role": "user", "content": prompt}),
     ];
+    let mut total = Usage::default();
     for _ in 0..MAX_ROUNDS {
         let body = json!({
             "model": model,
@@ -155,9 +158,13 @@ where
             "tools": tool_definitions(),
             "stream": false,
         });
-        let completion = parse_completion(&post(body).await?)?;
+        let answer = post(body).await?;
+        if let Some(round) = usage::from_openai_usage(&answer) {
+            total.add(&round);
+        }
+        let completion = parse_completion(&answer)?;
         if completion.calls.is_empty() {
-            return Ok(completion.text);
+            return Ok((completion.text, total));
         }
         messages.push(completion.message);
         for call in completion.calls {
@@ -240,8 +247,10 @@ mod tests {
         let sent: RefCell<Vec<Value>> = RefCell::new(Vec::new());
         let rounds = RefCell::new(vec![
             json!({"choices": [{"message": {"role": "assistant", "content": null, "tool_calls": [
-                {"id": "c1", "type": "function", "function": {"name": "query_vault", "arguments": "{}"}}]}}]}),
-            json!({"choices": [{"message": {"role": "assistant", "content": "All done."}}]}),
+                {"id": "c1", "type": "function", "function": {"name": "query_vault", "arguments": "{}"}}]}}],
+                "usage": {"prompt_tokens": 100, "completion_tokens": 10}}),
+            json!({"choices": [{"message": {"role": "assistant", "content": "All done."}}],
+                "usage": {"prompt_tokens": 150, "completion_tokens": 20}}),
         ]);
         let executed: RefCell<Vec<String>> = RefCell::new(Vec::new());
         let out = run(
@@ -260,7 +269,12 @@ mod tests {
         )
         .await
         .unwrap();
-        assert_eq!(out, "All done.");
+        assert_eq!(out.0, "All done.");
+        assert_eq!(
+            out.1,
+            Usage { input_tokens: Some(250), output_tokens: Some(30), cost_usd: None },
+            "every round's tokens are added up"
+        );
         assert_eq!(*executed.borrow(), ["query_vault"]);
         let sent = sent.borrow();
         assert_eq!(sent.len(), 2);
