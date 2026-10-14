@@ -85,6 +85,10 @@ pub struct Settings {
     // user turns it on, and the summary costs one more model call.
     pub memory_enabled: bool,
     pub memory_auto_summary: bool,
+
+    // Skills (plan v4, Fase 6): the imported skills the model may load with
+    // `load_skill`. Imported ones start out off.
+    pub skills_enabled: Vec<String>,
 }
 
 /// One entry in `Settings.quick_assistant_apps`. `exe` is already resolved
@@ -135,6 +139,7 @@ impl Default for Settings {
             quick_assistant_apps: Vec::new(),
             memory_enabled: false,
             memory_auto_summary: false,
+            skills_enabled: Vec::new(),
         }
     }
 }
@@ -412,7 +417,8 @@ mod tests {
   "quickAssistantFolders": [],
   "quickAssistantApps": [],
   "memoryEnabled": true,
-  "memoryAutoSummary": true
+  "memoryAutoSummary": true,
+  "skillsEnabled": ["pdf-tools"]
 }"#;
 
     fn custom() -> Value {
@@ -747,6 +753,7 @@ mod tests {
                 "quickAssistantApps",
                 "memoryEnabled",
                 "memoryAutoSummary",
+                "skillsEnabled",
             ]
         );
         let _ = std::fs::remove_dir_all(&dir);

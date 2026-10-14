@@ -17,7 +17,7 @@ use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::mpsc;
 
 use crate::settings::{AllowedApp, Settings};
-use crate::{integrations, island, log, platform, vault};
+use crate::{integrations, island, log, platform, skills, vault};
 
 // ── Folder allow-list ────────────────────────────────────────────────────
 
@@ -367,7 +367,29 @@ where
     F: FnOnce(&'static str, Value) -> Fut,
     Fut: std::future::Future<Output = Decision>,
 {
+    dispatch_with_skills(name, args, settings, paused, approve, &skills::load).await
+}
+
+/// `dispatch` with the skill loader injected, so the tests do not read the
+/// real skills folder.
+///
+/// `load_skill` is the one tool that approves itself, and only for a skill the
+/// user switched on: it reads a file Coucou itself stored and acts on nothing.
+/// Any other name is `refused-scope`; a pause refuses it like every other tool.
+pub async fn dispatch_with_skills<F, Fut>(
+    name: &str,
+    args: &Value,
+    settings: &Settings,
+    paused: bool,
+    approve: F,
+    load: &(dyn Fn(&str) -> Option<skills::Skill> + Sync),
+) -> String
+where
+    F: FnOnce(&'static str, Value) -> Fut,
+    Fut: std::future::Future<Output = Decision>,
+{
     let tool: &'static str = match name {
+        "load_skill" => "load_skill",
         "search_files" => "search_files",
         "read_approved_folder" => "read_approved_folder",
         "open_app" => "open_app",
@@ -381,6 +403,7 @@ where
         "search_files" => format!("{} in {}", str_arg(args, "query"), str_arg(args, "folder")),
         "read_approved_folder" => str_arg(args, "path").to_string(),
         "open_app" => str_arg(args, "app_id").to_string(),
+        "load_skill" => str_arg(args, "name").to_string(),
         _ => "vault".to_string(),
     };
 
@@ -398,11 +421,20 @@ where
         "search_files" => is_allowed_path(Path::new(str_arg(args, "folder")), folders),
         "read_approved_folder" => is_allowed_path(Path::new(str_arg(args, "path")), folders),
         "open_app" => apps.iter().any(|a| a.id == str_arg(args, "app_id")),
+        "load_skill" => settings.skills_enabled.iter().any(|s| s == str_arg(args, "name")),
         _ => true,
     };
     if !scoped {
         record(tool, &target, "refused-scope");
         return "Error: that target is not on the allow-list.".to_string();
+    }
+
+    if tool == "load_skill" {
+        record(tool, &target, "auto-approved");
+        return match load(str_arg(args, "name")) {
+            Some(skill) => skills::truncate_body(&skill.body),
+            None => "Error: that skill could not be read.".to_string(),
+        };
     }
 
     if tool == "read_approved_folder" {
@@ -613,8 +645,44 @@ mod tests {
         assert_eq!(logged(&key).outcome, "approved");
     }
 
+    fn fake_skill(name: &str) -> Option<skills::Skill> {
+        Some(skills::Skill { name: name.to_string(), description: "d".into(), body: format!("instructions of {name}") })
+    }
+
     #[tokio::test]
-    async fn a_tool_outside_the_four_is_refused() {
+    async fn an_enabled_skill_loads_without_a_card_and_is_logged() {
+        let t = token();
+        let name = format!("skill-{t}");
+        let settings = Settings { skills_enabled: vec![name.clone()], ..Settings::default() };
+        let out = dispatch_with_skills("load_skill", &json!({ "name": name }), &settings, false, never, &fake_skill).await;
+        assert_eq!(out, format!("instructions of {name}"));
+        assert_eq!(logged(&t).outcome, "auto-approved");
+    }
+
+    #[tokio::test]
+    async fn a_skill_that_is_not_enabled_is_refused_and_never_loaded() {
+        let t = token();
+        let name = format!("skill-{t}");
+        let settings = Settings::default();
+        let never_loaded = |_: &str| -> Option<skills::Skill> { panic!("a skill that is off must not be read") };
+        let out = dispatch_with_skills("load_skill", &json!({ "name": name }), &settings, false, never, &never_loaded).await;
+        assert!(out.starts_with("Error:"));
+        assert_eq!(logged(&t).outcome, "refused-scope");
+    }
+
+    #[tokio::test]
+    async fn a_paused_island_refuses_load_skill_too() {
+        let t = token();
+        let name = format!("skill-{t}");
+        let settings = Settings { skills_enabled: vec![name.clone()], ..Settings::default() };
+        let never_loaded = |_: &str| -> Option<skills::Skill> { panic!("paused: nothing is read") };
+        let out = dispatch_with_skills("load_skill", &json!({ "name": name }), &settings, true, never, &never_loaded).await;
+        assert!(out.starts_with("Error:"));
+        assert_eq!(logged(&t).outcome, "refused-paused");
+    }
+
+    #[tokio::test]
+    async fn a_tool_outside_the_five_is_refused() {
         let settings = settings_with(Vec::new());
         assert!(dispatch("delete_file", &json!({}), &settings, false, never).await.starts_with("Error:"));
     }

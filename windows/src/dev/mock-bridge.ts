@@ -296,6 +296,31 @@ async function memoryClear() {
   mockNotes = [];
 }
 
+let mockSkills: { name: string; description: string; enabled: boolean; ignored: string[] }[] = [
+  { name: "meeting-notes", description: "Turn rough meeting notes into decisions and action items.", enabled: true, ignored: [] },
+];
+
+async function skillList() {
+  return mockSkills;
+}
+
+async function skillImport(replace: boolean) {
+  const name = "pdf-tools";
+  if (mockSkills.some((s) => s.name === name) && !replace) throw `exists:${name}`;
+  mockSkills = mockSkills.filter((s) => s.name !== name);
+  const view = { name, description: "Work with PDF files.", enabled: false, ignored: ["scripts", "allowed-tools"] };
+  mockSkills = [...mockSkills, view];
+  return view;
+}
+
+async function skillDelete(name: string) {
+  mockSkills = mockSkills.filter((s) => s.name !== name);
+}
+
+async function skillSetEnabled(name: string, enabled: boolean) {
+  mockSkills = mockSkills.map((s) => (s.name === name ? { ...s, enabled } : s));
+}
+
 async function memoryPath() {
   return "C:\Users\diego\AppData\Local\Coucou\memory";
 }
@@ -445,6 +470,10 @@ export const Bridge = {
   memoryDelete,
   memoryClear,
   memoryPath,
+  skillList,
+  skillImport,
+  skillDelete,
+  skillSetEnabled,
   systemEndProcess,
   systemOpenDiskCleanup,
   healthState,

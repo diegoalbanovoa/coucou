@@ -17,6 +17,7 @@ mod providers;
 mod quick_assistant;
 mod quick_loop;
 mod secrets;
+mod skills;
 mod settings;
 mod system;
 mod transcript;
@@ -931,7 +932,13 @@ async fn quick_ask(app: AppHandle, prompt: String) -> Result<String, String> {
         .ok_or_else(|| "no-model:no model is configured for the quick assistant".to_string())?;
     // Read for this request and dropped with it; never written anywhere.
     let key = secrets::get(&providers::key_for(&profile.id));
-    let system = quick_loop::system_prompt(&settings.quick_assistant_folders, &settings.quick_assistant_apps);
+    // Level one of a skill: its name and description, only for those switched on.
+    let catalog: Vec<(String, String)> = skills::list(&settings.skills_enabled)
+        .into_iter()
+        .filter(|s| s.enabled)
+        .map(|s| (s.name, s.description))
+        .collect();
+    let system = quick_loop::system_prompt(&settings.quick_assistant_folders, &settings.quick_assistant_apps, &catalog);
     let post_profile = profile.clone();
     let clock = usage::Clock::start();
     let result = quick_loop::run(
@@ -1067,6 +1074,70 @@ async fn quick_app_add(app: AppHandle) -> Option<settings::AllowedApp> {
 #[tauri::command]
 fn quick_app_remove(app: AppHandle, id: String) {
     remember(&app, |s| quick_assistant::remove_app(&mut s.quick_assistant_apps, &id));
+}
+
+// ── Skills (plan v4, Fase 6) ─────────────────────────────────────────────────
+
+/// A skill folder whose import stopped at `exists:<name>`, kept (in memory, as
+/// a path only Rust ever saw) so that "Replace" can import it without opening
+/// the picker a second time.
+static PENDING_SKILL: std::sync::Mutex<Option<std::path::PathBuf>> = std::sync::Mutex::new(None);
+
+#[tauri::command]
+fn skill_list(app: AppHandle) -> Vec<skills::SkillView> {
+    skills::list(&shared_settings(&app).skills_enabled)
+}
+
+/// Opens the folder picker on a skill folder and imports its `SKILL.md` — only
+/// that file. `Ok(None)` when the picker was cancelled. An existing skill comes
+/// back as the error `exists:<name>`; calling again with `replace: true` imports
+/// the same folder over it. A new skill starts switched off.
+#[tauri::command]
+async fn skill_import(app: AppHandle, replace: bool) -> Result<Option<skills::SkillView>, String> {
+    let pending = PENDING_SKILL.lock().unwrap().take();
+    let folder = match (replace, pending) {
+        (true, Some(path)) => path,
+        _ => {
+            let Some(win) = settings_or_island(&app) else { return Ok(None) };
+            match choose_folder(win).await {
+                Some(picked) => std::path::PathBuf::from(picked),
+                None => return Ok(None),
+            }
+        }
+    };
+    match skills::import(&folder, replace) {
+        Ok(view) => {
+            log::line(format!("skill imported: {}", view.name));
+            Ok(Some(view))
+        }
+        Err(err) => {
+            if err.starts_with("exists:") {
+                *PENDING_SKILL.lock().unwrap() = Some(folder);
+            }
+            Err(err)
+        }
+    }
+}
+
+#[tauri::command]
+fn skill_delete(app: AppHandle, name: String) -> Result<(), String> {
+    skills::delete(&name)?;
+    remember(&app, |s| s.skills_enabled.retain(|n| n != &name));
+    Ok(())
+}
+
+#[tauri::command]
+fn skill_set_enabled(app: AppHandle, name: String, enabled: bool) -> Result<(), String> {
+    if enabled && skills::load(&name).is_none() {
+        return Err("that skill is not installed".to_string());
+    }
+    remember(&app, |s| {
+        s.skills_enabled.retain(|n| n != &name);
+        if enabled {
+            s.skills_enabled.push(name.clone());
+        }
+    });
+    Ok(())
 }
 
 /// The most recent action-log entries, oldest first.
@@ -1304,6 +1375,10 @@ pub fn run() {
             quick_app_add,
             quick_app_remove,
             quick_log,
+            skill_list,
+            skill_import,
+            skill_delete,
+            skill_set_enabled,
         ])
         .setup(move |app| {
             let handle = app.handle().clone();

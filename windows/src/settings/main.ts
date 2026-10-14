@@ -571,7 +571,89 @@ function quickSection(): HTMLElement {
 
   void draw();
 
-  return h("section", {}, h("h2", {}, dot, h("span", { text: t("quick.settings.title") })), body);
+  return h(
+    "section",
+    {},
+    h("h2", {}, dot, h("span", { text: t("quick.settings.title") })),
+    body,
+    skillsBlock(),
+  );
+}
+
+/**
+ * Imported skills: instructions for the quick assistant, nothing more. Only a
+ * skill's SKILL.md is ever copied; Rust ignores scripts/ and allowed-tools, and
+ * the note below says so. What the last import left out is remembered here for
+ * the session only (Rust stores just the file).
+ */
+function skillsBlock(): HTMLElement {
+  const box = h("div", { style: "display:flex;flex-direction:column;gap:8px;margin-top:12px" });
+  const leftOut = new Map<string, string[]>();
+  let message: HTMLElement | null = null;
+
+  async function doImport(replace: boolean) {
+    message = null;
+    try {
+      const view = await Bridge.skillImport(replace);
+      if (view) leftOut.set(view.name, view.ignored);
+    } catch (err) {
+      const text = String(err).replace(/^Error:\s*/, "");
+      if (text.startsWith("exists:")) {
+        message = inlineConfirm({
+          message: t("settings.skills.replaceConfirm"),
+          confirmLabel: t("settings.skills.replace"),
+          cancelLabel: t("settings.skills.neverMind"),
+          onConfirm: () => void doImport(true),
+          onCancel: () => { message = null; void draw(); },
+        });
+      } else {
+        message = h("div", { class: "notice err", text: t("settings.skills.failed", { detail: text }) });
+      }
+    }
+    await draw();
+  }
+
+  async function draw() {
+    const skills = (await Bridge.skillList()) ?? [];
+    clear(box);
+    box.append(
+      h("div", { class: "row" },
+        h("label", { text: t("settings.skills.title") }),
+        h("button", { text: t("settings.skills.import"), onclick: () => void doImport(false) }),
+      ),
+      h("div", { class: "hint", text: t("settings.skills.note") }),
+    );
+    if (message) box.append(message);
+    if (skills.length === 0) box.append(h("div", { class: "hint", text: t("settings.skills.none") }));
+    for (const s of skills) {
+      const ignored = leftOut.get(s.name) ?? s.ignored;
+      const files = ignored.filter((i) => i !== "allowed-tools");
+      const notes: HTMLElement[] = [];
+      if (files.length > 0) {
+        notes.push(h("div", { class: "hint", text: t("settings.skills.notImported", { list: files.join(", ") }) }));
+      }
+      if (ignored.includes("allowed-tools")) {
+        notes.push(h("div", { class: "hint", text: t("settings.skills.ignoresAllowedTools") }));
+      }
+      box.append(
+        h("div", { style: "display:flex;flex-direction:column;gap:2px" },
+          h("div", { class: "row" },
+            h("code", { class: "path", text: s.name, title: s.description }),
+            toggle(s.enabled, (v) => { void Bridge.skillSetEnabled(s.name, v); }),
+            h("button", {
+              text: t("settings.skills.remove"),
+              onclick: async () => { await Bridge.skillDelete(s.name); leftOut.delete(s.name); await draw(); },
+            }),
+          ),
+          h("div", { class: "hint", text: s.description.length > 90 ? `${s.description.slice(0, 89)}…` : s.description }),
+          ...notes,
+        ),
+      );
+    }
+  }
+
+  void draw();
+  return box;
 }
 
 // ── Memory section ───────────────────────────────────────────────────────────

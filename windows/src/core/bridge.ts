@@ -158,6 +158,13 @@ export const Bridge = {
    *  (kept in memory by Rust, never written anywhere). */
   usageSummary: () => call<BackendSummary[]>("usage_summary"),
   usageReset: () => call<void>("usage_reset"),
+  /** Imported skills — instructions only; nothing in them is ever run. */
+  skillList: () => call<SkillView[]>("skill_list"),
+  /** Picks a skill folder and imports its SKILL.md. Null when cancelled; rejects
+   *  with `exists:<name>` when one is installed (call again with `replace`). */
+  skillImport: (replace: boolean) => callOrThrow<SkillView | null>("skill_import", { replace }),
+  skillDelete: (name: string) => callOrThrow<void>("skill_delete", { name }),
+  skillSetEnabled: (name: string, enabled: boolean) => callOrThrow<void>("skill_set_enabled", { name, enabled }),
   /** Pinned notes for the provider chat. Stored by Rust, never a key. */
   memoryNotes: () => call<MemoryNote[]>("memory_notes"),
   memoryAdd: (text: string) => callOrThrow<MemoryNote>("memory_add", { text }),
@@ -280,6 +287,15 @@ export interface MemoryNote {
   id: string;
   at: number;
   text: string;
+}
+
+/** An imported skill (skills.rs's `SkillView`). `ignored` lists what the source
+ *  had that Coucou does not take: scripts, references, assets, allowed-tools. */
+export interface SkillView {
+  name: string;
+  description: string;
+  enabled: boolean;
+  ignored: string[];
 }
 
 /** One backend's row of the Usage pane (usage.rs's `BackendSummary`). A field

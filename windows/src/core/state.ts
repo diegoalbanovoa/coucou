@@ -142,6 +142,9 @@ export interface Settings {
   memoryEnabled: boolean;
   /** One extra model call when the conversation outgrows the context budget. */
   memoryAutoSummary: boolean;
+
+  /** Names of the imported skills the quick assistant may load (Fase 6). */
+  skillsEnabled: string[];
 }
 
 /** One entry of the quick assistant's app allow-list. */
@@ -183,6 +186,7 @@ export const DEFAULT_SETTINGS: Settings = {
   quickAssistantApps: [],
   memoryEnabled: false,
   memoryAutoSummary: false,
+  skillsEnabled: [],
 };
 
 type Listener = () => void;
