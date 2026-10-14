@@ -14,6 +14,7 @@ import {
   type DroppedFile,
   type ProviderProfile,
 } from "../core/bridge";
+import { providerHistory } from "../core/provider-history";
 import { Sound } from "../core/sound";
 import { State, type ChatMessage } from "../core/state";
 import {
@@ -1105,7 +1106,7 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
       const text = State.agentCli
         ? await Bridge.agentSend(State.agentCli, prompt)
         : State.selectedProvider
-          ? await Bridge.providerSend(State.selectedProvider, prompt)
+          ? await Bridge.providerSend(State.selectedProvider, prompt, providerHistory(State.chatHistory))
           : await Promise.reject(
               new Error("No agent CLI found. Install Claude Code, or another agent CLI, and Coucou will pick it up."),
             );

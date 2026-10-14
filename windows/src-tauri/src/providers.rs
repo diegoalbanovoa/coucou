@@ -189,12 +189,62 @@ impl ProviderError {
     }
 }
 
+// ── Conversation context ──────────────────────────────────────────────────
+
+/// One earlier message of the visible chat, as the webview sends it. Only the
+/// `user` and `assistant` roles ever reach the model.
+#[derive(Deserialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct HistoryMessage {
+    pub role: String,
+    pub content: String,
+}
+
+/// How much earlier conversation goes along with a turn, in characters
+/// (about 6 000 tokens). A starting value: a small local model may truncate
+/// it silently, see docs/plan-v4-notas.md.
+pub const HISTORY_BUDGET_CHARS: usize = 24_000;
+
+/// The newest messages that fit in `budget` characters, oldest first. Roles
+/// other than `user`/`assistant` and empty messages are dropped; a message
+/// that does not fit whole drops itself and everything before it, so the
+/// model never sees a conversation with a hole in the middle.
+pub fn fit_history(history: &[HistoryMessage], budget: usize) -> Vec<HistoryMessage> {
+    let mut used = 0usize;
+    let mut kept: Vec<HistoryMessage> = Vec::new();
+    for m in history
+        .iter()
+        .rev()
+        .filter(|m| (m.role == "user" || m.role == "assistant") && !m.content.is_empty())
+    {
+        let len = m.content.chars().count();
+        if used + len > budget {
+            break;
+        }
+        used += len;
+        kept.push(m.clone());
+    }
+    kept.reverse();
+    kept
+}
+
+/// The `messages` array of a request: the fitted history, then the prompt.
+pub fn build_messages(history: &[HistoryMessage], prompt: &str) -> Value {
+    let mut messages: Vec<Value> = fit_history(history, HISTORY_BUDGET_CHARS)
+        .into_iter()
+        .map(|m| serde_json::json!({"role": m.role, "content": m.content}))
+        .collect();
+    messages.push(serde_json::json!({"role": "user", "content": prompt}));
+    Value::Array(messages)
+}
+
 /// Sends one turn through a provider profile, streaming `Turn::Text` pieces
 /// to `on` as they arrive — the same shape `agent::send` already emits, so
 /// the chat's rendering code does not need to branch on which backend is
 /// replying. Returns the full assembled text, or a readable error.
 pub async fn send(
     profile: &ProviderProfile,
+    history: &[HistoryMessage],
     prompt: &str,
     cancel: &agent::Cancel,
     on: &(dyn Fn(Turn) + Send + Sync),
@@ -203,7 +253,7 @@ pub async fn send(
     let url = format!("{}/chat/completions", profile.base_url);
     let body = serde_json::json!({
         "model": profile.model,
-        "messages": [{"role": "user", "content": prompt}],
+        "messages": build_messages(history, prompt),
         "stream": true,
     });
 
@@ -352,6 +402,57 @@ pub async fn detect_ollama() -> Vec<OllamaModel> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn hm(role: &str, content: &str) -> HistoryMessage {
+        HistoryMessage { role: role.into(), content: content.into() }
+    }
+
+    #[test]
+    fn the_budget_cuts_the_oldest_messages() {
+        let h = [hm("user", "aaaa"), hm("assistant", "bbbb"), hm("user", "cccc")];
+        let kept = fit_history(&h, 8);
+        assert_eq!(kept, vec![hm("assistant", "bbbb"), hm("user", "cccc")]);
+    }
+
+    #[test]
+    fn the_kept_history_stays_chronological() {
+        let h = [hm("user", "one"), hm("assistant", "two"), hm("user", "three")];
+        assert_eq!(fit_history(&h, 1000), h.to_vec());
+    }
+
+    #[test]
+    fn errors_and_empty_messages_are_dropped() {
+        let h = [hm("user", "hi"), hm("error", "boom"), hm("assistant", ""), hm("assistant", "yo")];
+        assert_eq!(fit_history(&h, 1000), vec![hm("user", "hi"), hm("assistant", "yo")]);
+    }
+
+    #[test]
+    fn a_message_that_does_not_fit_cuts_everything_before_it() {
+        // The big one does not fit, so the small one before it must not
+        // sneak in either: no hole in the middle of the conversation.
+        let h = [hm("user", "ab"), hm("assistant", "0123456789"), hm("user", "cd")];
+        assert_eq!(fit_history(&h, 5), vec![hm("user", "cd")]);
+    }
+
+    #[test]
+    fn the_budget_counts_characters_not_bytes() {
+        let h = [hm("user", "ñññ")];
+        assert_eq!(fit_history(&h, 3).len(), 1);
+    }
+
+    #[test]
+    fn build_messages_ends_with_the_prompt() {
+        let m = build_messages(&[hm("user", "hi"), hm("assistant", "yo")], "now");
+        let arr = m.as_array().unwrap();
+        assert_eq!(arr.len(), 3);
+        assert_eq!(arr[2], serde_json::json!({"role": "user", "content": "now"}));
+        assert_eq!(arr[0], serde_json::json!({"role": "user", "content": "hi"}));
+    }
+
+    #[test]
+    fn with_no_history_the_body_is_the_single_message_it_always_was() {
+        assert_eq!(build_messages(&[], "hello"), serde_json::json!([{"role": "user", "content": "hello"}]));
+    }
 
     #[test]
     fn creating_two_profiles_with_the_same_label_gives_distinct_ids() {

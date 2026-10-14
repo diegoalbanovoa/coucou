@@ -135,8 +135,8 @@ export const Bridge = {
   providerDelete: (id: string) => callOrThrow<void>("provider_delete", { id }),
   /** One turn through a provider profile — no tools. Streams on the same
    *  "agent-turn" event an agent-CLI turn uses. */
-  providerSend: (profileId: string, prompt: string) =>
-    callOrThrow<string>("provider_send", { profileId, prompt }),
+  providerSend: (profileId: string, prompt: string, history: { role: "user" | "assistant"; content: string }[]) =>
+    callOrThrow<string>("provider_send", { profileId, prompt, history }),
   /** The models a local Ollama server has, or an empty list if none
    *  answers — checked only when the picker opens. */
   ollamaDetect: () => call<OllamaModel[]>("ollama_detect"),

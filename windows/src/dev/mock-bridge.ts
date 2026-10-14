@@ -171,6 +171,11 @@ async function agentSend(cli: string, prompt: string) {
   return "mock-session-id";
 }
 
+async function providerSend(profileId: string, prompt: string, history: { role: string; content: string }[]) {
+  console.info("[mock] provider_send", profileId, prompt, `${history.length} earlier messages`);
+  return "mock reply";
+}
+
 async function agentCancel() {
   return true;
 }
@@ -364,6 +369,7 @@ export const Bridge = {
   attachProject,
   detachProject,
   agentSend,
+  providerSend,
   agentCancel,
   vaultState,
   pickVault,

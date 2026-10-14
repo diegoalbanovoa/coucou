@@ -787,14 +787,19 @@ fn provider_delete(id: String) -> Result<(), String> {
 /// so the chat's rendering code needs no new branch for where a chunk of
 /// text came from.
 #[tauri::command]
-async fn provider_send(app: AppHandle, profile_id: String, prompt: String) -> Result<String, String> {
+async fn provider_send(
+    app: AppHandle,
+    profile_id: String,
+    prompt: String,
+    history: Option<Vec<providers::HistoryMessage>>,
+) -> Result<String, String> {
     let profile = providers::load(&profile_id).ok_or_else(|| "unknown provider profile".to_string())?;
     let emitter = app.clone();
     let on = move |turn: agent::Turn| {
         let _ = emitter.emit("agent-turn", turn);
     };
     let cancel = app.state::<agent::Cancel>();
-    providers::send(&profile, &prompt, &cancel, &on).await.map_err(|e| e.message())
+    providers::send(&profile, &history.unwrap_or_default(), &prompt, &cancel, &on).await.map_err(|e| e.message())
 }
 
 /// The models a local Ollama server has, or an empty list when none
