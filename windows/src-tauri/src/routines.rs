@@ -610,6 +610,25 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_routine_whose_model_repeats_a_call_ends_in_a_loop_guard_error() {
+        let out = run_with(
+            &routine(true),
+            false,
+            Some("m"),
+            "sys".into(),
+            None,
+            |_| async {
+                Ok(json!({"choices": [{"message": {"tool_calls": [
+                    {"id": "c", "function": {"name": "query_vault", "arguments": "{}"}}]}}]}))
+            },
+            |_| async { "briefing".to_string() },
+        )
+        .await;
+        assert_eq!(out.outcome, "error");
+        assert!(out.text.starts_with("loop-guard:"));
+    }
+
+    #[tokio::test]
     async fn an_endpoint_error_is_an_error_outcome() {
         let out = run_with(
             &routine(false),

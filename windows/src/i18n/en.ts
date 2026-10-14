@@ -432,6 +432,8 @@ export const en = {
     errInvalidKey: "The API key was rejected.",
     errNoNetwork: "Could not reach the model.",
     errRateLimited: "Rate limited or out of quota.",
+    errLoopGuard: "Stopped: the model kept repeating the same actions.",
+    errTooManyRounds: "Stopped: the model needed too many steps.",
     errEndpoint: "The model failed: {detail}",
     settings: {
       title: "Quick assistant",
@@ -465,6 +467,7 @@ export const en = {
         refusedSensitive: "refused (protected file)",
         redacted: "secrets hidden from the model",
         flaggedInjection: "suspicious instructions flagged",
+        refusedLoop: "refused (repeated action)",
       },
     },
   },

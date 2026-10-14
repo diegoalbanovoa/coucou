@@ -12,6 +12,7 @@ use std::time::Duration;
 
 use serde_json::{json, Value};
 
+use crate::loop_guard::{self, LoopGuard, LoopKind, Verdict};
 use crate::providers::{ProviderError, ProviderProfile};
 use crate::usage::{self, Usage};
 use crate::settings::AllowedApp;
@@ -199,6 +200,7 @@ where
         json!({"role": "user", "content": prompt}),
     ];
     let mut total = Usage::default();
+    let mut guard = LoopGuard::new();
     for _ in 0..MAX_ROUNDS {
         let body = json!({
             "model": model,
@@ -217,11 +219,26 @@ where
         messages.push(completion.message);
         for call in completion.calls {
             let id = call.id.clone();
-            let result = exec(call).await;
+            let verdict = guard.check(&call.name, &call.args);
+            if let Verdict::Block(kind) = verdict {
+                crate::quick_assistant::record_refusal(&call.name, &call.args, "refused-loop");
+                return Err(format!(
+                    "loop-guard:{}",
+                    match kind {
+                        LoopKind::Identical => "identical",
+                        LoopKind::Cycle => "cycle",
+                    }
+                ));
+            }
+            let mut result = exec(call).await;
+            if let Verdict::Warn(kind) = verdict {
+                result.push_str("\n\n");
+                result.push_str(loop_guard::warning_text(kind));
+            }
             messages.push(json!({"role": "tool", "tool_call_id": id, "content": result}));
         }
     }
-    Err("endpoint:too many tool rounds".to_string())
+    Err("loop-guard:max-rounds".to_string())
 }
 
 /// The real POST against the profile's endpoint. The key is read from the
@@ -367,17 +384,105 @@ mod tests {
     async fn a_model_that_never_stops_calling_tools_is_cut_off() {
         let looping = json!({"choices": [{"message": {"tool_calls": [
             {"id": "c", "function": {"name": "query_vault", "arguments": "{}"}}]}}]});
+        let last_body = RefCell::new(Value::Null);
+        let executed = std::cell::Cell::new(0);
+        let out = run(
+            "sys".into(),
+            "x",
+            "m",
+            |body| {
+                *last_body.borrow_mut() = body;
+                let v = looping.clone();
+                async move { Ok(v) }
+            },
+            |_| {
+                executed.set(executed.get() + 1);
+                async { "r".to_string() }
+            },
+        )
+        .await;
+        assert_eq!(out.unwrap_err(), "loop-guard:identical");
+        assert_eq!(executed.get(), 3);
+        let body = last_body.borrow();
+        let tools: Vec<&Value> = body["messages"].as_array().unwrap().iter().filter(|m| m["role"] == "tool").collect();
+        assert_eq!(tools.len(), 3);
+        assert!(tools[2]["content"].as_str().unwrap().ends_with(loop_guard::warning_text(LoopKind::Identical)));
+        assert_eq!(tools[1]["content"], "r");
+    }
+
+    fn call_round(name: &str, args: Value) -> Value {
+        json!({"choices": [{"message": {"tool_calls": [
+            {"id": "c", "function": {"name": name, "arguments": args.to_string()}}]}}]})
+    }
+
+    #[tokio::test]
+    async fn a_ping_pong_between_two_calls_is_cut_off_after_a_warning() {
+        let step = std::cell::Cell::new(0);
+        let last_body = RefCell::new(Value::Null);
+        let executed = std::cell::Cell::new(0);
+        let out = run(
+            "sys".into(),
+            "x",
+            "m",
+            |body| {
+                *last_body.borrow_mut() = body;
+                let n = step.get();
+                step.set(n + 1);
+                let round = if n % 2 == 0 {
+                    call_round("query_vault", json!({}))
+                } else {
+                    call_round("search_files", json!({"query": "q", "folder": "f"}))
+                };
+                async move { Ok(round) }
+            },
+            |_| {
+                executed.set(executed.get() + 1);
+                async { "r".to_string() }
+            },
+        )
+        .await;
+        assert_eq!(out.unwrap_err(), "loop-guard:cycle");
+        assert_eq!(executed.get(), 4);
+        let body = last_body.borrow();
+        let tools: Vec<&Value> = body["messages"].as_array().unwrap().iter().filter(|m| m["role"] == "tool").collect();
+        assert!(tools[3]["content"].as_str().unwrap().ends_with(loop_guard::warning_text(LoopKind::Cycle)));
+    }
+
+    #[tokio::test]
+    async fn six_rounds_of_different_calls_end_with_the_max_rounds_error() {
+        let step = std::cell::Cell::new(0);
         let out = run(
             "sys".into(),
             "x",
             "m",
             |_| {
-                let v = looping.clone();
-                async move { Ok(v) }
+                let n = step.get();
+                step.set(n + 1);
+                let round = call_round("search_files", json!({"query": format!("q{n}"), "folder": "f"}));
+                async move { Ok(round) }
             },
             |_| async { "r".to_string() },
         )
         .await;
-        assert!(out.unwrap_err().starts_with("endpoint:"));
+        assert_eq!(out.unwrap_err(), "loop-guard:max-rounds");
+    }
+
+    #[tokio::test]
+    async fn a_block_leaves_a_refused_loop_record() {
+        let token = crate::agent::uuid_v4();
+        let out = run(
+            "sys".into(),
+            "x",
+            "m",
+            |_| {
+                let round = call_round("search_files", json!({"query": token.clone(), "folder": "f"}));
+                async move { Ok(round) }
+            },
+            |_| async { "r".to_string() },
+        )
+        .await;
+        assert_eq!(out.unwrap_err(), "loop-guard:identical");
+        let entry = crate::quick_assistant::recent_log(10_000).into_iter().rev().find(|e| e.target.contains(&token)).unwrap();
+        assert_eq!(entry.outcome, "refused-loop");
     }
 }

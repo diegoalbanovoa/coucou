@@ -432,6 +432,11 @@ fn target_for(tool: &str, args: &Value) -> String {
     }
 }
 
+/// Records a refusal made before a call reaches `dispatch` (the loop guard).
+pub(crate) fn record_refusal(name: &str, args: &Value, outcome: &str) {
+    record(name, &target_for(name, args), outcome);
+}
+
 /// Everything a tool returns on its way to the model — its own errors
 /// included, so a file that starts with "Error:" gets no free pass.
 fn harden_output(tool: &str, target: &str, raw: String) -> String {

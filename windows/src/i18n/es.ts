@@ -412,6 +412,8 @@ export const es: Messages = {
     errInvalidKey: "Se rechazó la clave de API.",
     errNoNetwork: "No se pudo contactar con el modelo.",
     errRateLimited: "Límite de uso alcanzado o sin cuota.",
+    errLoopGuard: "Se detuvo: el modelo repetía las mismas acciones.",
+    errTooManyRounds: "Se detuvo: el modelo necesitó demasiados pasos.",
     errEndpoint: "El modelo falló: {detail}",
     settings: {
       title: "Asistente rápido",
@@ -445,6 +447,7 @@ export const es: Messages = {
         refusedSensitive: "rechazada (archivo protegido)",
         redacted: "secretos ocultados al modelo",
         flaggedInjection: "instrucciones sospechosas señaladas",
+        refusedLoop: "rechazada (acción repetida)",
       },
     },
   },

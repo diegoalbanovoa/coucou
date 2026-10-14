@@ -467,6 +467,7 @@ function outcomeLabel(outcome: string): string {
     case "auto-approved": return t("quick.settings.outcome.autoApproved");
     case "refused-paused": return t("quick.settings.outcome.refusedPaused");
     case "flagged-injection": return t("quick.settings.outcome.flaggedInjection");
+    case "refused-loop": return t("quick.settings.outcome.refusedLoop");
     case "redacted": return t("quick.settings.outcome.redacted");
     case "refused-sensitive": return t("quick.settings.outcome.refusedSensitive");
     default: return t("quick.settings.outcome.refusedScope");

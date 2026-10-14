@@ -34,6 +34,8 @@ export function errorText(raw: unknown): string {
       return t("quick.errNoNetwork");
     case "rate-limited":
       return t("quick.errRateLimited");
+    case "loop-guard":
+      return detail === "max-rounds" ? t("quick.errTooManyRounds") : t("quick.errLoopGuard");
     default:
       return t("quick.errEndpoint", { detail });
   }

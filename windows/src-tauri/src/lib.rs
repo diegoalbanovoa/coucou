@@ -11,6 +11,7 @@ mod i18n;
 mod integrations;
 mod island;
 mod log;
+mod loop_guard;
 mod memory;
 mod pipe;
 mod platform;
