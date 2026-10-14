@@ -43,6 +43,8 @@ pub enum Key {
     Quit,
     /// Title bar of the paperclip's native multi-select picker.
     AttachFiles,
+    /// Title bar of the picker that adds an app to the quick assistant.
+    ChooseApp,
 }
 
 pub fn tr(locale: Locale, key: Key) -> &'static str {
@@ -57,6 +59,8 @@ pub fn tr(locale: Locale, key: Key) -> &'static str {
         (Locale::Es, Key::Quit) => "Salir",
         (Locale::En, Key::AttachFiles) => "Attach files",
         (Locale::Es, Key::AttachFiles) => "Adjuntar archivos",
+        (Locale::En, Key::ChooseApp) => "Choose an app",
+        (Locale::Es, Key::ChooseApp) => "Elegir una aplicación",
     }
 }
 
@@ -66,7 +70,7 @@ mod tests {
 
     #[test]
     fn every_key_answers_in_both_locales() {
-        for key in [Key::Open, Key::Settings, Key::Pause, Key::Quit, Key::AttachFiles] {
+        for key in [Key::Open, Key::Settings, Key::Pause, Key::Quit, Key::AttachFiles, Key::ChooseApp] {
             assert!(!tr(Locale::En, key_copy(&key)).is_empty());
             assert!(!tr(Locale::Es, key).is_empty());
         }
@@ -81,6 +85,7 @@ mod tests {
             Key::Pause => Key::Pause,
             Key::Quit => Key::Quit,
             Key::AttachFiles => Key::AttachFiles,
+            Key::ChooseApp => Key::ChooseApp,
         }
     }
 

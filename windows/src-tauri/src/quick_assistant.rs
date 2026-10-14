@@ -9,11 +9,15 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
+use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
+use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::mpsc;
 
-use crate::{platform, settings::AllowedApp, vault};
+use crate::settings::{AllowedApp, Settings};
+use crate::{integrations, island, log, platform, vault};
 
 // ── Folder allow-list ────────────────────────────────────────────────────
 
@@ -80,8 +84,108 @@ pub enum Decision {
     Deny,
 }
 
+/// What the island can say about a request — the same three things it can
+/// say about a hook one (`pipe::Reply`), kept as this module's own type.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Reply {
+    /// The card is on screen and a human can act on it.
+    Ack,
+    Decision(Decision),
+    /// Nobody can act on it — paused, or another card already holds the view.
+    Decline,
+}
+
 #[derive(Default)]
-pub struct Pending(pub Mutex<HashMap<String, mpsc::Sender<Decision>>>);
+pub struct Pending(pub Mutex<HashMap<String, mpsc::Sender<Reply>>>);
+
+/// How long the island has to say "the card is up" before the request is
+/// treated as unanswerable — mirrors `pipe.rs`'s ACK_TIMEOUT.
+const ACK_TIMEOUT: Duration = Duration::from_millis(800);
+/// How long a human has to click — mirrors `pipe.rs`'s DECISION_TIMEOUT, and
+/// stays under the card's own 110 s clean-up in `island/hooks.ts`.
+const DECISION_TIMEOUT: Duration = Duration::from_secs(108);
+
+/// Every request id this module mints starts with this; `lib.rs`'s
+/// `approval_*` commands route on it. A hook request id is
+/// `<pid>-<counter>`, so the two can never collide.
+pub const ID_PREFIX: &str = "qa-";
+
+pub fn is_quick_id(request_id: &str) -> bool {
+    request_id.starts_with(ID_PREFIX)
+}
+
+/// Two waits, like the hook relay's: a short one for "the card is up", then
+/// the long one for a human. Anything but an explicit Allow is a Deny — a
+/// timeout, a decline, a dropped channel: nobody clicked, so nothing runs.
+pub async fn wait_for_reply(
+    rx: &mut mpsc::Receiver<Reply>,
+    ack_timeout: Duration,
+    decision_timeout: Duration,
+) -> Decision {
+    match tokio::time::timeout(ack_timeout, rx.recv()).await {
+        Ok(Some(Reply::Ack)) => {}
+        // A click that beats the ack is still a click.
+        Ok(Some(Reply::Decision(d))) => return d,
+        _ => return Decision::Deny,
+    }
+    match tokio::time::timeout(decision_timeout, rx.recv()).await {
+        Ok(Some(Reply::Decision(d))) => d,
+        _ => Decision::Deny,
+    }
+}
+
+/// Registers a request, shows the existing approval card for it (a `"hook"`
+/// event with no `coucou_agent` field, so `island/hooks.ts` treats it as an
+/// ordinary Claude-style request), and waits for the click.
+pub async fn request_approval(app: &AppHandle, tool: &str, input: Value) -> Decision {
+    let id = next_request_id();
+    let (tx, mut rx) = mpsc::channel::<Reply>(4);
+    app.state::<Pending>().0.lock().unwrap().insert(id.clone(), tx);
+    let payload = json!({
+        "hook_event_name": "PermissionRequest",
+        "request_id": id,
+        "session_id": "quick-assistant",
+        "tool_name": tool,
+        "tool_input": input,
+    });
+    log::line(format!("quick assistant request {id} {tool}"));
+    let _ = app.emit_to(island::WINDOW_LABEL, "hook", payload);
+    let decision = wait_for_reply(&mut rx, ACK_TIMEOUT, DECISION_TIMEOUT).await;
+    app.state::<Pending>().0.lock().unwrap().remove(&id);
+    decision
+}
+
+fn send(app: &AppHandle, request_id: &str, reply: Reply, keep: bool) {
+    let sender = {
+        let pending = app.state::<Pending>();
+        let mut map = pending.0.lock().unwrap();
+        if keep { map.get(request_id).cloned() } else { map.remove(request_id) }
+    };
+    match sender {
+        Some(tx) => {
+            let _ = tx.try_send(reply);
+        }
+        None => log::line(format!("quick assistant reply for {request_id} — no pending request")),
+    }
+}
+
+pub fn acknowledge(app: &AppHandle, request_id: &str) {
+    send(app, request_id, Reply::Ack, true);
+}
+
+pub fn decline(app: &AppHandle, request_id: &str) {
+    send(app, request_id, Reply::Decline, false);
+}
+
+/// Only an explicit "allow" (or the card's "always", read as a single
+/// allow — there is no standing approval in this layer) lets anything run.
+pub fn answer(app: &AppHandle, request_id: &str, decision: &str) {
+    let d = match decision {
+        "allow" | "always" => Decision::Allow,
+        _ => Decision::Deny,
+    };
+    send(app, request_id, Reply::Decision(d), false);
+}
 
 static NEXT_REQUEST: AtomicU64 = AtomicU64::new(1);
 
@@ -118,8 +222,15 @@ pub struct LogEntry {
     pub outcome: String,
 }
 
+#[cfg(not(test))]
 fn log_path() -> PathBuf {
     platform::config_dir().join("quick-assistant-log.jsonl")
+}
+
+/// Tests must not write into the user's real log.
+#[cfg(test)]
+fn log_path() -> PathBuf {
+    std::env::temp_dir().join(format!("coucou-qa-test-log-{}.jsonl", std::process::id()))
 }
 
 /// Appends one entry. Never fails loudly — a log write must not be the
@@ -131,7 +242,9 @@ pub fn log_action(entry: &LogEntry) {
     }
     use std::io::Write;
     if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(log_path()) {
-        let _ = writeln!(file, "{line}");
+        // One write, newline included: two writes can interleave with another
+        // thread's and fuse two entries into one unreadable line.
+        let _ = file.write_all(format!("{line}\n").as_bytes());
     }
 }
 
@@ -191,8 +304,27 @@ pub fn read_approved_folder(path: &str, folders: &[String]) -> Result<String, St
     if !is_allowed_path(target, folders) {
         return Err("that path is not inside an allow-listed folder".to_string());
     }
-    std::fs::read_to_string(target).map_err(|e| e.to_string())
+    if target.is_dir() {
+        // "Read a folder" lists it: names only, capped.
+        let mut names: Vec<String> = std::fs::read_dir(target)
+            .map_err(|e| e.to_string())?
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().to_string())
+            .collect();
+        names.sort();
+        names.truncate(200);
+        return Ok(names.join("\n"));
+    }
+    // A file is read up to a cap, so one huge file cannot flood the model.
+    use std::io::Read;
+    let mut bytes = Vec::new();
+    std::fs::File::open(target)
+        .and_then(|f| f.take(MAX_READ_BYTES).read_to_end(&mut bytes))
+        .map_err(|e| e.to_string())?;
+    Ok(String::from_utf8_lossy(&bytes).to_string())
 }
+
+const MAX_READ_BYTES: u64 = 64 * 1024;
 
 /// `open_app`: looks up `app_id` in the allow-list and launches the
 /// already-resolved executable directly — never a path or command string
@@ -208,9 +340,293 @@ pub fn query_vault(vault_path: Option<&str>) -> Option<String> {
     vault::briefing(found.as_deref())
 }
 
+// ── Dispatch: pause gate, scope, approval, log ───────────────────────────
+
+fn str_arg<'a>(args: &'a Value, key: &str) -> &'a str {
+    args.get(key).and_then(Value::as_str).unwrap_or("")
+}
+
+fn record(tool: &str, target: &str, outcome: &str) {
+    let at = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
+    log_action(&LogEntry { at, tool: tool.to_string(), target: target.to_string(), outcome: outcome.to_string() });
+}
+
+/// Runs one tool call the model asked for and returns the text handed back to
+/// it. In order: the pause gate (everything refused), the allow-list scope
+/// (refused with no card — approving would not move the target inside it),
+/// then — for every tool but `read_approved_folder` — a click, every time.
+/// Every outcome, refusals and denials included, is logged.
+///
+/// `approve` shows the card and waits; it is injected so the gate logic is
+/// testable without an app.
+pub async fn dispatch<F, Fut>(name: &str, args: &Value, settings: &Settings, paused: bool, approve: F) -> String
+where
+    F: FnOnce(&'static str, Value) -> Fut,
+    Fut: std::future::Future<Output = Decision>,
+{
+    let tool: &'static str = match name {
+        "search_files" => "search_files",
+        "read_approved_folder" => "read_approved_folder",
+        "open_app" => "open_app",
+        "query_vault" => "query_vault",
+        other => {
+            record(other, "", "refused-scope");
+            return "Error: that is not one of the available tools.".to_string();
+        }
+    };
+    let target = match tool {
+        "search_files" => format!("{} in {}", str_arg(args, "query"), str_arg(args, "folder")),
+        "read_approved_folder" => str_arg(args, "path").to_string(),
+        "open_app" => str_arg(args, "app_id").to_string(),
+        _ => "vault".to_string(),
+    };
+
+    if refused_while_paused(paused).is_some() {
+        record(tool, &target, "refused-paused");
+        return "Error: Coucou is paused, so no action was taken.".to_string();
+    }
+
+    let folders = &settings.quick_assistant_folders;
+    let apps = &settings.quick_assistant_apps;
+
+    // Scope first: a card for a target that cannot run would only teach the
+    // user to click through them.
+    let scoped = match tool {
+        "search_files" => is_allowed_path(Path::new(str_arg(args, "folder")), folders),
+        "read_approved_folder" => is_allowed_path(Path::new(str_arg(args, "path")), folders),
+        "open_app" => apps.iter().any(|a| a.id == str_arg(args, "app_id")),
+        _ => true,
+    };
+    if !scoped {
+        record(tool, &target, "refused-scope");
+        return "Error: that target is not on the allow-list.".to_string();
+    }
+
+    if tool == "read_approved_folder" {
+        record(tool, &target, "auto-approved");
+        return read_approved_folder(str_arg(args, "path"), folders).unwrap_or_else(|e| format!("Error: {e}"));
+    }
+
+    // What the card names: a recognisable target, not just the tool.
+    let input = match tool {
+        "search_files" => json!({ "query": format!("{} — {}", str_arg(args, "query"), str_arg(args, "folder")) }),
+        "open_app" => {
+            let shown = apps
+                .iter()
+                .find(|a| a.id == str_arg(args, "app_id"))
+                .map(|a| format!("{} ({})", a.label, a.exe))
+                .unwrap_or_default();
+            json!({ "path": shown })
+        }
+        _ => {
+            let shown = vault::resolve(settings.vault_path.as_deref())
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_else(|| "vault".to_string());
+            json!({ "path": shown })
+        }
+    };
+
+    if approve(tool, input).await != Decision::Allow {
+        record(tool, &target, "denied");
+        return "Error: the user denied this action.".to_string();
+    }
+    record(tool, &target, "approved");
+
+    match tool {
+        "search_files" => match search_files(str_arg(args, "query"), str_arg(args, "folder"), folders) {
+            Ok(hits) if hits.is_empty() => "No files matched.".to_string(),
+            Ok(hits) => hits.join("\n"),
+            Err(e) => format!("Error: {e}"),
+        },
+        "open_app" => match open_app(str_arg(args, "app_id"), apps) {
+            Ok(()) => "The app was opened.".to_string(),
+            Err(e) => format!("Error: {e}"),
+        },
+        _ => query_vault(settings.vault_path.as_deref())
+            .unwrap_or_else(|| "Error: no Obsidian vault was found.".to_string()),
+    }
+}
+
+/// The real thing: the live pause flag and the real approval card.
+pub async fn execute_tool(app: &AppHandle, name: &str, args: &Value, settings: &Settings) -> String {
+    let paused = integrations::PAUSED.load(Ordering::Relaxed);
+    let handle = app.clone();
+    dispatch(name, args, settings, paused, move |tool, input| async move {
+        request_approval(&handle, tool, input).await
+    })
+    .await
+}
+
+// ── The global shortcut ──────────────────────────────────────────────────
+
+/// What the settings window shows about the shortcut: what was asked for,
+/// whether it took, and why not.
+#[derive(Serialize, Clone, Default, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ShortcutInfo {
+    pub shortcut: Option<String>,
+    pub registered: bool,
+    pub error: Option<String>,
+}
+
+#[derive(Default)]
+pub struct ShortcutStatus(pub Mutex<ShortcutInfo>);
+
+/// Registers `wanted` (replacing whatever this module registered before) and
+/// records the outcome. Never fails loudly: a conflict is a value for the
+/// settings window to show, not a reason to stop the app.
+pub fn apply_shortcut(app: &AppHandle, wanted: Option<&str>) -> ShortcutInfo {
+    use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
+    let gs = app.global_shortcut();
+    let _ = gs.unregister_all();
+    let wanted = wanted.map(str::trim).filter(|s| !s.is_empty());
+    let info = match wanted {
+        None => ShortcutInfo::default(),
+        Some(text) => {
+            let result = text.parse::<Shortcut>().map_err(|e| e.to_string()).and_then(|shortcut| {
+                gs.on_shortcut(shortcut, |app, _shortcut, event| {
+                    if event.state == ShortcutState::Pressed {
+                        let _ = app.emit_to(island::WINDOW_LABEL, "quick-ask", ());
+                    }
+                })
+                .map_err(|e| e.to_string())
+            });
+            match result {
+                Ok(()) => ShortcutInfo { shortcut: Some(text.to_string()), registered: true, error: None },
+                Err(error) => {
+                    log::line(format!("quick assistant shortcut {text} not registered: {error}"));
+                    ShortcutInfo { shortcut: Some(text.to_string()), registered: false, error: Some(error) }
+                }
+            }
+        }
+    };
+    *app.state::<ShortcutStatus>().0.lock().unwrap() = info.clone();
+    info
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn settings_with(folders: Vec<String>) -> Settings {
+        Settings { quick_assistant_folders: folders, ..Settings::default() }
+    }
+
+    fn never(_: &'static str, _: Value) -> std::future::Ready<Decision> {
+        panic!("no card should have been shown")
+    }
+
+    /// The newest log entry whose target contains `token` — tests share one
+    /// log file and run in parallel, so "the last line" is not theirs.
+    fn logged(token: &str) -> LogEntry {
+        recent_log(10_000).into_iter().rev().find(|e| e.target.contains(token)).unwrap()
+    }
+
+    fn token() -> String {
+        crate::agent::uuid_v4()
+    }
+
+    #[tokio::test]
+    async fn wait_for_reply_allows_only_on_an_explicit_allow() {
+        let (tx, mut rx) = mpsc::channel(4);
+        tx.send(Reply::Ack).await.unwrap();
+        tx.send(Reply::Decision(Decision::Allow)).await.unwrap();
+        assert_eq!(wait_for_reply(&mut rx, Duration::from_secs(1), Duration::from_secs(1)).await, Decision::Allow);
+    }
+
+    #[tokio::test]
+    async fn wait_for_reply_times_out_to_deny() {
+        let (_tx, mut rx) = mpsc::channel::<Reply>(4);
+        // No ack within the first window.
+        assert_eq!(wait_for_reply(&mut rx, Duration::from_millis(20), Duration::from_secs(1)).await, Decision::Deny);
+        // Acked, but nobody clicks.
+        let (tx, mut rx) = mpsc::channel(4);
+        tx.send(Reply::Ack).await.unwrap();
+        assert_eq!(wait_for_reply(&mut rx, Duration::from_secs(1), Duration::from_millis(20)).await, Decision::Deny);
+    }
+
+    #[tokio::test]
+    async fn wait_for_reply_denies_a_decline() {
+        let (tx, mut rx) = mpsc::channel(4);
+        tx.send(Reply::Decline).await.unwrap();
+        assert_eq!(wait_for_reply(&mut rx, Duration::from_secs(1), Duration::from_secs(1)).await, Decision::Deny);
+    }
+
+    #[test]
+    fn request_ids_carry_the_routing_prefix() {
+        assert!(is_quick_id(&next_request_id()));
+        assert!(!is_quick_id("1234-5"));
+    }
+
+    #[tokio::test]
+    async fn a_paused_island_refuses_every_tool_without_a_card() {
+        let settings = settings_with(Vec::new());
+        let t = token();
+        let args = json!({ "path": t, "query": t, "folder": t, "app_id": t });
+        for name in ["search_files", "read_approved_folder", "open_app", "query_vault"] {
+            let out = dispatch(name, &args, &settings, true, never).await;
+            assert!(out.starts_with("Error:"));
+        }
+        assert_eq!(logged(&t).outcome, "refused-paused");
+    }
+
+    #[tokio::test]
+    async fn read_inside_the_allow_list_needs_no_card_and_is_logged() {
+        let dir = tempdir();
+        std::fs::write(dir.join("a.txt"), b"hi").unwrap();
+        let settings = settings_with(vec![dir.to_string_lossy().to_string()]);
+        let args = json!({ "path": dir.join("a.txt").to_string_lossy() });
+        assert_eq!(dispatch("read_approved_folder", &args, &settings, false, never).await, "hi");
+        assert_eq!(logged(&dir.file_name().unwrap().to_string_lossy()).outcome, "auto-approved");
+    }
+
+    #[tokio::test]
+    async fn read_outside_the_allow_list_is_refused_with_no_card() {
+        let outside = tempdir();
+        std::fs::write(outside.join("a.txt"), b"hi").unwrap();
+        let settings = settings_with(vec![tempdir().to_string_lossy().to_string()]);
+        let args = json!({ "path": outside.join("a.txt").to_string_lossy() });
+        assert!(dispatch("read_approved_folder", &args, &settings, false, never).await.starts_with("Error:"));
+        assert_eq!(logged(&outside.file_name().unwrap().to_string_lossy()).outcome, "refused-scope");
+    }
+
+    #[tokio::test]
+    async fn search_asks_every_time_and_a_denial_runs_nothing() {
+        let dir = tempdir();
+        std::fs::write(dir.join("report.txt"), b"x").unwrap();
+        let settings = settings_with(vec![dir.to_string_lossy().to_string()]);
+        let args = json!({ "query": "report", "folder": dir.to_string_lossy() });
+        let denied = dispatch("search_files", &args, &settings, false, |_, _| std::future::ready(Decision::Deny)).await;
+        assert!(denied.contains("denied"));
+        let key = dir.file_name().unwrap().to_string_lossy().to_string();
+        assert_eq!(logged(&key).outcome, "denied");
+        let allowed = dispatch("search_files", &args, &settings, false, |tool, input| {
+            assert_eq!(tool, "search_files");
+            assert!(input["query"].as_str().unwrap().contains("report"));
+            std::future::ready(Decision::Allow)
+        })
+        .await;
+        assert!(allowed.contains("report.txt"));
+        assert_eq!(logged(&key).outcome, "approved");
+    }
+
+    #[tokio::test]
+    async fn a_tool_outside_the_four_is_refused() {
+        let settings = settings_with(Vec::new());
+        assert!(dispatch("delete_file", &json!({}), &settings, false, never).await.starts_with("Error:"));
+    }
+
+    #[test]
+    fn read_approved_folder_lists_a_directory() {
+        let dir = tempdir();
+        std::fs::write(dir.join("b.txt"), b"x").unwrap();
+        std::fs::write(dir.join("a.txt"), b"x").unwrap();
+        let folders = vec![dir.to_string_lossy().to_string()];
+        assert_eq!(read_approved_folder(&dir.to_string_lossy(), &folders).unwrap(), "a.txt\nb.txt");
+    }
 
     fn tempdir() -> PathBuf {
         let dir = std::env::temp_dir().join(format!("coucou-qa-test-{}", crate::agent::uuid_v4()));

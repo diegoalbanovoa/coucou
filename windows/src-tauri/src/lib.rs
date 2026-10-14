@@ -14,6 +14,7 @@ mod pipe;
 mod platform;
 mod providers;
 mod quick_assistant;
+mod quick_loop;
 mod secrets;
 mod settings;
 mod system;
@@ -347,6 +348,10 @@ fn hooks_apply(
 
 #[tauri::command]
 fn approval_decision(app: AppHandle, request_id: String, decision: String) {
+    if quick_assistant::is_quick_id(&request_id) {
+        quick_assistant::answer(&app, &request_id, &decision);
+        return;
+    }
     pipe::answer(&app, &request_id, &decision);
 }
 
@@ -355,6 +360,10 @@ fn approval_decision(app: AppHandle, request_id: String, decision: String) {
 /// what stops a paused or unresponsive island from freezing Claude Code.
 #[tauri::command]
 fn approval_ack(app: AppHandle, request_id: String) {
+    if quick_assistant::is_quick_id(&request_id) {
+        quick_assistant::acknowledge(&app, &request_id);
+        return;
+    }
     pipe::acknowledge(&app, &request_id);
 }
 
@@ -362,6 +371,10 @@ fn approval_ack(app: AppHandle, request_id: String) {
 /// already up. Claude Code falls back to asking in the terminal immediately.
 #[tauri::command]
 fn approval_decline(app: AppHandle, request_id: String) {
+    if quick_assistant::is_quick_id(&request_id) {
+        quick_assistant::decline(&app, &request_id);
+        return;
+    }
     pipe::decline(&app, &request_id);
 }
 
@@ -791,6 +804,122 @@ async fn ollama_detect() -> Vec<providers::OllamaModel> {
     providers::detect_ollama().await
 }
 
+// ── Quick assistant (openspec/changes/quick-assistant-tools) ─────────────────
+
+/// The quick-ask turn: the configured provider profile, the four tools, the
+/// approval card for each. Never touches the agent CLI or the chat's own
+/// provider selection. Errors are `<kind>:<detail>` strings, as provider_send's.
+#[tauri::command]
+async fn quick_ask(app: AppHandle, prompt: String) -> Result<String, String> {
+    let settings = shared_settings(&app);
+    let profile = settings
+        .quick_assistant_profile
+        .as_deref()
+        .filter(|id| !id.is_empty())
+        .and_then(providers::load)
+        .ok_or_else(|| "no-model:no model is configured for the quick assistant".to_string())?;
+    // Read for this request and dropped with it; never written anywhere.
+    let key = secrets::get(&providers::key_for(&profile.id));
+    let system = quick_loop::system_prompt(&settings.quick_assistant_folders, &settings.quick_assistant_apps);
+    let post_profile = profile.clone();
+    quick_loop::run(
+        system,
+        &prompt,
+        &profile.model,
+        |body| {
+            let profile = post_profile.clone();
+            let key = key.clone();
+            async move { quick_loop::post_completion(&profile, key.as_deref(), body).await }
+        },
+        |call| {
+            let app = app.clone();
+            let settings = settings.clone();
+            async move { quick_assistant::execute_tool(&app, &call.name, &call.args, &settings).await }
+        },
+    )
+    .await
+}
+
+#[tauri::command]
+fn quick_shortcut_status(status: State<quick_assistant::ShortcutStatus>) -> quick_assistant::ShortcutInfo {
+    status.0.lock().unwrap().clone()
+}
+
+/// Stores and registers the shortcut. A conflict comes back in the result, not
+/// as an error: the settings window names the shortcut that could not be had.
+#[tauri::command]
+fn quick_shortcut_set(app: AppHandle, shortcut: Option<String>) -> quick_assistant::ShortcutInfo {
+    let wanted = shortcut.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+    let stored = wanted.clone();
+    remember(&app, |s| s.quick_assistant_shortcut = stored);
+    quick_assistant::apply_shortcut(&app, wanted.as_deref())
+}
+
+#[tauri::command]
+fn quick_folders(app: AppHandle) -> Vec<String> {
+    shared_settings(&app).quick_assistant_folders
+}
+
+/// Opens the folder picker and adds the choice to the allow-list.
+#[tauri::command]
+async fn quick_folder_add(app: AppHandle) -> Option<String> {
+    let picked = choose_folder(settings_or_island(&app)?).await?;
+    let mut folders = shared_settings(&app).quick_assistant_folders;
+    quick_assistant::add_folder(&mut folders, &picked).ok()?;
+    remember(&app, |s| s.quick_assistant_folders = folders);
+    log::line(format!("quick assistant folder allowed: {picked}"));
+    Some(picked)
+}
+
+#[tauri::command]
+fn quick_folder_remove(app: AppHandle, path: String) {
+    remember(&app, |s| quick_assistant::remove_folder(&mut s.quick_assistant_folders, &path));
+}
+
+#[tauri::command]
+fn quick_apps(app: AppHandle) -> Vec<settings::AllowedApp> {
+    shared_settings(&app).quick_assistant_apps
+}
+
+/// Opens the file picker on an executable and adds it to the app allow-list.
+#[tauri::command]
+async fn quick_app_add(app: AppHandle) -> Option<settings::AllowedApp> {
+    let win = settings_or_island(&app)?;
+    if PICKING.swap(true, Ordering::SeqCst) {
+        return None;
+    }
+    let _guard = PickingGuard;
+    let title = {
+        let locale = i18n::Locale::resolve(&shared_settings(&app).language);
+        i18n::tr(locale, i18n::Key::ChooseApp).to_string()
+    };
+    let picked = tauri::async_runtime::spawn_blocking(move || platform::pick_files(&win, &title))
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .next()?;
+    let label = std::path::Path::new(&picked)
+        .file_stem()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| picked.clone());
+    let mut apps = shared_settings(&app).quick_assistant_apps;
+    let added = quick_assistant::add_app(&mut apps, &label, &picked).ok()?;
+    remember(&app, |s| s.quick_assistant_apps = apps);
+    log::line(format!("quick assistant app allowed: {}", added.label));
+    Some(added)
+}
+
+#[tauri::command]
+fn quick_app_remove(app: AppHandle, id: String) {
+    remember(&app, |s| quick_assistant::remove_app(&mut s.quick_assistant_apps, &id));
+}
+
+/// The most recent action-log entries, oldest first.
+#[tauri::command]
+fn quick_log(limit: Option<usize>) -> Vec<quick_assistant::LogEntry> {
+    quick_assistant::recent_log(limit.unwrap_or(50).min(500))
+}
+
 /// Starts a fresh conversation with the CLI, leaving the project attached.
 #[tauri::command]
 fn agent_reset(app: AppHandle) {
@@ -933,7 +1062,10 @@ pub fn run() {
             settings: Mutex::new(loaded.clone()),
             gate: gate.clone(),
         })
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .manage(Pending::default())
+        .manage(quick_assistant::Pending::default())
+        .manage(quick_assistant::ShortcutStatus::default())
         .manage(agent::Project::default())
         .manage(agent::Session::default())
         .manage(agent::Cancel::default())
@@ -999,6 +1131,16 @@ pub fn run() {
             open_n8n,
             open_settings_window,
             set_paused,
+            quick_ask,
+            quick_shortcut_status,
+            quick_shortcut_set,
+            quick_folders,
+            quick_folder_add,
+            quick_folder_remove,
+            quick_apps,
+            quick_app_add,
+            quick_app_remove,
+            quick_log,
         ])
         .setup(move |app| {
             let handle = app.handle().clone();
@@ -1023,6 +1165,8 @@ pub fn run() {
             log::line(format!("--- Coucou {} started ---", env!("CARGO_PKG_VERSION")));
             reconcile_autostart(&handle, loaded.autostart);
             restore_agent(&handle, &loaded);
+            // A conflict is recorded, not fatal: the settings window reports it.
+            quick_assistant::apply_shortcut(&handle, loaded.quick_assistant_shortcut.as_deref());
             hooks::ensure_hook_exe(&handle);
             pipe::start(handle.clone());
             integrations::start(handle.clone());
