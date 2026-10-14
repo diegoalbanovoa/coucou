@@ -452,7 +452,8 @@ export interface QuickLogEntry {
   at: number;
   tool: string;
   target: string;
-  /** "approved" | "denied" | "auto-approved" | "refused-paused" | "refused-scope" */
+  /** "approved" | "denied" | "auto-approved" | "refused-paused" | "refused-scope"
+   *  | "refused-sensitive" (and, from later phases, "refused-loop", "redacted", "flagged-injection") */
   outcome: string;
 }
 

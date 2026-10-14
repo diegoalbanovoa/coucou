@@ -17,7 +17,7 @@ use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::mpsc;
 
 use crate::settings::{AllowedApp, Settings};
-use crate::{integrations, island, log, platform, skills, vault};
+use crate::{integrations, island, log, platform, sensitive, skills, vault};
 
 // ── Folder allow-list ────────────────────────────────────────────────────
 
@@ -218,7 +218,7 @@ pub struct LogEntry {
     pub at: u64,
     pub tool: String,
     pub target: String,
-    /// "approved" | "denied" | "auto-approved" | "refused-paused" | "refused-scope"
+    /// "approved" | "denied" | "auto-approved" | "refused-paused" | "refused-scope" | "refused-sensitive"
     pub outcome: String,
 }
 
@@ -278,7 +278,11 @@ pub fn search_files(query: &str, folder: &str, folders: &[String]) -> Result<Vec
             return;
         }
         if entry.file_name().map(|n| n.to_string_lossy().to_lowercase().contains(&query_lower)).unwrap_or(false) {
-            hits.push(entry.to_string_lossy().to_string());
+            // Protected files are not offered either, so the model does not
+            // learn to ask for them.
+            if !sensitive::is_sensitive_path(entry) {
+                hits.push(entry.to_string_lossy().to_string());
+            }
         }
     });
     Ok(hits)
@@ -289,7 +293,9 @@ fn walk(dir: &Path, visit: &mut impl FnMut(&Path)) {
     for entry in entries.flatten() {
         let path = entry.path();
         visit(&path);
-        if path.is_dir() {
+        // `file_type` does not follow links: a folder link could lead out of
+        // the allowed folder, or round in a circle.
+        if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
             walk(&path, visit);
         }
     }
@@ -305,20 +311,26 @@ pub fn read_approved_folder(path: &str, folders: &[String]) -> Result<String, St
         return Err("that path is not inside an allow-listed folder".to_string());
     }
     if target.is_dir() {
-        // "Read a folder" lists it: names only, capped.
+        // "Read a folder" lists it: names only, capped, protected files left out.
         let mut names: Vec<String> = std::fs::read_dir(target)
             .map_err(|e| e.to_string())?
             .flatten()
+            .filter(|e| !sensitive::is_sensitive_path(&e.path()))
             .map(|e| e.file_name().to_string_lossy().to_string())
             .collect();
         names.sort();
         names.truncate(200);
         return Ok(names.join("\n"));
     }
+    if sensitive::is_sensitive_path(target) {
+        return Err(sensitive::PROTECTED_ERR.to_string());
+    }
+    // Open the resolved path, so the file read is exactly the one checked.
+    let real = target.canonicalize().map_err(|e| e.to_string())?;
     // A file is read up to a cap, so one huge file cannot flood the model.
     use std::io::Read;
     let mut bytes = Vec::new();
-    std::fs::File::open(target)
+    std::fs::File::open(real)
         .and_then(|f| f.take(MAX_READ_BYTES).read_to_end(&mut bytes))
         .map_err(|e| e.to_string())?;
     Ok(String::from_utf8_lossy(&bytes).to_string())
@@ -427,6 +439,13 @@ where
     if !scoped {
         record(tool, &target, "refused-scope");
         return "Error: that target is not on the allow-list.".to_string();
+    }
+
+    // A protected file is refused with no card: approving would not make it
+    // any less sensitive.
+    if tool == "read_approved_folder" && sensitive::is_sensitive_path(Path::new(str_arg(args, "path"))) {
+        record(tool, &target, "refused-sensitive");
+        return format!("Error: {}.", sensitive::PROTECTED_ERR);
     }
 
     if tool == "load_skill" {
@@ -694,6 +713,97 @@ mod tests {
         std::fs::write(dir.join("a.txt"), b"x").unwrap();
         let folders = vec![dir.to_string_lossy().to_string()];
         assert_eq!(read_approved_folder(&dir.to_string_lossy(), &folders).unwrap(), "a.txt\nb.txt");
+    }
+
+    #[cfg(unix)]
+    fn link(src: &Path, dst: &Path) -> bool {
+        std::os::unix::fs::symlink(src, dst).is_ok()
+    }
+    #[cfg(windows)]
+    fn link(src: &Path, dst: &Path) -> bool {
+        std::os::windows::fs::symlink_file(src, dst).is_ok()
+    }
+    #[cfg(unix)]
+    fn link_dir(src: &Path, dst: &Path) -> bool {
+        std::os::unix::fs::symlink(src, dst).is_ok()
+    }
+    #[cfg(windows)]
+    fn link_dir(src: &Path, dst: &Path) -> bool {
+        std::os::windows::fs::symlink_dir(src, dst).is_ok()
+    }
+
+    #[test]
+    fn read_approved_folder_refuses_a_protected_file() {
+        let dir = tempdir();
+        std::fs::write(dir.join(".env"), b"TOPSECRET").unwrap();
+        let folders = vec![dir.to_string_lossy().to_string()];
+        let err = read_approved_folder(&dir.join(".env").to_string_lossy(), &folders).unwrap_err();
+        assert!(!err.contains("TOPSECRET"));
+        assert_eq!(err, sensitive::PROTECTED_ERR);
+    }
+
+    #[tokio::test]
+    async fn dispatch_refuses_a_protected_file_with_no_card() {
+        let dir = tempdir();
+        std::fs::write(dir.join(".env"), b"TOPSECRET").unwrap();
+        let settings = settings_with(vec![dir.to_string_lossy().to_string()]);
+        let args = json!({ "path": dir.join(".env").to_string_lossy() });
+        let out = dispatch("read_approved_folder", &args, &settings, false, never).await;
+        assert!(out.starts_with("Error:"));
+        assert!(!out.contains("TOPSECRET"));
+        assert_eq!(logged(&dir.file_name().unwrap().to_string_lossy()).outcome, "refused-sensitive");
+    }
+
+    #[tokio::test]
+    async fn dispatch_refuses_an_innocent_link_to_a_protected_file() {
+        let dir = tempdir();
+        std::fs::write(dir.join(".env"), b"TOPSECRET").unwrap();
+        let l = dir.join("notes.txt");
+        if !link(&dir.join(".env"), &l) {
+            eprintln!("symlink not permitted, skipped");
+            return;
+        }
+        let settings = settings_with(vec![dir.to_string_lossy().to_string()]);
+        let args = json!({ "path": l.to_string_lossy() });
+        let out = dispatch("read_approved_folder", &args, &settings, false, never).await;
+        assert!(out.starts_with("Error:"));
+        assert!(!out.contains("TOPSECRET"));
+        assert_eq!(logged(&dir.file_name().unwrap().to_string_lossy()).outcome, "refused-sensitive");
+    }
+
+    #[test]
+    fn listing_a_folder_hides_protected_files() {
+        let dir = tempdir();
+        for n in [".env", "id_rsa", "a.txt"] {
+            std::fs::write(dir.join(n), b"x").unwrap();
+        }
+        let folders = vec![dir.to_string_lossy().to_string()];
+        assert_eq!(read_approved_folder(&dir.to_string_lossy(), &folders).unwrap(), "a.txt");
+    }
+
+    #[test]
+    fn search_files_hides_protected_files() {
+        let dir = tempdir();
+        std::fs::write(dir.join(".env"), b"x").unwrap();
+        std::fs::write(dir.join("env-notes.txt"), b"x").unwrap();
+        let folders = vec![dir.to_string_lossy().to_string()];
+        let hits = search_files("env", &dir.to_string_lossy(), &folders).unwrap();
+        assert_eq!(hits.len(), 1);
+        assert!(hits[0].ends_with("env-notes.txt"));
+    }
+
+    #[test]
+    fn walk_does_not_follow_a_folder_link() {
+        let dir = tempdir();
+        let outside = tempdir();
+        std::fs::write(outside.join("report.txt"), b"x").unwrap();
+        if !link_dir(&outside, &dir.join("out")) {
+            eprintln!("symlink not permitted, skipped");
+            return;
+        }
+        let folders = vec![dir.to_string_lossy().to_string()];
+        let hits = search_files("report", &dir.to_string_lossy(), &folders).unwrap();
+        assert!(hits.is_empty(), "{hits:?}");
     }
 
     fn tempdir() -> PathBuf {

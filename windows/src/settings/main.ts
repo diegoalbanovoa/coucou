@@ -466,6 +466,7 @@ function outcomeLabel(outcome: string): string {
     case "denied": return t("quick.settings.outcome.denied");
     case "auto-approved": return t("quick.settings.outcome.autoApproved");
     case "refused-paused": return t("quick.settings.outcome.refusedPaused");
+    case "refused-sensitive": return t("quick.settings.outcome.refusedSensitive");
     default: return t("quick.settings.outcome.refusedScope");
   }
 }

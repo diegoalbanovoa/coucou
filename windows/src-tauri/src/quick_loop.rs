@@ -41,7 +41,7 @@ pub fn tool_definitions() -> Value {
         }},
         {"type": "function", "function": {
             "name": "read_approved_folder",
-            "description": "Read a file, or list a folder, inside an allow-listed folder.",
+            "description": "Read a file, or list a folder, inside an allow-listed folder. Files that usually hold secrets (.env, private keys, credential files) are always refused.",
             "parameters": {"type": "object", "properties": {
                 "path": {"type": "string", "description": "A path inside an allow-listed folder."}
             }, "required": ["path"]}

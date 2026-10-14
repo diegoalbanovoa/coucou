@@ -18,6 +18,7 @@ mod quick_assistant;
 mod quick_loop;
 mod routines;
 mod secrets;
+mod sensitive;
 mod skills;
 mod settings;
 mod system;

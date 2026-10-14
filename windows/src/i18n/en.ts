@@ -462,6 +462,7 @@ export const en = {
         autoApproved: "allowed (allowed folder)",
         refusedPaused: "refused (paused)",
         refusedScope: "refused (not on the allow-list)",
+        refusedSensitive: "refused (protected file)",
       },
     },
   },

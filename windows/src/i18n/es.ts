@@ -442,6 +442,7 @@ export const es: Messages = {
         autoApproved: "permitida (carpeta permitida)",
         refusedPaused: "rechazada (en pausa)",
         refusedScope: "rechazada (fuera de la lista)",
+        refusedSensitive: "rechazada (archivo protegido)",
       },
     },
   },
