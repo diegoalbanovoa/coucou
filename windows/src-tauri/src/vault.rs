@@ -1,13 +1,14 @@
-// The Obsidian vault, as a knowledge base the agent can read and write.
-//
-// The path used to be one line in agent.rs with `OneDrive\Documentos\Obsidian
-// Vault` written into it. That is right for exactly one machine, and wrong
-// silently: a vault moved or renamed just stopped reaching the agent.
-//
-// Obsidian keeps its own list of vaults in obsidian.json, so it is asked
-// instead. What the user chose in the settings window wins over that, and
-// "none" is the honest answer when neither has one — the settings window then
-// offers the folder picker.
+//! The Obsidian vault, as a knowledge base the agent can read and write.
+//!
+//! The path used to be one line in agent.rs with `OneDrive\Documentos\Obsidian
+//! Vault` written into it. That is right for exactly one machine, and wrong
+//! silently: a vault moved or renamed just stopped reaching the agent.
+//!
+//! Obsidian keeps its own list of vaults in obsidian.json, so it is asked
+//! instead. What the user chose in the settings window wins over that, and
+//! "none" is the honest answer when neither has one -- the settings window then
+//! offers the folder picker. Used by agent.rs (the briefing) and the settings
+//! commands (info). This module only reads: it never writes to the vault.
 
 use std::path::{Path, PathBuf};
 

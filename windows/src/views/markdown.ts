@@ -7,6 +7,7 @@
 // Parsing is separate from drawing so the parsing can be tested without a DOM
 // (`parse`), and so the drawing can build nodes rather than HTML text: nothing
 // in a reply is ever parsed as markup, whatever the agent wrote.
+// Used by the chat, quick-ask and digest views.
 
 import { Bridge } from "../core/bridge";
 
@@ -18,6 +19,7 @@ export interface Span {
   href?: string;
 }
 
+/** A parsed block-level element of a reply. */
 export type Block =
   | { kind: "paragraph"; spans: Span[] }
   | { kind: "heading"; level: number; spans: Span[] }
@@ -31,6 +33,7 @@ export type Block =
 const INLINE =
   /(`[^`\n]+`)|(\*\*[^*\n]+\*\*)|(\*[^*\n]+\*)|(_[^_\n]+_)|(\[[^\]\n]*\]\([^)\s]+\))/;
 
+/** Block-level line patterns: code fence (captures the language), ATX heading, bullet and numbered list item. */
 const FENCE = /^\s*```+\s*([\w+-]*)\s*$/;
 const HEADING = /^(#{1,6})\s+(.+)$/;
 const BULLET = /^\s*[-*+]\s+(.+)$/;
@@ -149,6 +152,7 @@ export function parse(text: string): Block[] {
   return blocks;
 }
 
+/** Builds the DOM node for one span; text is always set as text, never as HTML. */
 function spanNode(span: Span): Node {
   switch (span.kind) {
     case "code": {
@@ -186,6 +190,7 @@ function spanNode(span: Span): Node {
   }
 }
 
+/** Appends the nodes of `spans` to `parent` and returns it. */
 function fill(parent: HTMLElement, spans: Span[]): HTMLElement {
   for (const span of spans) parent.append(spanNode(span));
   return parent;

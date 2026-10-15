@@ -8,13 +8,19 @@
 import { h } from "../views/dom";
 import { icon } from "../views/icons";
 
+/** Handle returned by `pushNav`. */
 export interface PushNav {
+  /** Mount this in the card. */
   el: HTMLElement;
+  /** Slides `body` in over the current frame, under a back button labelled `title`. */
   push(title: string, body: Node): void;
+  /** Goes back one frame; a no-op at the root. */
   pop(): void;
+  /** Number of frames, including the root (1 = nothing pushed). */
   readonly depth: number;
 }
 
+/** Creates a back-stack whose root frame holds `root`. */
 export function pushNav(root: Node): PushNav {
   const el = h("div", { class: "ui-push-nav" });
   const frames: HTMLElement[] = [h("div", { class: "ui-push-frame" }, root)];

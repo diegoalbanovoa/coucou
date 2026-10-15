@@ -1,13 +1,17 @@
-// Files that usually hold secrets (.env, private keys, credential files). The
-// quick assistant refuses to read them even inside an allow-listed folder, and
-// hides them from folder listings and file searches. Judged by name, following
-// symlinks, so an innocent-looking link to a `.env` is refused too.
+//! Files that usually hold secrets (.env, private keys, credential files). The
+//! quick assistant refuses to read them even inside an allow-listed folder, and
+//! hides them from folder listings and file searches. Judged by name, following
+//! symlinks, so an innocent-looking link to a `.env` is refused too.
+//!
+//! The check is name-based on purpose: it also protects files that do not exist
+//! yet or cannot be opened. On Windows, NTFS alternate data streams are refused.
 
 use std::path::Path;
 
 /// Message for the model when a read is refused.
 pub const PROTECTED_ERR: &str = "that file is protected because it may hold secrets, so it was not read";
 
+/// File names that are protected as a whole (lowercased comparison).
 const EXACT: &[&str] = &[
     ".env",
     ".secret",
@@ -20,7 +24,9 @@ const EXACT: &[&str] = &[
     "id_ecdsa",
     "id_dsa",
 ];
+/// Protected name prefixes, e.g. `.env.local`, `credentials.json`.
 const PREFIXES: &[&str] = &[".env.", "credentials."];
+/// Protected name suffixes, e.g. `prod.env`, `server.pem`.
 const SUFFIXES: &[&str] = &[".env", ".secrets", ".pem", ".key", ".p12", ".pfx", ".jks"];
 
 /// True when the name (last component) matches the policy. ASCII
@@ -32,6 +38,7 @@ pub fn is_sensitive_name(name: &str) -> bool {
         || SUFFIXES.iter().any(|s| n.ends_with(s))
 }
 
+/// Last path component as a lossy string, `None` for paths like `..`.
 fn last_name(path: &Path) -> Option<String> {
     path.file_name().map(|n| n.to_string_lossy().to_string())
 }

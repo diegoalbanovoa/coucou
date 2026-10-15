@@ -5,13 +5,16 @@
 import { h } from "../views/dom";
 import { icon, type IconName } from "../views/icons";
 
+/** Options for `iconButton`. */
 export interface IconButtonOptions {
   icon: IconName;
+  /** Tooltip and accessible name; required because the button has no text. */
   label: string;
   disabled?: boolean;
   onClick: () => void;
 }
 
+/** Builds a 32x32 icon-only `.ui-icon-btn` button. */
 export function iconButton(opts: IconButtonOptions): HTMLButtonElement {
   return h(
     "button",

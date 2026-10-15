@@ -1,24 +1,29 @@
-// Disk, memory, and a careful broom.
-//
-// The reading side is plain: how much room each drive has left, and how much
-// memory is in use. The cleaning side is where all the care is, because a tool
-// that deletes files on a machine it does not own has exactly one acceptable
-// shape:
-//
-//   1. Scan, and show what was found with its size.
-//   2. Wait for a click. Nothing is deleted without one.
-//   3. Delete only inside the folders on a fixed list.
-//
-// The list is in `targets()` and nowhere else. It holds user-owned caches and
-// nothing that needs administrator rights: %TEMP%, the recycle bin, the npm
-// and pip caches, and Coucou's own inbox and log. `C:\Windows\Temp` and
-// Prefetch are deliberately absent — they need elevation, and an app that
-// asks for it to tidy up has overstepped.
-//
-// `guard` is the part worth reading twice. Every candidate is canonicalised
-// and checked to be genuinely inside its target, which resolves `..` and makes
-// a symlink or junction point at where it really goes — the classic way a
-// cleaner deletes somewhere it never meant to on Windows.
+//! Disk, memory, and a careful broom.
+//!
+//! The reading side is plain: how much room each drive has left, and how much
+//! memory is in use. The cleaning side is where all the care is, because a tool
+//! that deletes files on a machine it does not own has exactly one acceptable
+//! shape:
+//!
+//!   1. Scan, and show what was found with its size.
+//!   2. Wait for a click. Nothing is deleted without one.
+//!   3. Delete only inside the folders on a fixed list.
+//!
+//! The list is in `targets()` and nowhere else. It holds user-owned caches and
+//! nothing that needs administrator rights: %TEMP%, the recycle bin, the npm
+//! and pip caches, and Coucou's own inbox and log. `C:\Windows\Temp` and
+//! Prefetch are deliberately absent — they need elevation, and an app that
+//! asks for it to tidy up has overstepped.
+//!
+//! `guard` is the part worth reading twice. Every candidate is canonicalised
+//! and checked to be genuinely inside its target, which resolves `..` and makes
+//! a symlink or junction point at where it really goes — the classic way a
+//! cleaner deletes somewhere it never meant to on Windows.
+//!
+//! The module also lists the heaviest processes and ends them on request, with
+//! the same refusal rules (never Coucou itself, its webview children or
+//! OS-critical processes). Called from the System tab's Tauri commands; OS
+//! specifics live in `platform`.
 
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
@@ -40,19 +45,25 @@ const KEEP_NEWER_THAN: Duration = Duration::from_secs(2 * 24 * 60 * 60);
 pub struct Drive {
     /// "C:" on Windows, the mount point on Linux.
     pub name: String,
+    /// Free bytes on the drive.
     pub free: u64,
+    /// Total bytes on the drive.
     pub total: u64,
 }
 
+/// Live machine numbers for the System tab: drives, memory and CPU.
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct Stats {
     pub drives: Vec<Drive>,
+    /// Bytes of RAM in use.
     pub memory_used: u64,
+    /// Bytes of RAM installed.
     pub memory_total: u64,
     /// 0 to 100. See `platform::cpu_percent` — this is a delta since the
     /// previous call, so the very first reading of a run is always 0.
     pub cpu_percent: f32,
+    /// Logical core count.
     pub cores: usize,
     /// Whether the tab's "Open Disk Cleanup" button does anything on this
     /// machine. Windows only — there is no one-click equivalent to offer on
@@ -60,6 +71,8 @@ pub struct Stats {
     pub disk_cleanup_available: bool,
 }
 
+/// Takes a snapshot for the System tab. `cpu_percent` is a delta against the
+/// previous call, so poll at a steady rate.
 pub fn stats() -> Stats {
     let (memory_used, memory_total) = platform::memory();
     let drives = platform::drives()
@@ -86,7 +99,9 @@ pub fn open_disk_cleanup() -> bool {
 
 /// One thing the broom knows how to sweep.
 pub struct Target {
+    /// Stable id the front end sends back to `scan` and `clean`.
     pub id: &'static str,
+    /// Name shown in the tab.
     pub label: &'static str,
     /// What it is, in the one line the preview shows.
     pub about: &'static str,
@@ -160,10 +175,13 @@ pub fn targets() -> Vec<Target> {
     .collect()
 }
 
+/// `Some(path)` only when it is an existing directory.
 fn exists(path: PathBuf) -> Option<PathBuf> {
     path.is_dir().then_some(path)
 }
 
+/// Looks up a target by id. An unknown id gives `None`, so the front end cannot
+/// ask for anything that is not on the list.
 fn target(id: &str) -> Option<Target> {
     targets().into_iter().find(|t| t.id == id)
 }
@@ -415,7 +433,9 @@ const PROTECTED_NAMES: &[&str] = &[
 pub struct ProcInfo {
     pub pid: u32,
     pub name: String,
+    /// Memory the process uses, in bytes.
     pub memory: u64,
+    /// True when the tab must not offer to end this process.
     pub protected: bool,
     /// Opaque outside this file — see `platform::RawProc`. The TS side
     /// carries it right back in an end request and nowhere else.
@@ -430,6 +450,8 @@ pub struct ProcInfo {
     pub start_time: String,
 }
 
+/// True for Coucou's own pid and for names on `PROTECTED_NAMES`; such processes are
+/// listed but never offered for ending.
 fn protected(pid: u32, name: &str) -> bool {
     pid == std::process::id() || PROTECTED_NAMES.contains(&name.to_lowercase().as_str())
 }
@@ -542,6 +564,7 @@ pub fn end_processes(targets: &[EndTarget]) -> Vec<u32> {
     settle(&platform::processes(), std::process::id(), targets, platform::kill_process)
 }
 
+/// Display form of a path, shared with the agent so both show it the same way.
 fn platform_path(path: &Path) -> String {
     crate::agent::display_path(path)
 }

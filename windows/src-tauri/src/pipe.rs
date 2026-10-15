@@ -1,22 +1,27 @@
-// Relay server for coucou-hook.
-//
-// Windows: the named pipe `\\.\pipe\coucou-<sid>`, one instance per connection.
-// Linux: the Unix socket `$XDG_RUNTIME_DIR/coucou.sock`. Every hook event is
-// forwarded to the island as a `hook` event. `PermissionRequest` is the only one
-// that keeps its connection open: it waits for the island's decision and writes
-// it back on the same connection, which is how approving from the island works.
-//
-// Claude Code is never blocked by us. Three things guarantee it:
-//   * coucou-hook gives the connection 300 ms and exits cleanly if we are closed;
-//   * we only wait for a human once the island has *confirmed* the card is on
-//     screen, so a paused island or a webview that is not listening costs a few
-//     hundred milliseconds, not two minutes;
-//   * whatever happens we drop the connection after the decision timeout, and
-//     the terminal takes over.
-//
-// What we write back is the bare word `allow` or `deny`. Turning that into the
-// documented hookSpecificOutput JSON is coucou-hook's job, so the wire format
-// Claude Code expects lives in exactly one place.
+//! Relay server for coucou-hook.
+//!
+//! Windows: the named pipe `\\.\pipe\coucou-<sid>`, one instance per connection.
+//! Linux: the Unix socket `$XDG_RUNTIME_DIR/coucou.sock`. Every hook event is
+//! forwarded to the island as a `hook` event. `PermissionRequest` is the only one
+//! that keeps its connection open: it waits for the island's decision and writes
+//! it back on the same connection, which is how approving from the island works.
+//!
+//! Claude Code is never blocked by us. Three things guarantee it:
+//!   * coucou-hook gives the connection 300 ms and exits cleanly if we are closed;
+//!   * we only wait for a human once the island has *confirmed* the card is on
+//!     screen, so a paused island or a webview that is not listening costs a few
+//!     hundred milliseconds, not two minutes;
+//!   * whatever happens we drop the connection after the decision timeout, and
+//!     the terminal takes over.
+//!
+//! What we write back is the bare word `allow` or `deny`. Turning that into the
+//! documented hookSpecificOutput JSON is coucou-hook's job, so the wire format
+//! Claude Code expects lives in exactly one place.
+//!
+//! Started once from `lib.rs` (`start`); the island answers through the
+//! [`acknowledge`], [`decline`] and [`answer`] functions, which find the waiting
+//! connection by request id in [`Pending`]. Security: only the current user may
+//! connect (a DACL on the Windows pipe, a `peer_cred` uid check on Linux).
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -40,6 +45,8 @@ const DECISION_TIMEOUT: Duration = Duration::from_secs(108);
 /// simply not listening would leave Claude Code staring at a prompt nobody can
 /// see for nearly two minutes.
 const ACK_TIMEOUT: Duration = Duration::from_millis(800);
+/// Upper bound (1 MiB) on what we buffer while waiting for the newline that
+/// ends the hook's JSON line, so a misbehaving client cannot exhaust memory.
 const MAX_PAYLOAD: usize = 1 << 20;
 
 /// What the island can say about a permission request.
@@ -52,10 +59,13 @@ pub enum Reply {
     Decline,
 }
 
-/// Permission requests the island has been told about.
+/// Permission requests the island has been told about, keyed by request id
+/// (`<pid>-<n>`). Registered as Tauri managed state; an entry lives from the
+/// moment the `hook` event is emitted until the decision, decline or timeout.
 #[derive(Default)]
 pub struct Pending(pub Mutex<HashMap<String, mpsc::Sender<Reply>>>);
 
+/// Source of the per-process sequence number in permission request ids.
 static COUNTER: AtomicU64 = AtomicU64::new(1);
 
 /// `\\.\pipe\coucou-<sid>` — must match coucou-hook's `pipe_path()` exactly.
@@ -104,6 +114,12 @@ fn pipe_security_descriptor() -> Option<usize> {
     Some(psd.0 as usize)
 }
 
+/// Spawns the Windows named-pipe accept loop on the Tauri async runtime.
+///
+/// Refuses to start if another process already owns the pipe name
+/// (`first_pipe_instance`). After each connection a fresh instance is created
+/// before the connected one is handed to [`handle`], retrying forever so the
+/// relay never goes deaf. Failures are only logged.
 #[cfg(windows)]
 pub fn start(app: AppHandle) {
     tauri::async_runtime::spawn(async move {
@@ -172,6 +188,11 @@ pub fn start(app: AppHandle) {
     });
 }
 
+/// Spawns the Linux Unix-socket accept loop on the Tauri async runtime.
+///
+/// Removes a stale socket file but refuses to start if a live Coucou answers
+/// on it. The socket is 0600 and each connection's peer uid must equal ours;
+/// anything else is dropped. Without `$XDG_RUNTIME_DIR` hooks stay inactive.
 #[cfg(target_os = "linux")]
 pub fn start(app: AppHandle) {
     use std::os::unix::fs::PermissionsExt;
@@ -238,6 +259,13 @@ impl Relay for NamedPipeServer {
 #[cfg(target_os = "linux")]
 impl Relay for tokio::net::UnixStream {}
 
+/// Serves one relay connection: reads a single JSON line, forwards it to the
+/// island as a `hook` event and, for `PermissionRequest` only, waits for the
+/// decision and writes it back as `allow` / `deny`.
+///
+/// Malformed or non-object payloads are dropped silently. When no decision
+/// arrives nothing is written, so the hook prints nothing and the terminal
+/// prompt takes over.
 async fn handle(app: AppHandle, mut pipe: impl Relay) {
     let mut buf = Vec::new();
     let mut chunk = [0u8; 4096];
@@ -298,6 +326,10 @@ async fn handle(app: AppHandle, mut pipe: impl Relay) {
 }
 
 /// Two waits: a short one for "the card is up", then the long one for a human.
+///
+/// Returns `Some("allow"|"deny")` for a human decision, or `None` when the
+/// island declined, never acknowledged within [`ACK_TIMEOUT`], the channel
+/// closed, or [`DECISION_TIMEOUT`] elapsed (the terminal then takes over).
 async fn wait_for_decision(id: &str, rx: &mut mpsc::Receiver<Reply>) -> Option<String> {
     match tokio::time::timeout(ACK_TIMEOUT, rx.recv()).await {
         Ok(Some(Reply::Ack)) => {}
@@ -333,6 +365,10 @@ async fn wait_for_decision(id: &str, rx: &mut mpsc::Receiver<Reply>) -> Option<S
     }
 }
 
+/// Delivers `reply` to the connection waiting on `request_id`. With `keep`
+/// the entry stays registered (an `Ack` precedes a later decision); otherwise
+/// it is removed so a request can be answered only once. Unknown ids are
+/// logged (e.g. the request already timed out).
 fn send(app: &AppHandle, request_id: &str, reply: Reply, keep: bool) {
     let sender = {
         let pending = app.state::<Pending>();

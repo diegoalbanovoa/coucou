@@ -1,13 +1,18 @@
-// Subagent activity, tracked from the same live "hook" event the island
-// already receives (registerHookHandlers in hooks.ts) — see
-// openspec/changes/agent-activity-panel/design.md. Self-contained, like
-// views/ticker.ts's Ticker, rather than a field on AppState: easy to test
-// and to remove without touching the pill/coucou_agent machinery.
+/**
+ * Subagent activity, tracked from the same live "hook" event the island
+ * already receives (registerHookHandlers in hooks.ts) — see
+ * openspec/changes/agent-activity-panel/design.md. Self-contained, like
+ * views/ticker.ts's Ticker, rather than a field on AppState: easy to test
+ * and to remove without touching the pill/coucou_agent machinery.
+ */
 
 /** One thing a subagent did, newest entries pushed last. */
 export interface ActivityEntry {
+  /** Tool name, or the hook event name when there is no tool. */
   action: string;
+  /** Milliseconds since the epoch. */
   at: number;
+  /** The subagent's final message; only set on "SubagentStop". */
   result?: string;
 }
 
@@ -16,10 +21,12 @@ const MAX_ENTRIES_PER_AGENT = 20;
 
 type Listener = () => void;
 
+/** In-memory log of subagent actions, per agent type. Not persisted. */
 class SubagentActivityStore {
   private byAgent = new Map<string, ActivityEntry[]>();
   private listeners = new Set<Listener>();
 
+  /** Registers a change callback; returns the unsubscribe function. */
   subscribe(fn: Listener): () => void {
     this.listeners.add(fn);
     return () => this.listeners.delete(fn);
@@ -39,6 +46,7 @@ class SubagentActivityStore {
     return this.byAgent.get(agent) ?? [];
   }
 
+  /** Appends an entry for `agentType`, dropping the oldest past the per-agent cap, and notifies. */
   record(agentType: string, action: string, result?: string) {
     const list = this.byAgent.get(agentType) ?? [];
     list.push({ action, at: Date.now(), result });
@@ -48,6 +56,7 @@ class SubagentActivityStore {
   }
 }
 
+/** The shared activity store the agent-activity panel reads. */
 export const SubagentActivity = new SubagentActivityStore();
 
 /** The subset of HookPayload (hooks.ts) this module reads. */

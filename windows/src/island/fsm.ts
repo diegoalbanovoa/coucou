@@ -1,11 +1,23 @@
-// Island open/close FSM — port of IslandStateMachine.swift.
-// No DOM, no Tauri: it only reports transitions.
+/**
+ * Island open/close FSM — port of IslandStateMachine.swift.
+ * No DOM, no Tauri: it only reports transitions.
+ *
+ * Owned by island/island.ts, which feeds it mouse and alert inputs and maps
+ * each transition to an IslandMode. All timing lives here as timers
+ * (setTimeout); a `pinned` island never starts the home -> petit countdown.
+ */
 
+/**
+ * hidden = retracted; petit = compact pill; home = expanded; coucou = the
+ * launch greeting (collapses to petit by itself).
+ */
 export type FsmState = "hidden" | "petit" | "home" | "coucou";
 
+/** Timer-driven state machine deciding when the island shows, expands and hides. */
 export class IslandStateMachine {
   state: FsmState = "hidden";
 
+  /** Set by the owner; called once per actual state change (never for a no-op). */
   onTransition: ((from: FsmState, to: FsmState) => void) | null = null;
 
   /** home → petit delay, seconds. */
@@ -25,11 +37,13 @@ export class IslandStateMachine {
 
   // ── Inputs ──────────────────────────────────────────────────────────────────
 
+  /** App start: show the greeting. */
   launch() {
     this.cancelTimers();
     this.transition("coucou");
   }
 
+  /** Cursor entered the island: wakes it when hidden, otherwise cancels the pending collapse. */
   mouseEntered() {
     switch (this.state) {
       case "hidden":
@@ -48,6 +62,7 @@ export class IslandStateMachine {
     }
   }
 
+  /** Cursor left the island: starts the collapse countdown for the current state. */
   mouseLeft() {
     switch (this.state) {
       case "hidden":
@@ -65,6 +80,7 @@ export class IslandStateMachine {
     }
   }
 
+  /** Click on the compact pill expands it; clicks in any other state are ignored. */
   click() {
     if (this.state !== "petit") return;
     this.cancelTimers();
@@ -109,12 +125,13 @@ export class IslandStateMachine {
     this.transition("home");
   }
 
-  /// Explicit close (OK button, Escape, an alert being answered).
+  /** Explicit close (OK button, Escape, an alert being answered). */
   forcePetit() {
     this.cancelTimers();
     this.transition("petit");
   }
 
+  /** Retract fully (tray Pause). */
   forceHidden() {
     this.cancelTimers();
     this.transition("hidden");
@@ -122,6 +139,7 @@ export class IslandStateMachine {
 
   // ── Timers ──────────────────────────────────────────────────────────────────
 
+  /** petit -> hidden after `petitToHiddenDelay`; re-arming replaces any earlier timer. */
   private schedulePetitHide() {
     this.clear("petitHide");
     this.petitHide = window.setTimeout(() => {
@@ -130,6 +148,7 @@ export class IslandStateMachine {
     }, this.petitToHiddenDelay * 1000);
   }
 
+  /** home -> petit after `homeToPetitDelay`; skipped entirely while pinned. */
   private scheduleHomeCollapse() {
     this.clear("homeCollapse");
     if (this.pinned) return;
@@ -139,6 +158,7 @@ export class IslandStateMachine {
     }, this.homeToPetitDelay * 1000);
   }
 
+  /** coucou -> petit after `delay` seconds. */
   private scheduleGreetCollapse(delay: number) {
     this.clear("greetCollapse");
     this.greetCollapse = window.setTimeout(() => {
@@ -147,18 +167,21 @@ export class IslandStateMachine {
     }, delay * 1000);
   }
 
+  /** Cancels one named timer and forgets its id. */
   private clear(which: "petitHide" | "homeCollapse" | "greetCollapse") {
     const id = this[which];
     if (id != null) window.clearTimeout(id);
     this[which] = null;
   }
 
+  /** Cancels every pending collapse/hide countdown. */
   cancelTimers() {
     this.clear("petitHide");
     this.clear("homeCollapse");
     this.clear("greetCollapse");
   }
 
+  /** Moves to `next` and notifies `onTransition`; staying put is a silent no-op. */
   private transition(next: FsmState) {
     if (next === this.state) return;
     const from = this.state;

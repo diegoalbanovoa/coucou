@@ -1,4 +1,6 @@
 // Entry point: boot the bridge, wire the island, start the greeting.
+// Loaded by index.html for the island window (the settings window has its own
+// entry, settings/main.ts).
 
 import "./style.css";
 import { Bridge, IS_TAURI, onEvent } from "./core/bridge";
@@ -26,6 +28,13 @@ window.addEventListener("unhandledrejection", (e) => {
   void Bridge.log(`[unhandled rejection] ${String(e.reason)}`);
 });
 
+/**
+ * Boot sequence: preload sounds, create the island, fetch boot data and
+ * settings from Rust, subscribe to backend events (cursor, tray, shortcut,
+ * screen and settings changes), register the island handlers, then launch.
+ * Order matters: handlers are registered before `island.launch()` so no early
+ * event is lost.
+ */
 async function main() {
   const root = document.getElementById("root");
   if (!root) return;

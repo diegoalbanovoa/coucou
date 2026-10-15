@@ -1,8 +1,13 @@
-// SoundEngine — port of SoundEngine.swift.
-// The 28 WAVs are the macOS app's own files (see SOUNDS_DIR in vite.config.ts);
-// they are served at /sounds/<name>.wav. Default volume 0.12, slider range 0–0.2,
-// exactly like the Mac player, and several sounds may overlap.
+/**
+ * SoundEngine — port of SoundEngine.swift.
+ * The 28 WAVs are the macOS app's own files (see SOUNDS_DIR in vite.config.ts);
+ * they are served at /sounds/<name>.wav. Default volume 0.12, slider range 0–0.2,
+ * exactly like the Mac player, and several sounds may overlap.
+ * Used by island/* and views to play cues; the settings window drives volume
+ * and enabled. The AudioContext is suspended when idle to keep CPU at zero.
+ */
 
+/** Every sound the app can play, by file name without extension. */
 export const SOUND_NAMES = [
   "peek", "open", "close", "hover", "blip", "slap", "annoyed", "dizzy", "greet",
   "work", "finish", "error", "approval", "question", "approve", "gulp", "tick",
@@ -18,10 +23,13 @@ export const SOUND_NAMES = [
   "cough",
 ] as const;
 
+/** Union of the names in `SOUND_NAMES`. */
 export type SoundName = (typeof SOUND_NAMES)[number];
 
+/** Web Audio player behind the `Sound` singleton. */
 class SoundEngine {
   enabled = true;
+  /** Master gain, 0 to 0.2. */
   volume = 0.12;
 
   private ctx: AudioContext | null = null;
@@ -83,15 +91,21 @@ class SoundEngine {
     }, 1500);
   }
 
+  /** Sets the master volume, clamped to 0..0.2 (the Mac player's range). */
   setVolume(v: number) {
     this.volume = Math.max(0, Math.min(0.2, v));
     if (this.master) this.master.gain.value = this.volume;
   }
 
+  /** Mutes or unmutes; muted `play` calls return before touching the audio graph. */
   setEnabled(on: boolean) {
     this.enabled = on;
   }
 
+  /**
+   * Plays a sound over any already playing. Silent if disabled, not yet
+   * preloaded, or the file is missing; wakes a context `idle()` suspended.
+   */
   play(name: SoundName | string) {
     if (!this.enabled) return;
     const ctx = this.ctx;
@@ -110,4 +124,5 @@ class SoundEngine {
   }
 }
 
+/** The shared sound engine; call `preload()` once at startup. */
 export const Sound = new SoundEngine();

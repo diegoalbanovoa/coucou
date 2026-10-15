@@ -1,15 +1,16 @@
-// What little of the UI is Rust's to say: the tray menu, and (since plan-v2.md
-// § 5.3 asks for it specifically) the paperclip's native file picker's title.
-// The folder picker (`pick_folder`) still uses whatever title Windows itself
-// gives an `IFileOpenDialog` — the plan never asked for that one, and
-// changing a dialog nobody filed an issue against was not this phase's job.
-//
-// `TypeScript` owns the real dictionary (src/i18n/); this is deliberately a
-// much smaller mirror of just a few platform-native strings; a new key here
-// does not need a matching one there, and vice versa.
+//! What little of the UI is Rust's to say: the tray menu, and (since plan-v2.md
+//! § 5.3 asks for it specifically) the paperclip's native file picker's title.
+//! The folder picker (`pick_folder`) still uses whatever title Windows itself
+//! gives an `IFileOpenDialog` — the plan never asked for that one, and
+//! changing a dialog nobody filed an issue against was not this phase's job.
+//!
+//! `TypeScript` owns the real dictionary (src/i18n/); this is deliberately a
+//! much smaller mirror of just a few platform-native strings; a new key here
+//! does not need a matching one there, and vice versa.
 
-/// "system", "en" or "es" — the same three values `Settings::language`
-/// stores, resolved the same way `i18n/index.ts`'s `resolveLocale` does.
+/// A UI language the Rust side can render. `Settings::language` stores
+/// "system", "en" or "es"; `resolve` maps that to one of these the same way
+/// `i18n/index.ts`'s `resolveLocale` does, falling back to `En`.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Locale {
     En,
@@ -36,10 +37,15 @@ impl Locale {
     }
 }
 
+/// A native string Rust renders itself (tray menu items and dialog titles).
 pub enum Key {
+    /// Tray item that shows the island.
     Open,
+    /// Tray item that opens the Settings window.
     Settings,
+    /// Tray item that pauses or resumes Mochi.
     Pause,
+    /// Tray item that exits the app.
     Quit,
     /// Title bar of the paperclip's native multi-select picker.
     AttachFiles,
@@ -47,6 +53,8 @@ pub enum Key {
     ChooseApp,
 }
 
+/// Translates `key` into `locale`. Exhaustive match: adding a `Key` or
+/// `Locale` without both strings fails to compile.
 pub fn tr(locale: Locale, key: Key) -> &'static str {
     match (locale, key) {
         (Locale::En, Key::Open) => "Open Coucou",

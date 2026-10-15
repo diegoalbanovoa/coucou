@@ -1,5 +1,15 @@
-// The island: DOM shell, sizing animation, Mochi placement, mouse handling.
-// Mirrors IslandRootView.swift + IslandWindowController.swift.
+/**
+ * The island: DOM shell, sizing animation, Mochi placement, mouse handling.
+ * Mirrors IslandRootView.swift + IslandWindowController.swift.
+ *
+ * Created once by main.ts. It owns the single requestAnimationFrame loop
+ * (`frame`), which must stop when nothing animates so a hidden island costs
+ * 0 % CPU. State changes arrive through `State.subscribe` and only mark the DOM
+ * dirty; the loop re-syncs views on the next frame. Open/close timing lives in
+ * `IslandStateMachine` (fsm.ts); geometry maths in core/layout.ts. Cursor
+ * position comes from Rust's poll (`onCursor`), not DOM events, because the
+ * window is click-through while collapsed.
+ */
 
 import { Tracked, Spring, clamp } from "../core/anim";
 import { Bridge, IS_TAURI, onDragDrop } from "../core/bridge";
@@ -19,13 +29,17 @@ import { h } from "../views/dom";
 import { IslandStateMachine } from "./fsm";
 import { takeChatFiles } from "../views/chat";
 
+/** Extra canvas height (px) above/below Mochi so particles and emotes are not clipped. */
 const BOT_OVERHANG = 40;
 /** Same margin as the Rust hit test (src-tauri/src/island.rs). */
 const HIT_MARGIN = 14;
 
+/** Rank hidden < compact < expanded; a lower rank than before means the island is shrinking. */
 const modeOrder = (m: IslandMode) => (m === "hidden" ? 0 : m === "compact" ? 1 : 2);
 
+/** The island's DOM, animation loop and input handling; one instance per app run. */
 export class Island {
+  /** Open/close state machine; the island maps its transitions to modes. */
   readonly fsm = new IslandStateMachine();
 
   private root: HTMLElement;
@@ -43,9 +57,11 @@ export class Island {
   private header!: ViewHost;
   private views!: Map<IslandViewName, ViewHost>;
 
+  // Island box: springs when growing, timed curve when shrinking (see animateGeometry).
   private width = new Tracked(NOTCH_W);
   private height = new Tracked(0);
   private radius = new Tracked(ROUNDED_CORNER);
+  // Mochi's centre and size, always springing toward `updateBotTargets`' values.
   private botCx = new Spring(46);
   private botCy = new Spring(16);
   private botSize = new Spring(10);
@@ -53,9 +69,12 @@ export class Island {
   private engine = new BotEngine();
   private greeting = new Greeting();
 
+  /** Whether the rAF loop is alive; `ensureRunning` restarts it. */
   private running = false;
   private lastFrame = 0;
+  /** State changed since the last `syncDom`. */
   private dirty = true;
+  /** Last Mochi canvas width in px, so the backing store is resized only on change. */
   private canvasPx = 0;
 
   // Rust starts the window at full size so the launch greeting has room.
@@ -64,6 +83,7 @@ export class Island {
   private wasInIsland = false;
   /** Last shape handed to Rust for the click-through test. */
   private pushedRect = { x: -1, y: -1, w: -1, h: -1 };
+  /** `performance.now()` at which the expanded island will auto-collapse; drives the countdown bar. */
   private homeCollapseAt: number | null = null;
 
   // Bot hover → love (IslandWindowController.botHoverIn)
@@ -77,6 +97,7 @@ export class Island {
   private lastSyncedView: IslandViewName | null = null;
   private lastQuickView = false;
 
+  /** Builds the DOM inside `root` and wires the FSM, input and state subscription. Call `launch()` after. */
   constructor(root: HTMLElement) {
     this.root = root;
     this.build();
@@ -92,6 +113,11 @@ export class Island {
 
   // ── DOM ─────────────────────────────────────────────────────────────────────
 
+  /**
+   * Creates the element tree and the `ViewActions` that views call back into
+   * (navigation, approval decisions, settings toggles). The approval `decide`
+   * action is the only path that answers a permission request.
+   */
   private build() {
     const actions: ViewActions = {
       setView: (v) => this.setView(v),
@@ -199,6 +225,7 @@ export class Island {
 
   // ── FSM ─────────────────────────────────────────────────────────────────────
 
+  /** Maps FSM transitions to island modes, sounds and the greeting. */
   private wireFsm() {
     this.fsm.homeToPetitDelay = State.settings.autoCloseInterval;
     this.fsm.onTransition = (from, to) => {
@@ -226,12 +253,18 @@ export class Island {
     };
   }
 
+  /** Starts the greeting; call once after handlers are registered. */
   launch() {
     this.fsm.launch();
   }
 
   // ── Mode / view ─────────────────────────────────────────────────────────────
 
+  /**
+   * Changes the collapse level: plays the open/close sound, drops focus and
+   * pin when leaving expanded, and starts the geometry animation (curve when
+   * shrinking, spring when growing).
+   */
   private setMode(mode: IslandMode) {
     const prev = State.mode;
     if (mode === prev) return;
@@ -248,6 +281,7 @@ export class Island {
     State.notify();
   }
 
+  /** Opens straight to `view` and resets the inactivity clock. Does not touch the FSM. */
   expand(view: IslandViewName) {
     State.view = view;
     if (State.mode !== "expanded") this.setMode("expanded");
@@ -257,6 +291,7 @@ export class Island {
     State.notify();
   }
 
+  /** Switches the view (opening the island if needed), calling the views' blur/focus hooks. */
   setView(view: IslandViewName) {
     // One funnel for every view change, so a view that started a timer or a
     // poll gets told when it stops being the one on screen — and the one
@@ -279,6 +314,7 @@ export class Island {
     State.notify();
   }
 
+  /** Explicit close to the compact pill; clears any pin. */
   collapse() {
     State.isPinned = false;
     this.fsm.pinned = false;
@@ -295,6 +331,7 @@ export class Island {
     this.expand(view);
   }
 
+  /** Shows the compact island for a non-urgent event (no-op unless hidden). */
   reveal() {
     this.fsm.reveal();
   }
@@ -336,6 +373,7 @@ export class Island {
    * tray, nothing is sent on its own. A drag that starts anywhere else opens
    * the chat first, the same transition the tab itself uses.
    */
+  /** Handles the webview's drag-and-drop events; ignored while paused. Only "drop" hands paths on. */
   private onDragDrop(e: { type: string; paths?: string[] }) {
     if (e.type !== "over") void Bridge.log(`drag ${e.type} ${e.paths?.length ?? 0} file(s)`);
     if (State.paused) return;
@@ -376,6 +414,7 @@ export class Island {
     this.animateGeometry(false);
   }
 
+  /** Where the island box should end up for the current mode, view and chat contents. */
   private targetSize(): { w: number; h: number; r: number } {
     const { w, h } = islandSize(
       State.mode,
@@ -389,6 +428,7 @@ export class Island {
     return { w, h, r };
   }
 
+  /** Retargets width, height and radius: timed curve (no overshoot) when shrinking, spring otherwise. */
   private animateGeometry(shrinking: boolean) {
     const { w, h, r } = this.targetSize();
     if (shrinking) {
@@ -403,6 +443,10 @@ export class Island {
     this.ensureRunning();
   }
 
+  /**
+   * Writes the current animated size to the DOM and, when the rect moved by
+   * more than half a pixel, pushes it to Rust for the click-through test.
+   */
   private applyGeometry() {
     const w = this.width.value;
     const hh = this.height.value;
@@ -434,6 +478,10 @@ export class Island {
 
   // ── Window collapse (hidden → tiny wake strip, zero polling) ────────────────
 
+  /**
+   * Shrinks the native window to the wake strip 420 ms after the island hides
+   * (once it has finished retracting) and restores it before any reopen.
+   */
   private updateWindowCollapsed() {
     if (this.collapseTimer != null) {
       window.clearTimeout(this.collapseTimer);
@@ -457,6 +505,7 @@ export class Island {
 
   // ── Input ───────────────────────────────────────────────────────────────────
 
+  /** Attaches the mouse, keyboard and drag-drop listeners. Escape closes unless pinned. */
   private wireInput() {
     // The wake strip is the only thing the OS can hit while the island is hidden.
     this.wakeStrip.addEventListener("mouseenter", () => {
@@ -502,7 +551,11 @@ export class Island {
     });
   }
 
-  /** Cursor in window-logical coordinates. */
+  /**
+   * Cursor in window-logical coordinates, from Rust's "cursor" event. Drives
+   * enter/leave on the FSM (with a hit margin), the auto-close countdown,
+   * Mochi's eyes and the hover-to-love behaviour.
+   */
   onCursor(x: number, y: number) {
     State.mouse = { x, y };
     const rect = this.islandRect();
@@ -541,6 +594,7 @@ export class Island {
     this.ensureRunning();
   }
 
+  /** Whether window point (x, y) is inside Mochi's circle. */
   private isBotHit(x: number, y: number): boolean {
     const rect = this.islandRect();
     const cx = rect.x + this.botCx.value;
@@ -549,6 +603,7 @@ export class Island {
     return (x - cx) ** 2 + (y - cy) ** 2 <= radius * radius;
   }
 
+  /** Cursor just landed on Mochi: blink and perk up, unless it loved recently (6 s cooldown). */
   private botHoverIn(x: number, y: number) {
     if (performance.now() / 1000 - this.lastLoveTime < 6) return;
     this.botHoverStart = { x, y };
@@ -558,6 +613,7 @@ export class Island {
     this.scheduleLove();
   }
 
+  /** After ~1.9 s of hovering Mochi, plays the "love" emote (re-armed by cursor movement). */
   private scheduleLove() {
     if (this.botHoverTimer != null) window.clearTimeout(this.botHoverTimer);
     this.botHoverTimer = window.setTimeout(() => {
@@ -570,6 +626,7 @@ export class Island {
     }, 1900);
   }
 
+  /** Cancels the pending love emote and releases the hover scale. */
   private cancelBotHover() {
     if (this.botHoverTimer != null) window.clearTimeout(this.botHoverTimer);
     this.botHoverTimer = null;
@@ -598,6 +655,7 @@ export class Island {
 
   // ── Frame loop ──────────────────────────────────────────────────────────────
 
+  /** Starts the animation loop if it is not running; every change that needs a redraw calls this. */
   ensureRunning() {
     if (this.running) return;
     this.running = true;
@@ -605,6 +663,11 @@ export class Island {
     requestAnimationFrame(this.frame);
   }
 
+  /**
+   * One animation frame: steps geometry and Mochi springs, syncs the DOM if
+   * dirty, draws Mochi or the greeting, and reschedules itself only while
+   * something is still moving (see the note on `busy` below).
+   */
   private frame = (nowMs: number) => {
     const dt = Math.min(0.05, (nowMs - this.lastFrame) / 1000);
     this.lastFrame = nowMs;
@@ -667,6 +730,7 @@ export class Island {
     }
   };
 
+  /** Sets Mochi's spring targets from the layout and positions the glow behind it. */
   private updateBotTargets() {
     const p = botPosition(State.mode, State.view, this.height.value);
     this.botCx.target = p.cx;
@@ -692,6 +756,7 @@ export class Island {
     }
   }
 
+  /** Resizes Mochi's canvas if needed, feeds the engine (colour, gaze, file slot) and draws one frame. */
   private drawBot(dt: number) {
     const size = this.botSize.value;
     const w = Math.max(1, Math.round(size));
@@ -737,10 +802,12 @@ export class Island {
     return Math.tanh((State.mouse.x - botScreenX) / 260);
   }
 
+  /** Vertical gaze, -1..1 (inverted: positive looks up). */
   private lookY(): number {
     return -Math.tanh((State.mouse.y - this.botCy.value) / 200);
   }
 
+  /** Draws the thin auto-close bar during the last part of the countdown; zero width otherwise. */
   private updateCountdown(nowMs: number) {
     if (State.mode !== "expanded" || State.isPinned || this.homeCollapseAt == null) {
       this.countdown.style.width = "0px";
@@ -755,6 +822,11 @@ export class Island {
 
   // ── DOM sync ────────────────────────────────────────────────────────────────
 
+  /**
+   * Brings the DOM in line with `State`: content visibility, the active view,
+   * keyboard focus (only the chat and quick-ask may take it), the compact
+   * mini-bot grid and Mochi's state.
+   */
   private syncDom() {
     const expanded = State.mode === "expanded";
     const greetingActive = expanded && State.view === "greeting";
@@ -822,10 +894,12 @@ export class Island {
     State.notify();
   }
 
+  /** The fixed native window size, in logical px. */
   get panelSize() {
     return { w: PANEL_W, h: PANEL_H };
   }
 
+  /** Chat height for the current history, ignoring the attachment tray (see `targetSize` for the real size). */
   get chatHeight() {
     return chatPromptHeight(State.chatHistory.length, State.chatExpanded, State.workAreaHeight);
   }

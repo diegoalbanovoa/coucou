@@ -1,15 +1,32 @@
-// Thin wrapper over the Tauri commands/events. Every call is a no-op when the
-// page is opened in a plain browser, so the island can be iterated on with
-// `npm run dev` alone.
+/**
+ * Thin wrapper over the Tauri commands/events. Every call is a no-op when the
+ * page is opened in a plain browser, so the island can be iterated on with
+ * `npm run dev` alone.
+ *
+ * This file is the single typed seam between the webview and Rust: each entry
+ * of `Bridge` maps 1:1 to a `#[tauri::command]` in src-tauri/src, and the
+ * interfaces below mirror the serde structs those commands return (camelCase on
+ * this side). Used by every view, island/* and the settings window. Secrets,
+ * API keys and file bytes never cross it, only ids, paths and flags.
+ *
+ * Two flavours of call: `call` swallows errors and resolves `null` (fire and
+ * forget, or "nothing to show"), `callOrThrow` rejects so the UI can show why.
+ */
 
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import type { AllowedApp, Settings } from "./state";
 
+/** True inside the Tauri webview; false in a plain browser (dev/mock mode). */
 export const IS_TAURI =
   typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
+/**
+ * Invokes a Tauri command and never throws: outside Tauri, or when the command
+ * rejects, it resolves `null` (the failure is logged). Use `callOrThrow` when
+ * the caller needs to show the error.
+ */
 async function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T | null> {
   if (!IS_TAURI) return null;
   try {
@@ -20,11 +37,13 @@ async function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T |
   }
 }
 
+/** Logical rect of the monitor the island lives on (mirror of Rust's screen_info). */
 export interface ScreenInfo {
   x: number;
   y: number;
   width: number;
   height: number;
+  /** Device pixel ratio of that monitor. */
   scale: number;
   /** How tall the island can grow (logical px) before it would cover the
    *  taskbar — see src-tauri/src/island.rs's screen_info, which this mirrors.
@@ -32,23 +51,34 @@ export interface ScreenInfo {
   workHeight: number;
 }
 
+/** Everything the island needs to start, returned once by the `boot` command. */
 export interface BootInfo {
+  /** Persisted settings as loaded by Rust (defaults filled in). */
   settings: Settings;
   /** Logical screen rect of the monitor the island lives on. */
   screen: ScreenInfo;
+  /** App version string, shown in Settings. */
   version: string;
+  /** Path of the `coucou-hook` relay binary that Claude Code hooks call. */
   hookPath: string;
   /** False where the OS has no global cursor (Wayland): see Island.followPageCursor. */
   cursorPoll: boolean;
 }
 
+/**
+ * Every Rust command the webview can call, one typed method each. Methods
+ * built on `call` resolve `null` outside Tauri or on failure; those built on
+ * `callOrThrow` reject with the Rust error string so the UI can display it.
+ */
 export const Bridge = {
+  /** First call at startup: settings, screen rect, version, hook path. */
   boot: () => call<BootInfo>("boot"),
 
   /** Re-read after a "screen-changed" event — resolution/work-area can only
    *  change between calls, never during boot's. */
   screenInfo: () => call<ScreenInfo>("screen_info"),
 
+  /** Persists the whole settings object (Rust owns the file). */
   saveSettings: (settings: Settings) => call<void>("save_settings", { settings }),
 
   /** Shrink the window down to the invisible wake strip (hidden) or back to full. */
@@ -64,21 +94,26 @@ export const Bridge = {
   /** Give the window keyboard focus (chat field) and take it away again. */
   focusWindow: (focused: boolean) => call<void>("focus_window", { focused }),
 
+  /** Re-centres the window on the target monitor (after a display change). */
   reposition: () => call<void>("reposition"),
 
+  /** Opens a link in the default browser. */
   openUrl: (url: string) => call<void>("open_url", { url }),
 
   /** "Open terminal" → opens the folder in VS Code when `code` is on PATH. */
   openInVSCode: (path: string | null) => call<boolean>("open_in_vscode", { path }),
 
+  /** Exits the whole app. */
   quit: () => call<void>("quit_app"),
 
+  /** Shows (or focuses) the separate settings window. */
   openSettingsWindow: () => call<void>("open_settings_window"),
 
   /** Writes to %LOCALAPPDATA%\Coucou\coucou.log, next to the Rust lines. */
   log: (message: string) => call<void>("log_line", { message }),
 
   // ── Claude Code hooks ─────────────────────────────────────────────────────
+  /** Whether the hooks are installed in ~/.claude/settings.json. */
   hooksStatus: () => call<HookStatus>("hooks_status"),
   /** Diff to show before anything is written. `install: false` previews removal. */
   hooksPreview: (install: boolean) => callOrThrow<HookPreview>("hooks_preview", { install }),
@@ -89,6 +124,7 @@ export const Bridge = {
   hooksApply: (install: boolean, fingerprint: string) =>
     callOrThrow<string>("hooks_apply", { install, fingerprint }),
 
+  /** Answers a pending permission card; only ever called from an explicit click. */
   approvalDecision: (requestId: string, decision: "allow" | "deny") =>
     call<void>("approval_decision", { requestId, decision }),
   /** "The card is up" — until this lands the relay only waits a moment. */
@@ -118,6 +154,7 @@ export const Bridge = {
   pickFiles: () => call<string[]>("pick_files"),
   /** Attaches the folder the agent runs in. */
   attachProject: (path: string) => callOrThrow<string>("attach_project", { path }),
+  /** Clears the attached project folder. */
   detachProject: () => call<void>("detach_project"),
   /** One agent turn. Tool calls arrive separately, as ordinary hook events. */
   agentSend: (cli: string, prompt: string) =>
@@ -157,14 +194,19 @@ export const Bridge = {
   /** Turns, latency, tokens and reported cost per backend, this session only
    *  (kept in memory by Rust, never written anywhere). */
   usageSummary: () => call<BackendSummary[]>("usage_summary"),
+  /** Clears the in-memory usage counters. */
   usageReset: () => call<void>("usage_reset"),
   // ── Routines (plan v4, Fase 7) ────────────────────────────────────────────
+  /** All saved routines. */
   routineList: () => call<Routine[]>("routine_list"),
+  /** Creates (no `id`) or updates a routine. */
   routineSave: (input: RoutineInput) => callOrThrow<Routine>("routine_save", { input }),
+  /** Removes a routine by id. */
   routineDelete: (id: string) => callOrThrow<void>("routine_delete", { id }),
   /** Rust runs it (key, tools, approvals); the webview only says which one.
    *  The result also arrives on the "routine-result" event. */
   routineRun: (id: string) => callOrThrow<RoutineResult>("routine_run", { id }),
+  /** The newest `limit` stored routine results. */
   routineResults: (limit: number) => call<RoutineResult[]>("routine_results", { limit }),
   /** Writes a `missed` result and nothing else. */
   routineMarkMissed: (id: string) => call<RoutineResult | null>("routine_mark_missed", { id }),
@@ -173,12 +215,17 @@ export const Bridge = {
   /** Picks a skill folder and imports its SKILL.md. Null when cancelled; rejects
    *  with `exists:<name>` when one is installed (call again with `replace`). */
   skillImport: (replace: boolean) => callOrThrow<SkillView | null>("skill_import", { replace }),
+  /** Removes an imported skill by name. */
   skillDelete: (name: string) => callOrThrow<void>("skill_delete", { name }),
+  /** Toggles whether the quick assistant may load a skill. */
   skillSetEnabled: (name: string, enabled: boolean) => callOrThrow<void>("skill_set_enabled", { name, enabled }),
   /** Pinned notes for the provider chat. Stored by Rust, never a key. */
   memoryNotes: () => call<MemoryNote[]>("memory_notes"),
+  /** Pins a new note. */
   memoryAdd: (text: string) => callOrThrow<MemoryNote>("memory_add", { text }),
+  /** Unpins one note by id. */
   memoryDelete: (id: string) => callOrThrow<void>("memory_delete", { id }),
+  /** Unpins every note. */
   memoryClear: () => callOrThrow<void>("memory_clear"),
   /** The folder the notes live in, shown as plain text. */
   memoryPath: () => call<string>("memory_path"),
@@ -215,10 +262,13 @@ export const Bridge = {
     callOrThrow<DroppedFile>("paste_image", { media, bytes }),
   /** Only ever tells you whether a key exists — never its value. */
   secretPresent: (key: string) => call<boolean>("secret_present", { key }),
+  /** Stores a secret in the OS keychain; the value goes one way only. */
   secretSet: (key: string, value: string) => callOrThrow<void>("secret_set", { key, value }),
+  /** Deletes a secret from the OS keychain. */
   secretClear: (key: string) => callOrThrow<void>("secret_clear", { key }),
 
   // ── Integrations ──────────────────────────────────────────────────────────
+  /** Asks Rust to poll one integration now instead of waiting for its timer. */
   refreshIntegration: (id: string) => call<void>("refresh_integration", { id }),
   /** Opens the configured n8n instance in the browser. */
   openN8n: () => call<void>("open_n8n"),
@@ -235,22 +285,29 @@ export const Bridge = {
   /** Stores and registers the shortcut; null clears it. A conflict comes back
    *  in the result (`registered: false`), not as a rejection. */
   quickShortcutSet: (shortcut: string | null) => call<ShortcutInfo>("quick_shortcut_set", { shortcut }),
+  /** Folders the quick assistant's file tools may reach. */
   quickFolders: () => call<string[]>("quick_folders"),
   /** Opens the folder picker and allow-lists the choice. Null on cancel. */
   quickFolderAdd: () => call<string | null>("quick_folder_add"),
+  /** Removes a folder from the allow-list. */
   quickFolderRemove: (path: string) => call<void>("quick_folder_remove", { path }),
+  /** Apps the quick assistant's `open_app` tool may launch. */
   quickApps: () => call<AllowedApp[]>("quick_apps"),
   /** Opens the file picker on an executable and allow-lists it. Null on cancel. */
   quickAppAdd: () => call<AllowedApp | null>("quick_app_add"),
+  /** Removes an app from the allow-list. */
   quickAppRemove: (id: string) => call<void>("quick_app_remove", { id }),
   /** The newest action-log entries, oldest first. */
   quickLog: (limit?: number) => call<QuickLogEntry[]>("quick_log", { limit }),
 };
 
+/** Payload of the "integration" event: one poller's latest result. */
 export interface IntegrationUpdate {
   id: string;
+  /** Integration-specific fields; shape is owned by the matching poller. */
   data: Record<string, unknown>;
   error: string | null;
+  /** A one-off notable occurrence (e.g. a deploy finished), if any. */
   event: { success: boolean; label: string; detail: string | null } | null;
 }
 
@@ -263,10 +320,13 @@ export interface ChatAttachment {
   size: number;
 }
 
+/** A chat message as persisted by Rust between runs (`chatKeep`/`chatLoad`). */
 export interface KeptMessage {
   role: "user" | "assistant" | "error";
   content: string;
+  /** Milliseconds since the epoch. */
   at: number;
+  /** Tool steps shown under an assistant turn. */
   steps: string[];
   attachments: ChatAttachment[];
 }
@@ -282,11 +342,14 @@ export interface Drive {
 /** The health monitor's level — a mood for Mochi, not a system state. See
  *  src-tauri/src/health.rs and mochi/moods.ts. */
 export type HealthLevel = "ok" | "strained" | "sick";
+/** Which resource is driving a non-`ok` level. */
 export type HealthCause = "cpu" | "memory" | "disk";
 
+/** One reading of the health monitor ("health" event / `healthState`). */
 export interface HealthEvent {
   level: HealthLevel;
   cause: HealthCause;
+  /** Load percentages (0 to 100) at the time of the reading. */
   cpu: number;
   memory: number;
   disk: number;
@@ -524,21 +587,29 @@ export interface SlashCommand {
   source: "user" | "project" | "skill";
 }
 
+/** A file copied into Coucou's inbox (drop, picker or paste). `path` is the inbox copy. */
 export interface DroppedFile {
   name: string;
   path: string;
+  /** Bytes. */
   size: number;
 }
 
+/** State of the Claude Code hook install. */
 export interface HookStatus {
   installed: boolean;
+  /** The ~/.claude/settings.json that would be (or was) edited. */
   settingsPath: string;
   hookPath: string;
+  /** Whether the relay binary exists at `hookPath`. */
   hookReady: boolean;
 }
 
+/** What `hooksPreview` returns: the change to review before anything is written. */
 export interface HookPreview {
+  /** Unified diff of settings.json. */
   diff: string;
+  /** Where the dated backup will be written. */
   backup: string;
   settingsPath: string;
   /** Hand back to hooksApply so only the reviewed diff is ever written. */
@@ -551,12 +622,14 @@ async function callOrThrow<T>(cmd: string, args?: Record<string, unknown>): Prom
   return invoke<T>(cmd, args);
 }
 
+/** Events Rust emits to the island window, by name. Handlers subscribe via `onEvent`. */
 export type BridgeEvent =
   | { name: "cursor"; payload: { x: number; y: number } }
   | { name: "tray"; payload: string }
   | { name: "hook"; payload: Record<string, unknown> }
   | { name: "screen-changed"; payload: null };
 
+/** Simplified drag-and-drop event; `paths` is set on "drop" only. */
 export interface DragDropPayload {
   type: "enter" | "over" | "drop" | "leave";
   paths?: string[];
@@ -570,6 +643,10 @@ export async function onDragDrop(handler: (e: DragDropPayload) => void) {
   });
 }
 
+/**
+ * Subscribes to a named Rust event; resolves to the unlisten function (a no-op
+ * outside Tauri). The handler receives the payload only, not the envelope.
+ */
 export async function onEvent<T>(name: string, handler: (payload: T) => void) {
   if (!IS_TAURI) return () => {};
   return listen<T>(name, (e) => handler(e.payload));

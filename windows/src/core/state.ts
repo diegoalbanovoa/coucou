@@ -1,37 +1,62 @@
-// App state — mirror of AppState.swift (the parts the island needs).
+/**
+ * App state — mirror of AppState.swift (the parts the island needs).
+ *
+ * One mutable singleton (`State`) holds everything the island renders from:
+ * tasks (pills), the current view/mode, chat, settings and integration data.
+ * Mutators call `notify()`; the island subscribes once and re-renders on the
+ * next frame, so views read `State` directly and never keep their own copy.
+ * Also defines `Settings`/`DEFAULT_SETTINGS`, which must stay in step with
+ * `Settings` in src-tauri/src/settings.rs.
+ */
 
 import type { BotEmoteName, BotStateName, IslandMode, IslandViewName } from "./layout";
 import type { EyeShape } from "../mochi/engine";
 import type { ChatAttachment, DroppedFile, HealthEvent, RoutineResult } from "./bridge";
 
+/** Where a pill's events come from: Claude Code hooks, an n8n-style poller, or another agent CLI. */
 export type AgentSource = "claudeCode" | "n8n" | "agent";
+/** The small marker on a pill that needs attention. Cleared when the pill is focused. */
 export type PillBadge = "approval" | "finished" | "error";
 
+/** One pill: an agent session or an integration, with Mochi's state for it. */
 export interface AgentTask {
+  /** Stable id: `integration_*` for fixed pills, `agent_*` for dynamic ones. */
   id: string;
   name: string;
+  /** Hex accent colour of the pill. */
   color: string;
   state: BotStateName;
+  /** Index into `steps` of the step currently shown. */
   stepIndex: number;
+  /** Recent tool steps, capped at 20 by `appendStep`. */
   steps: string[];
   source: AgentSource;
+  /** True for the fixed pills in `INTEGRATION_AGENTS`; false for dynamic agent pills. */
   isIntegration: boolean;
+  /** One-shot emote overriding the state animation, if any. */
   emote?: BotEmoteName | null;
+  /** Eye shape of the pill's mini Mochi. */
   miniEye?: EyeShape | null;
   pillBadge?: PillBadge | null;
+  /** Working directory of the session, from the hook payload. */
   sessionCwd?: string | null;
   /** Where the session runs — "Windows Terminal", "VS Code"… Empty until known. */
   host?: string;
 }
 
+/** A permission request waiting for the user's explicit click. */
 export interface ApprovalInfo {
+  /** Echoed back to `Bridge.approvalDecision` to resolve the right request. */
   requestId: string;
   sessionId: string;
   tool: string;
+  /** What the tool wants to run, shown on the card. */
   command: string;
 }
 
+/** One message in the on-screen chat log. */
 export interface ChatMessage {
+  /** Local counter, unique within a run. */
   id: number;
   /** `error` is a turn that failed: shown in the log, not as a note view. */
   role: "user" | "assistant" | "error";
@@ -46,18 +71,22 @@ export interface ChatMessage {
   attachments?: ChatAttachment[];
 }
 
+/** One row of a search result card; `url`, when present, makes it clickable. */
 export interface ResultItem {
   label: string;
   detail: string;
   url?: string;
 }
 
+/** Content of the "result" view. */
 export interface SearchResult {
   title: string;
   items: ResultItem[];
+  /** Footnote under the list. */
   note?: string;
 }
 
+/** Builds an idle, empty integration pill (used only for `INTEGRATION_AGENTS`). */
 const task = (
   id: string, name: string, color: string, source: AgentSource,
 ): AgentTask => ({
@@ -80,6 +109,7 @@ export const INTEGRATION_AGENTS: AgentTask[] = [
   task("integration_stripe", "Stripe", "#0570DE", "n8n"),
 ];
 
+/** Integration pills the user may switch on or off; `integration_claude` is always on. */
 export const TOGGLEABLE_INTEGRATION_IDS = [
   "integration_resend", "integration_n8n", "integration_vercel", "integration_github",
   "integration_notion", "integration_calcom", "integration_stripe",
@@ -89,18 +119,28 @@ export const TOGGLEABLE_INTEGRATION_IDS = [
 export interface IntegrationInfo {
   data: Record<string, unknown>;
   error: string | null;
+  /** True once at least one poll has come back. */
   loaded: boolean;
+  /** False when the integration has no credentials yet. */
   configured: boolean;
 }
 
+/** User settings, persisted by Rust. Field names match the serde struct (camelCase). */
 export interface Settings {
   soundEnabled: boolean;
+  /** 0 to 1. */
   soundVolume: number;
+  /** Seconds before an expanded island collapses by itself. */
   autoCloseInterval: number;
+  /** Seconds of inactivity before Mochi goes to sleep. */
   absenceInterval: number;
+  /** Ids of the optional integration pills currently on (max 4). */
   activeIntegrations: string[];
+  /** Which monitor the island sits on: the primary one or the one under the cursor. */
   screen: "primary" | "cursor";
+  /** Launch with the OS. */
   autostart: boolean;
+  /** Whether the user has installed the Claude Code hooks. */
   hooksInstalled: boolean;
   /** The folder the chat runs in, remembered across restarts. Null for none. */
   projectRoot: string | null;
@@ -154,6 +194,7 @@ export interface AllowedApp {
   exe: string;
 }
 
+/** Defaults used until `boot` returns the saved settings; keep in step with Rust's `Settings::default()`. */
 export const DEFAULT_SETTINGS: Settings = {
   soundEnabled: true,
   soundVolume: 0.12,
@@ -189,15 +230,26 @@ export const DEFAULT_SETTINGS: Settings = {
   skillsEnabled: [],
 };
 
+/** Callback run by `notify()`. */
 type Listener = () => void;
 
+/**
+ * The mutable app state behind the `State` singleton. Fields are plain and
+ * public by design: writers change them and then call `notify()` (the setters
+ * below already do). Not persisted — only `settings` round-trips through Rust.
+ */
 class AppState {
+  /** Collapse level of the island (hidden / compact / expanded). */
   mode: IslandMode = "hidden";
+  /** Which view is drawn while expanded. */
   view: IslandViewName = "overview";
 
+  /** Pills in display order; see `loadIntegrationTasks` for the ordering rules. */
   tasks: AgentTask[] = [];
+  /** Id of the pill Mochi follows. Falls back to the first task when stale. */
   focusId: string | null = null;
 
+  /** Forces Mochi's state regardless of the focused task (dev/mock mode, health). */
   stateOverride: BotStateName | null = null;
 
   /** Cursor in logical screen pixels, origin top-left (like AppState.mousePosition). */
@@ -205,9 +257,12 @@ class AppState {
   /** Cursor relative to the island's top-left corner. */
   mouseInIsland = { x: 0, y: 0 };
 
+  /** Keeps the island open (no auto-collapse) while true. */
   isPinned = false;
+  /** Tray "Pause": integration pollers are stopped and tools refused. */
   paused = false;
 
+  /** A file is being dragged over the island. */
   fileDragOver = false;
 
   /** Mock mode only (`?state=cleanup`) — opens the System tab's "free up
@@ -225,9 +280,13 @@ class AppState {
    *  mochi/moods.ts and plan-v2.md § 7.3. */
   health: HealthEvent | null = null;
 
+  /** Text of the "note" view. */
   noteMessage: string | null = null;
+  /** Content of the "result" view. */
   searchResult: SearchResult | null = null;
+  /** The chat log, oldest first. */
   chatHistory: ChatMessage[] = [];
+  /** The permission request currently on the approval card, if any. */
   pendingApproval: ApprovalInfo | null = null;
   /** Folder the agent runs in, or null when nothing is attached. */
   attachedProject: string | null = null;
@@ -267,14 +326,18 @@ class AppState {
   /** A digest is waiting for the island to be collapsed and idle. */
   pendingDigest = false;
 
+  /** Latest poller report per integration id. */
   integrations: Record<string, IntegrationInfo> = {};
 
+  /** `performance.now()` of the last user/agent activity; drives auto-close and sleep. */
   lastActivity = performance.now();
 
+  /** Live copy of the settings; replaced by `boot`, saved through `Bridge.saveSettings`. */
   settings: Settings = { ...DEFAULT_SETTINGS };
 
   private listeners = new Set<Listener>();
 
+  /** Registers a re-render callback; returns the unsubscribe function. */
   subscribe(fn: Listener): () => void {
     this.listeners.add(fn);
     return () => this.listeners.delete(fn);
@@ -285,18 +348,22 @@ class AppState {
     for (const fn of this.listeners) fn();
   }
 
+  /** The pill Mochi follows: `focusId` if it still exists, else the first task. */
   get focusTask(): AgentTask | null {
     return this.tasks.find((t) => t.id === this.focusId) ?? this.tasks[0] ?? null;
   }
 
+  /** The state Mochi should show: the override, else the focused task's, else idle. */
   get effectiveState(): BotStateName {
     return this.stateOverride ?? this.focusTask?.state ?? "idle";
   }
 
+  /** Every pill except the focused one (the side pills in the overview). */
   get otherTasks(): AgentTask[] {
     return this.tasks.filter((t) => t.id !== this.focusId);
   }
 
+  /** Focuses a pill and clears its badge (looking at it counts as seen). Unknown ids are ignored. */
   setFocus(id: string) {
     const t = this.tasks.find((x) => x.id === id);
     if (!t) return;
@@ -305,6 +372,7 @@ class AppState {
     this.notify();
   }
 
+  /** Sets a pill's Mochi state. Unknown ids are ignored. */
   updateTask(id: string, state: BotStateName) {
     const t = this.tasks.find((x) => x.id === id);
     if (!t) return;
@@ -312,6 +380,7 @@ class AppState {
     this.notify();
   }
 
+  /** Appends a tool step to a pill, keeping only the newest 20, and points `stepIndex` at it. */
   appendStep(id: string, step: string) {
     const t = this.tasks.find((x) => x.id === id);
     if (!t) return;
@@ -321,6 +390,7 @@ class AppState {
     this.notify();
   }
 
+  /** Sets or clears a pill's attention badge. */
   setPillBadge(id: string, badge: PillBadge | null) {
     const t = this.tasks.find((x) => x.id === id);
     if (!t) return;
@@ -357,6 +427,7 @@ class AppState {
     this.notify();
   }
 
+  /** Drops a pill; if it was focused, focus moves to the first remaining one. */
   removeTask(id: string) {
     const idx = this.tasks.findIndex((t) => t.id === id);
     if (idx < 0) return;
@@ -379,6 +450,10 @@ class AppState {
     this.notify();
   }
 
+  /**
+   * Switches an optional integration pill on or off, then rebuilds the task
+   * list. `integration_claude` cannot be toggled and at most 4 can be on.
+   */
   toggleIntegration(id: string) {
     if (id === "integration_claude") return;
     const active = this.settings.activeIntegrations;
@@ -392,9 +467,11 @@ class AppState {
     this.loadIntegrationTasks();
   }
 
+  /** The view to return to when nothing else is pending. */
   defaultView(): IslandViewName {
     return this.tasks.length === 0 ? "empty" : "overview";
   }
 }
 
+/** The app-wide state singleton; import this, never construct `AppState`. */
 export const State = new AppState();

@@ -1,9 +1,18 @@
-// Island geometry — ported from IslandTypes.swift + IslandWindowController.islandSize
-// + IslandRootView.botPosition. All values are logical pixels, identical to the
-// macOS app's points.
+/**
+ * Island geometry — ported from IslandTypes.swift + IslandWindowController.islandSize
+ * + IslandRootView.botPosition. All values are logical pixels, identical to the
+ * macOS app's points.
+ *
+ * Pure data and functions, no DOM: island/island.ts uses them to size the
+ * island and place Mochi, views read `VIEW_LAYOUTS`, and state.ts takes the
+ * shared name types from here. PANEL_W/PANEL_H must match island.rs on the
+ * Rust side.
+ */
 
+/** Collapse level: retracted to nothing, the compact pill, or the full card. */
 export type IslandMode = "hidden" | "compact" | "expanded";
 
+/** Every screen the expanded island can show; keys of `VIEW_LAYOUTS`. */
 export type IslandViewName =
   | "overview"
   | "empty"
@@ -23,6 +32,7 @@ export type IslandViewName =
   | "quick"
   | "digest";
 
+/** Mochi's activity states (mirror of the Mac BotState); drive animation and glow. */
 export type BotStateName =
   | "idle"
   | "working"
@@ -36,14 +46,20 @@ export type BotStateName =
   | "sleeping"
   | "dizzy";
 
+/** Short one-shot expressions Mochi can play over its current state. */
 export type BotEmoteName = "love" | "surprised" | "proud" | "wink" | "yawn" | "happy" | "annoyed";
 
+/** How the other agents' pills are arranged beside the main card. */
 export type AgentLayoutMode = "none" | "grid" | "pills" | "column";
 
+/** Per-view geometry of the expanded island. */
 export interface ViewLayout {
+  /** Card height before clamping to the work area. */
   height: number;
+  /** Mochi's centre, x from the island's left edge. */
   botX: number;
   botY: number | null; // null = auto-centred
+  /** 0 to 1 effectively hides Mochi for views that draw their own. */
   botDiameter: number;
   agentMode: AgentLayoutMode;
 }
@@ -69,6 +85,7 @@ export const EXPANDED_CORNER = 22;
 export const WAKE_STRIP_W = 240;
 export const WAKE_STRIP_H = 6;
 
+/** Layout of every view; add an entry here when adding an `IslandViewName`. */
 export const VIEW_LAYOUTS: Record<IslandViewName, ViewLayout> = {
   // Fase 6 (plan-v2.md § 6.2): Mochi is the protagonist of this view, large
   // and centred in its own left column rather than sharing the header strip
@@ -152,6 +169,11 @@ export function chatPromptHeight(
   return clampViewHeight(desired, ceiling, CHAT_MIN_H);
 }
 
+/**
+ * Island size in logical px for a mode and view. Hidden is zero-height, compact
+ * is a fixed pill, expanded uses the view's height (the chat's is dynamic)
+ * clamped to the work area so the fixed-size native window never clips it.
+ */
 export function islandSize(
   mode: IslandMode,
   view: IslandViewName,
@@ -177,6 +199,7 @@ export function islandSize(
   }
 }
 
+/** Where and how big to draw Mochi, relative to the island's top-left. */
 export interface BotPlacement {
   cx: number;
   cy: number;
@@ -205,6 +228,7 @@ export function botPosition(mode: IslandMode, view: IslandViewName, islandH: num
   }
 }
 
+/** Glow colour behind Mochi for a state; white for the calm states. */
 export function botGlowColor(s: BotStateName): string {
   switch (s) {
     case "working":
@@ -226,6 +250,7 @@ export function botGlowColor(s: BotStateName): string {
   }
 }
 
+/** Glow strength (0 to 1) for a state: faint when resting, none when dizzy. */
 export function botGlowOpacity(s: BotStateName): number {
   switch (s) {
     case "idle":
@@ -254,6 +279,11 @@ const PROJECT_COLORS: Record<string, string> = {
 
 const FALLBACK_COLORS = ["#22C55E", "#EAB308", "#60A5FA", "#E879F9"];
 
+/**
+ * Accent colour for a project name: exact match, then substring match against
+ * the known projects, else a stable pick from a fallback palette via a string
+ * hash (so the same name always gets the same colour).
+ */
 export function colorForProject(name: string): string {
   const key = name.toLowerCase().trim();
   const exact = PROJECT_COLORS[key];
@@ -269,6 +299,7 @@ export function colorForProject(name: string): string {
 // Card wash colours (CardBackground.washColor)
 export type Wash = "red" | "green" | "pink" | "amber" | "cyan" | "indigo" | "soft" | null;
 
+/** CSS `rgba()` for a card wash tint; `null` is fully transparent. */
 export function washRGBA(wash: Wash): string {
   switch (wash) {
     case "red":

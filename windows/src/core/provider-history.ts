@@ -1,13 +1,17 @@
-// The earlier conversation a provider profile gets along with a new prompt
-// (providers.rs's `build_messages`). A provider has no session of its own, so
-// the visible chat is its only memory.
-//
-// It includes the turns an agent CLI answered too: the conversation on screen
-// is one conversation (docs/plan-v4-notas.md, Fase 2). It does not trim to a
-// budget — the Rust side does, in `fit_history`.
+/**
+ * The earlier conversation a provider profile gets along with a new prompt
+ * (providers.rs's `build_messages`). A provider has no session of its own, so
+ * the visible chat is its only memory.
+ *
+ * It includes the turns an agent CLI answered too: the conversation on screen
+ * is one conversation (docs/plan-v4-notas.md, Fase 2). It does not trim to a
+ * budget — the Rust side does, in `fit_history`. Used by views/chat.ts when
+ * sending through `Bridge.providerSend`.
+ */
 
 import type { ChatMessage } from "./state";
 
+/** One prior turn in the shape `Bridge.providerSend` expects. */
 export interface HistoryEntry {
   role: "user" | "assistant";
   content: string;

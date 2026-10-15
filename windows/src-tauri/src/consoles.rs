@@ -1,17 +1,17 @@
-// Which agent consoles this machine has.
-//
-// Moved out of agent.rs, which had grown to hold three jobs at once: the table
-// of CLIs and how to find them, the parsing of one turn's output, and the
-// state of the conversation. Finding them is its own concern — it answers a
-// question the island asks on every boot and every focus, and it answers it
-// about the machine rather than about any conversation.
-//
-// What a console is, here: an agent CLI installed on this machine that Coucou
-// knows how to drive headlessly. Not a shell, and not a terminal window —
-// PowerShell has no turns to take and a Windows Terminal tab cannot be driven
-// from outside. Live sessions are a separate matter and need nothing from this
-// module: they arrive as hook events and the island already knows which
-// terminal and folder each one is in.
+//! Which agent consoles this machine has.
+//!
+//! Moved out of agent.rs, which had grown to hold three jobs at once: the table
+//! of CLIs and how to find them, the parsing of one turn's output, and the
+//! state of the conversation. Finding them is its own concern — it answers a
+//! question the island asks on every boot and every focus, and it answers it
+//! about the machine rather than about any conversation.
+//!
+//! What a console is, here: an agent CLI installed on this machine that Coucou
+//! knows how to drive headlessly. Not a shell, and not a terminal window —
+//! PowerShell has no turns to take and a Windows Terminal tab cannot be driven
+//! from outside. Live sessions are a separate matter and need nothing from this
+//! module: they arrive as hook events and the island already knows which
+//! terminal and folder each one is in.
 
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -34,6 +34,7 @@ const VERSION_TIMEOUT: Duration = Duration::from_secs(10);
 pub struct Cli {
     /// Stable id, also the value stored in settings.
     pub id: &'static str,
+    /// Name shown in the UI.
     pub label: &'static str,
     /// Executable stem to look for.
     pub(crate) stem: &'static str,
@@ -162,7 +163,9 @@ pub struct Capabilities {
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct Console {
+    /// Same id as the matching [`Cli`] entry.
     pub id: &'static str,
+    /// Name shown in the UI.
     pub label: &'static str,
     /// Where it was found. Worth showing: which copy is being run is exactly
     /// the thing that surprises people with four package managers installed.
@@ -172,6 +175,7 @@ pub struct Console {
     /// The colour its Mochi wears in the picker, so a console is recognisable
     /// before its name is read.
     pub color: &'static str,
+    /// What the island may offer for this console (streaming, resume, approval).
     pub can: Capabilities,
     /// Whether this one has ever actually been run from Coucou, or whether it
     /// is driven the way its own documentation says. Four of the seven are the

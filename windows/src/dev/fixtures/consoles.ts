@@ -13,6 +13,7 @@
 // about; PowerShell previews the shell-detection Fase 3 is deciding on —
 // mock-only, not a claim that shells are in scope.
 
+/** Local copy of `Console` from core/bridge.ts. */
 export interface MockConsole {
   id: string;
   label: string;
@@ -24,6 +25,7 @@ export interface MockConsole {
   configPath: string;
 }
 
+/** Consoles the mock `agentClis` reports: one verified, one partial, two unverified. */
 export const MOCK_CONSOLES: MockConsole[] = [
   {
     id: "claude",

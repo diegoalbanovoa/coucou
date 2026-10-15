@@ -4,6 +4,7 @@
 
 import { h } from "../views/dom";
 
+/** Options for `inlineConfirm`. */
 export interface InlineConfirmOptions {
   message: string;
   confirmLabel: string;
@@ -12,10 +13,13 @@ export interface InlineConfirmOptions {
    *  the same way before Fase 2 routes it through `t()`. */
   cancelLabel?: string;
   onConfirm: () => void;
+  /** Called by the cancel button and by Esc. */
   onCancel: () => void;
+  /** Styles the confirm button red and focuses "no" first. */
   destructive?: boolean;
 }
 
+/** Builds the yes/no strip; the caller swaps it in for the row's normal content. */
 export function inlineConfirm(opts: InlineConfirmOptions): HTMLElement {
   const confirmBtn = h("button", {
     class: `ui-btn ${opts.destructive ? "ui-btn-destructive" : "ui-btn-primary"} ui-btn-sm`,

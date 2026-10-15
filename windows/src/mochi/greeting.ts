@@ -1,11 +1,14 @@
 // The launch "coucou" — port of GreetingCanvasView.swift.
 // Everything is laid out in the same 640×150 reference space as on macOS.
+// `Greeting` is owned by the island, which draws it on a dedicated canvas at
+// launch and moves the FSM on when it completes.
 
 import { Sound } from "../core/sound";
 import { COMPACT_W, NOTCH_H, NOTCH_W } from "../core/layout";
 
 // ── Timing (mirrors greeting-v2.html `T`) ─────────────────────────────────────
 
+/** Keyframe times in seconds; `COLLAPSE` is the length of the early-exit collapse. */
 const T = {
   grow: 0.45,
   squint0: 0.6,
@@ -29,23 +32,30 @@ const T = {
   COLLAPSE: 0.34,
 };
 
+/** Seconds after start at which the scripted greeting ends. */
 export const GREETING_END = T.end;
 
 // ── Geometry (640×150) ────────────────────────────────────────────────────────
 
+/** Mochi's resting centre in the reference space. */
 const C0 = { x: 320, y: 90 };
+/** Full-size body height; ASP is width/height of the squircle. */
 const HB = 58;
 const ASP = 1.34;
+/** Final "small" pose: offset from the compact pill centre, y, and body height. */
 const EAR_X = 40;
 const EAR_Y = 16;
 const EAR_HB = 17;
+/** The dark card (and its corner radius) that unfolds under the notch. */
 const CARD = { x: 10, y: 36, w: 620, h: 104 };
 const CARD_R = 20;
+/** Size of the collapsed island the greeting shrinks into. */
 const SMALL_W = COMPACT_W;
 const SMALL_H = NOTCH_H;
 
 // ── Easing ────────────────────────────────────────────────────────────────────
 
+/** Easing curves on t in 0..1: cubic out/in/in-out and an overshooting back-out. */
 const E = {
   out: (t: number) => 1 - Math.pow(1 - t, 3),
   easeIn: (t: number) => t * t * t,
@@ -57,14 +67,22 @@ const E = {
   },
 };
 
+/** Clamps `v` to `[a, b]`. */
 const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
+/** Linear interpolation. */
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
+/** Progress of `t` through the window `[a, b]`, clamped to 0..1. */
 const seg = (t: number, a: number, b: number) => clamp((t - a) / (b - a), 0, 1);
 
 // ── Pose ──────────────────────────────────────────────────────────────────────
 
+/** Eye shape: round dot, happy squint arc, or content (downward) arc. */
 type EyeType = "dot" | "happy" | "content";
 
+/**
+ * Everything needed to draw one frame: island size (`iw`/`ih`), Mochi
+ * placement/scale/tilt, eyes, hands, badge and effect intensities (0..1).
+ */
 interface Pose {
   hb: number; x: number; y: number; sx: number; sy: number; tilt: number;
   eye: EyeType; open: number; eyeRoll: number;
@@ -75,6 +93,7 @@ interface Pose {
   iw: number; ih: number;
 }
 
+/** The scripted pose at `t` seconds (the full greeting, no early exit). */
 function greetPose(t: number): Pose {
   const gx = seg(t, 0, 0.5);
   const g = Math.sin((Math.PI * gx) / 2) + 0.04 * Math.sin(Math.PI * gx) * gx;
@@ -154,6 +173,7 @@ function greetPose(t: number): Pose {
   };
 }
 
+/** The resting pose the greeting collapses into (Mochi beside the pill). */
 function smallPose(): Pose {
   return {
     hb: EAR_HB,
@@ -170,6 +190,10 @@ function smallPose(): Pose {
   };
 }
 
+/**
+ * Pose at time `t`; if the user interrupts at `tc` the greeting pose frozen at
+ * `tc` is blended into [smallPose] over `T.COLLAPSE` seconds.
+ */
 function pose(t: number, tc: number): Pose {
   if (t < tc) return greetPose(Math.min(t, T.end + 10));
   const a = greetPose(tc);
@@ -205,10 +229,12 @@ function pose(t: number, tc: number): Pose {
 
 // ── Particles (seeded LCG, seed = 7, identical sequence to the Swift version) ──
 
+/** Particle shapes: ring dots expand outwards, streaks are coloured sparks. */
 interface RingDot { a: number; j: number; s: number; al: number }
 interface Ring { t0: number; dots: RingDot[] }
 interface Streak { a: number; sp: number; len: number; t0: number; col: string }
 
+/** Precomputed particle set; the LCG keeps it identical to the Swift version. */
 const PARTICLES = (() => {
   let seed = 7;
   const rnd = () => {
@@ -237,6 +263,7 @@ const PARTICLES = (() => {
 
 // ── Drawing ───────────────────────────────────────────────────────────────────
 
+/** Builds a rounded-rect path (radius clamped to half the shorter side). */
 function rr(x: CanvasRenderingContext2D, X: number, Y: number, W: number, H: number, R: number) {
   const r = Math.max(0, Math.min(R, W / 2, H / 2));
   x.beginPath();
@@ -248,6 +275,7 @@ function rr(x: CanvasRenderingContext2D, X: number, Y: number, W: number, H: num
   x.closePath();
 }
 
+/** Superellipse (exponent 3.2) body outline centred on 0,0 with half sizes hw/hh. */
 function mochiPath(hw: number, hh: number): Path2D {
   const n = 3.2;
   const p = new Path2D();
@@ -265,6 +293,7 @@ function mochiPath(hw: number, hh: number): Path2D {
   return p;
 }
 
+/** Fills `path` with Mochi's white body gradient between two points. */
 function whiteFill(
   x: CanvasRenderingContext2D, path: Path2D,
   x0: number, y0: number, x1: number, y1: number,
@@ -278,6 +307,7 @@ function whiteFill(
   x.restore();
 }
 
+/** Left hand: a small circle that pops out and waves with `p.wave`. */
 function drawHandL(x: CanvasRenderingContext2D, hw: number, hh: number, p: Pose) {
   const k = p.handL;
   if (k <= 0.01) return;
@@ -297,6 +327,7 @@ function drawHandL(x: CanvasRenderingContext2D, hw: number, hh: number, p: Pose)
   x.restore();
 }
 
+/** Right hand: a rounded bar rotated to wave; hidden when `p.handR` ~ 0. */
 function drawHandR(x: CanvasRenderingContext2D, hw: number, hh: number, p: Pose) {
   const k = p.handR;
   if (k <= 0.01) return;
@@ -327,6 +358,7 @@ function drawHandR(x: CanvasRenderingContext2D, hw: number, hh: number, p: Pose)
   x.restore();
 }
 
+/** Draws halo, hands, body, tint, eyes and badge for pose `p`. */
 function drawMochi(x: CanvasRenderingContext2D, p: Pose) {
   const hh = p.hb / 2;
   const hw = hh * ASP;
@@ -431,6 +463,7 @@ function drawMochi(x: CanvasRenderingContext2D, p: Pose) {
   x.restore();
 }
 
+/** Draws the expanding dot rings and sparks around Mochi at time `t`. */
 function drawParticles(x: CanvasRenderingContext2D, t: number, p: Pose) {
   if (!(p.card > 0 || p.fx < 1)) return;
   for (const ring of PARTICLES.rings) {
@@ -460,8 +493,10 @@ function drawParticles(x: CanvasRenderingContext2D, t: number, p: Pose) {
   }
 }
 
+/** Colours of the four mini Mochis that appear in the collapsed pill. */
 const MINI_COLORS = ["#E86A6A", "#3E86E0", "#EFAE5A", "#8C73F2"];
 
+/** Draws the four tiny Mochis scaled by `alpha` (0 hides them). */
 function drawMinis(x: CanvasRenderingContext2D, alpha: number) {
   if (alpha <= 0.01) return;
   const cx = 320 + SMALL_W / 2 - 27;
@@ -485,13 +520,18 @@ function drawMinis(x: CanvasRenderingContext2D, alpha: number) {
  * T.end (or right after the collapse when interrupted) so the FSM can move on.
  */
 export class Greeting {
+  /** performance.now() at start(). */
   private startMs = 0;
+  /** Collapse start time in seconds; Infinity while the greeting runs. */
   private tc = Number.POSITIVE_INFINITY;
+  /** True once onComplete has been delivered (it fires only once). */
   private fired = false;
+  /** Pending sound and completion timers. */
   private timers: number[] = [];
 
   onComplete: (() => void) | null = null;
 
+  /** (Re)starts the animation and schedules the sounds and completion. */
   start() {
     this.startMs = performance.now();
     this.tc = Number.POSITIVE_INFINITY;
@@ -516,14 +556,17 @@ export class Greeting {
     this.cancelTimers();
   }
 
+  /** Seconds since start(). */
   get elapsed(): number {
     return (performance.now() - this.startMs) / 1000;
   }
 
+  /** Whether the completion callback has already fired. */
   get done(): boolean {
     return this.fired;
   }
 
+  /** Fires onComplete exactly once and clears the timers. */
   private fire() {
     if (this.fired) return;
     this.fired = true;
@@ -531,11 +574,16 @@ export class Greeting {
     this.onComplete?.();
   }
 
+  /** Cancels the pending sound/completion timers. */
   private cancelTimers() {
     this.timers.forEach((id) => window.clearTimeout(id));
     this.timers = [];
   }
 
+  /**
+   * Renders the current frame on a 640×150 canvas; also triggers completion
+   * once the end time passes without hover (fallback if the timer was lost).
+   */
   draw(x: CanvasRenderingContext2D) {
     const t = this.elapsed;
     if (!this.fired && t >= T.end && this.tc >= T.autoLeave) this.fire();

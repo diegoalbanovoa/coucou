@@ -1,6 +1,11 @@
 // Settings window — the place where anything that writes to disk is confirmed.
 // Stage 2 covers the Claude Code hooks and the general preferences; API keys and
 // integrations land here too in a later stage.
+//
+// Entry point of the separate settings window (settings.html). Each section is
+// a function that returns a `<section>` element and talks to Rust through
+// `Bridge`; `render()` rebuilds the whole page, which is only needed when the
+// language changes. Changes to `settings` are written immediately with save().
 
 import "./settings.css";
 import { Bridge, onEvent, type HookStatus, type Routine, type RoutineResult } from "../core/bridge";
@@ -10,17 +15,22 @@ import { t, tn, fmtPercent, fmtRelative, setLocale, resolveLocale, type LocaleSe
 import { segmented } from "../ui/segmented";
 import { inlineConfirm } from "../ui/inline-confirm";
 
+/** This window's working copy of the settings; every control mutates it and calls save(). */
 let settings: Settings = { ...DEFAULT_SETTINGS };
+/** App version shown next to the title, from the boot payload. */
 let version = "";
 
+/** Mount point of the whole page. */
 const root = document.getElementById("settings-root")!;
 
+/** Persists the whole `settings` object through Rust, which also broadcasts `settings-changed` to the island. */
 async function save() {
   await Bridge.saveSettings(settings);
 }
 
 // ── Reusable bits ─────────────────────────────────────────────────────────────
 
+/** Switch button that flips its own look immediately and reports the new value. */
 function toggle(on: boolean, onChange: (v: boolean) => void): HTMLElement {
   const el = h("button", { class: on ? "switch on" : "switch", "aria-pressed": on });
   el.addEventListener("click", () => {
@@ -31,10 +41,12 @@ function toggle(on: boolean, onChange: (v: boolean) => void): HTMLElement {
   return el;
 }
 
+/** Small green/red status dot. */
 function statusDot(ok: boolean): HTMLElement {
   return h("i", { class: "dot", style: `background:var(${ok ? "--c-green" : "--c-red"})` });
 }
 
+/** Renders a unified diff: `+` lines as additions, `-` as deletions, the rest as context. */
 function renderDiff(text: string): HTMLElement {
   const box = h("div", { class: "diff" });
   for (const line of text.split("\n")) {
@@ -46,6 +58,12 @@ function renderDiff(text: string): HTMLElement {
 
 // ── Claude Code section ───────────────────────────────────────────────────────
 
+/**
+ * Claude Code hooks: shows the install state and, on request, a diff preview
+ * of the change to settings.json with the backup path. Nothing is written
+ * until the user confirms; Rust checks the preview's fingerprint on apply so
+ * the file cannot change between preview and write.
+ */
 function claudeSection(status: HookStatus): HTMLElement {
   const body = h("div", { style: "display:flex;flex-direction:column;gap:12px" });
   const section = h(
@@ -55,6 +73,7 @@ function claudeSection(status: HookStatus): HTMLElement {
     body,
   );
 
+  /** Re-reads the hook status after an apply and redraws the section. */
   const rebuild = async () => {
     const fresh = await Bridge.hooksStatus();
     if (fresh) Object.assign(status, fresh);
@@ -65,6 +84,7 @@ function claudeSection(status: HookStatus): HTMLElement {
     head.append(statusDot(status.installed), h("span", { text: t("settings.claudeCode.title") }));
   };
 
+  /** Draws the status rows and the install/uninstall actions. */
   function draw() {
     body.append(
       h("div", {
@@ -109,6 +129,7 @@ function claudeSection(status: HookStatus): HTMLElement {
     body.append(actions);
   }
 
+  /** Shows the diff of installing (or removing) the hooks and a confirm button; errors from Rust are shown instead of the diff. */
   async function showPreview(install: boolean) {
     let preview;
     try {
@@ -182,6 +203,7 @@ function agentsSection(): HTMLElement {
   const note = h("div", { class: "hint" });
   const rescan = h("button", { text: t("settings.agents.rescan") });
 
+  /** Lists the detected CLIs (name, version, binary and config paths). */
   async function draw() {
     note.textContent = t("settings.agents.looking");
     clear(body);
@@ -231,6 +253,7 @@ function agentsSection(): HTMLElement {
 
 // ── Integrations section ──────────────────────────────────────────────────────
 
+/** One integration and the secret fields it needs. */
 interface IntegrationDef {
   id: string;
   name: string;
@@ -264,12 +287,19 @@ function integrationDefs(): IntegrationDef[] {
   ];
 }
 
+/** How many integrations may be active at once (matches the island's pill slots). */
 const MAX_ACTIVE = 4;
 
+/**
+ * Collapsible integration keys: an on/off switch per integration (capped at
+ * MAX_ACTIVE) and a save button per credential. `present` says which secrets
+ * are already stored; the secret values themselves are never read back.
+ */
 function integrationsSection(present: Record<string, boolean>): HTMLElement {
   const note = h("div", { class: "hint" });
   const list = h("div", { style: "display:flex;flex-direction:column;gap:14px" });
 
+  /** Refreshes the "pick up to N" counter. */
   function updateNote() {
     const used = settings.activeIntegrations.length;
     note.textContent = t("settings.integrations.pickUpTo", { max: MAX_ACTIVE, used });
@@ -362,6 +392,7 @@ function chatFolderSection(): HTMLElement {
   const choose = h("button", { text: t("settings.chatFolder.choose") });
   const forget = h("button", { text: t("settings.chatFolder.clear") });
 
+  /** Reads the default chat folder from Rust and updates the dot, path and buttons. */
   async function draw() {
     const state = (await Bridge.chatFolderState()) ?? { path: "", exists: false };
     const set = state.path !== "";
@@ -416,6 +447,7 @@ function vaultSection(): HTMLElement {
   const choose = h("button", { text: t("settings.vault.choose") });
   const forget = h("button", { text: t("settings.vault.useObsidians") });
 
+  /** Reads the vault state from Rust and shows where it came from (Obsidian's list or a manual choice). */
   async function draw() {
     const info = (await Bridge.vaultState()) ?? { path: "", source: "none" as const, known: 0 };
     const found = info.source !== "none";
@@ -483,6 +515,7 @@ function quickSection(): HTMLElement {
   const body = h("div", { style: "display:flex;flex-direction:column;gap:12px" });
   const dot = statusDot(false);
 
+  /** Fetches shortcut status, profiles, allow-lists and the last 30 log entries, then rebuilds the section. */
   async function draw() {
     const [info, profiles, folders, apps, log] = await Promise.all([
       Bridge.quickShortcutStatus(),
@@ -499,6 +532,7 @@ function quickSection(): HTMLElement {
       placeholder: t("quick.settings.shortcutPlaceholder"),
       value: info?.shortcut ?? settings.quickAssistantShortcut ?? "",
     }) as HTMLInputElement;
+    /** Registers the shortcut (null clears it); Rust reports conflicts through the status. */
     const apply = async (value: string | null) => {
       await Bridge.quickShortcutSet(value);
       await draw();
@@ -523,6 +557,7 @@ function quickSection(): HTMLElement {
       void save();
     });
 
+    /** A list of allowed items, each with a Remove button, or the empty hint. */
     const list = (items: { key: string; text: string }[], empty: string, remove: (key: string) => Promise<void>) =>
       h("div", { style: "display:flex;flex-direction:column;gap:6px" },
         ...(items.length === 0
@@ -596,6 +631,7 @@ function skillsBlock(): HTMLElement {
   let message: HTMLElement | null = null;
   let removingSkill: string | null = null;
 
+  /** Imports a skill via the native picker; on a name clash asks before replacing it. */
   async function doImport(replace: boolean) {
     message = null;
     try {
@@ -618,6 +654,7 @@ function skillsBlock(): HTMLElement {
     await draw();
   }
 
+  /** Redraws the skill list with enable switches, ignored-parts notes and remove confirms. */
   async function draw() {
     const skills = (await Bridge.skillList()) ?? [];
     clear(box);
@@ -673,6 +710,7 @@ function skillsBlock(): HTMLElement {
 
 // ── Memory section ───────────────────────────────────────────────────────────
 
+/** Max characters of a memory note shown in the list. */
 const NOTE_PREVIEW_CHARS = 80;
 
 /** A note, cut to one line's worth for the list. */
@@ -690,6 +728,7 @@ function memorySection(): HTMLElement {
   let confirming = false;
   let removingNote: string | null = null;
 
+  /** Reloads the notes and storage path, then rebuilds the section. */
   async function draw() {
     const [notes, path] = await Promise.all([Bridge.memoryNotes(), Bridge.memoryPath()]);
     clear(body);
@@ -798,6 +837,7 @@ function routinesSection(): HTMLElement {
   let running: string | null = null;
   let error: string | null = null;
 
+  /** Saves a routine; a validation error from Rust is kept in `error` and shown in the editor. */
   async function persist(routine: Routine) {
     try {
       await Bridge.routineSave(routine);
@@ -807,6 +847,7 @@ function routinesSection(): HTMLElement {
     }
   }
 
+  /** Inline form for the routine in `editing` (new when it has no id). */
   function editor(profiles: { id: string; label: string }[], skills: string[]): HTMLElement {
     const draft = editing!;
     const label = h("input", { type: "text", value: draft.label ?? "", placeholder: t("settings.routines.label") }) as HTMLInputElement;
@@ -869,11 +910,13 @@ function routinesSection(): HTMLElement {
     );
   }
 
+  /** One line of the recent-results list. */
   function resultLine(r: RoutineResult): HTMLElement {
     return h("div", { class: "hint" },
       `${r.label} · ${routineOutcomeLabel(r.outcome)} · ${fmtRelative(r.at, resolveLocale(settings.language))}`);
   }
 
+  /** Reloads routines, profiles, skills and recent results, then rebuilds the section. */
   async function draw() {
     const [routines, profiles, skills, results] = await Promise.all([
       Bridge.routineList(),
@@ -948,6 +991,7 @@ function routinesSection(): HTMLElement {
 
 // ── General section ───────────────────────────────────────────────────────────
 
+/** Sound, auto-close delay, display, launch-at-startup and language. */
 function generalSection(): HTMLElement {
   const volume = h("input", {
     type: "range", min: "0", max: "0.2", step: "0.005",
@@ -1028,6 +1072,7 @@ function generalSection(): HTMLElement {
 
 // ── Team health section (plan-v2.md § 7.2) ──────────────────────────────────────
 
+/** Health monitor settings: enable, usage threshold and the optional disk threshold. */
 function healthSection(): HTMLElement {
   const threshold = h("input", {
     type: "range", min: "50", max: "95", step: "5",
@@ -1094,6 +1139,7 @@ function healthSection(): HTMLElement {
 let hookStatus: HookStatus = { installed: false, settingsPath: "", hookPath: "", hookReady: false };
 let secretsPresent: Record<string, boolean> = {};
 
+/** Rebuilds the whole page from the current `settings` and cached status. */
 function render() {
   clear(root);
   root.append(
@@ -1121,6 +1167,7 @@ function renderForLocaleChange() {
   render();
 }
 
+/** Boot: load settings and version, language, hook status and which secrets exist, render, then follow `settings-changed`. */
 async function main() {
   const boot = await Bridge.boot();
   if (boot) {

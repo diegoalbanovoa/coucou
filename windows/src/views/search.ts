@@ -9,6 +9,7 @@
 // What this can reach is the island's own log, which is the last forty
 // messages (see transcript.rs). It is not the CLI's full history, and the
 // counter says so by counting what is there.
+// Used by the chat view's find bar (chat.ts).
 
 import type { ChatMessage } from "../core/state";
 import { t } from "../i18n/index";
@@ -19,6 +20,7 @@ export interface Match {
   id: number;
   /** Index into the message's content. */
   at: number;
+  /** Length of the hit, measured in the normalized query. */
   length: number;
 }
 

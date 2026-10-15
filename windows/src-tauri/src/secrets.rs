@@ -1,8 +1,14 @@
-// API keys live in the Windows Credential Manager or, on Linux, the Secret
-// Service (GNOME Keyring, KWallet) — never on disk and never in the front end — the island can only ask whether a key is present.
+//! API keys live in the Windows Credential Manager or, on Linux, the Secret
+//! Service (GNOME Keyring, KWallet) -- never on disk and never in the front end.
+//! The island can only ask whether a key is present ([`present`]); values are
+//! read by Rust callers (providers, integrations, routines) at the moment of use.
+//!
+//! Only names in [`KNOWN_KEYS`] or well-formed provider-profile names are
+//! accepted, so a compromised webview cannot use this as a general keychain.
 
 use keyring::Entry;
 
+/// Credential-store service name; part of the stored item's identity, do not change.
 const SERVICE: &str = "fr.louisraille.coucou";
 
 /// Every key Coucou may store. Anything outside this list is refused.
@@ -33,6 +39,7 @@ fn is_provider_profile_key(key: &str) -> bool {
         && slug.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
 }
 
+/// Opens the keychain entry for `key`, or `None` if the name is not allowed.
 fn entry(key: &str) -> Option<Entry> {
     if !KNOWN_KEYS.contains(&key) && !is_provider_profile_key(key) {
         return None;
@@ -40,10 +47,13 @@ fn entry(key: &str) -> Option<Entry> {
     Entry::new(SERVICE, key).ok()
 }
 
+/// Reads a key. `None` if it is unknown, missing, empty or unreadable.
 pub fn get(key: &str) -> Option<String> {
     entry(key)?.get_password().ok().filter(|v| !v.is_empty())
 }
 
+/// Stores a key; an empty value deletes it. Errors on a name that is not allowed or a
+/// keychain failure.
 pub fn set(key: &str, value: &str) -> Result<(), String> {
     let entry = entry(key).ok_or_else(|| format!("unknown key {key}"))?;
     if value.is_empty() {
@@ -53,6 +63,7 @@ pub fn set(key: &str, value: &str) -> Result<(), String> {
     entry.set_password(value).map_err(|e| e.to_string())
 }
 
+/// Deletes a key. Succeeds when it was already absent.
 pub fn clear(key: &str) -> Result<(), String> {
     let entry = entry(key).ok_or_else(|| format!("unknown key {key}"))?;
     match entry.delete_credential() {
@@ -61,6 +72,7 @@ pub fn clear(key: &str) -> Result<(), String> {
     }
 }
 
+/// True when a non-empty value is stored. This is all the front end may learn.
 pub fn present(key: &str) -> bool {
     get(key).is_some()
 }

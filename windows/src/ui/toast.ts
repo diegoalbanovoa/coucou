@@ -4,19 +4,22 @@
 
 import { h } from "../views/dom";
 
+/** Colour treatment of a toast. */
 export type ToastTone = "neutral" | "success" | "error";
 
+/** Optional button on a toast (e.g. "Undo"). */
 export interface ToastAction {
   label: string;
   onClick: () => void;
 }
 
+/** Options for `toast`. */
 export interface ToastOptions {
   message: string;
   tone?: ToastTone;
   action?: ToastAction;
   /** Milliseconds before it dismisses itself. */
-  duration?: number;
+  duration?: number; // default 2500
 }
 
 /**

@@ -1,6 +1,10 @@
-// Dropped files are copied into %LOCALAPPDATA%\Coucou\inbox so the original is
-// never touched and the copy survives the drag source going away.
-// The inbox is swept of anything older than a week, as on macOS.
+//! Dropped files are copied into %LOCALAPPDATA%\Coucou\inbox so the original is
+//! never touched and the copy survives the drag source going away.
+//! The inbox is swept of anything older than a week, as on macOS.
+//!
+//! Called from the drop, paste and preview commands in `lib.rs`. The webview
+//! only ever names paths; everything that reads one (`preview`) re-checks that
+//! it resolves inside the inbox, and executables are refused at the door.
 
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
@@ -9,6 +13,7 @@ use serde::Serialize;
 
 use crate::settings;
 
+/// How long a copy stays in the inbox before `sweep` deletes it.
 const KEEP_FOR: Duration = Duration::from_secs(7 * 24 * 60 * 60);
 
 /// Never copied into the inbox, whatever sent it — an executable the agent
@@ -21,18 +26,24 @@ pub const BLOCKED_EXTS: &[&str] = &["exe", "msi", "bat", "cmd", "ps1", "vbs", "l
 /// rather than showing verbatim — see views/chat.ts's attach().
 pub const BLOCKED_ERR: &str = "blocked-extension";
 
+/// A file that now lives in the inbox, as reported to the front end.
 #[derive(Serialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct DroppedFile {
+    /// File name of the copy (may carry a ` (n)` suffix if the name was taken).
     pub name: String,
+    /// Absolute path of the copy inside the inbox, not of the original.
     pub path: String,
+    /// Size in bytes; the front end checks its per-file cap against this.
     pub size: u64,
 }
 
+/// The folder dropped and pasted files are copied into.
 pub fn inbox_dir() -> PathBuf {
     settings::local_dir().join("inbox")
 }
 
+/// Whether the extension (case-insensitive) is in [`BLOCKED_EXTS`].
 fn is_blocked(path: &Path) -> bool {
     path.extension()
         .map(|e| e.to_string_lossy().to_lowercase())
@@ -40,6 +51,11 @@ fn is_blocked(path: &Path) -> bool {
         .unwrap_or(false)
 }
 
+/// Copies the dropped file at `source` into the inbox and sweeps old copies.
+///
+/// Never overwrites: a name clash gets a ` (n)` suffix. Errors are strings
+/// meant for the user, except [`BLOCKED_ERR`] which the front end translates.
+/// Folders and blocked extensions are refused before anything is copied.
 pub fn ingest(source: &str) -> Result<DroppedFile, String> {
     let src = Path::new(source);
     if is_blocked(src) {
@@ -199,6 +215,7 @@ pub const MAX_PREVIEW_BYTES: u64 = 4 * 1024 * 1024;
 // views/chat.ts where it is enforced. A second copy here would be a number
 // nothing checks, drifting from the one that does.
 
+/// Whether the extension (case-insensitive) is one Coucou shows as a thumbnail.
 pub fn is_image(path: &Path) -> bool {
     path.extension()
         .map(|e| e.to_string_lossy().to_lowercase())
@@ -206,6 +223,7 @@ pub fn is_image(path: &Path) -> bool {
         .unwrap_or(false)
 }
 
+/// MIME type for an image path; unknown extensions default to JPEG.
 fn media_type(path: &Path) -> &'static str {
     match path.extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default().as_str()
     {

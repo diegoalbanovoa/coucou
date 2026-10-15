@@ -1,10 +1,14 @@
-// The island chat's agent side: which CLI it runs, which folder it runs in,
-// and what `/` can reach.
-//
-// There is deliberately very little here. The turn itself is one Rust call,
-// and everything that happens during it — the steps, the diffs, the permission
-// card — arrives as ordinary Claude Code hook events, because the session
-// Coucou spawns runs the same hooks any terminal session does. See agent.rs.
+/**
+ * The island chat's agent side: which CLI it runs, which folder it runs in,
+ * and what `/` can reach.
+ *
+ * There is deliberately very little here. The turn itself is one Rust call,
+ * and everything that happens during it — the steps, the diffs, the permission
+ * card — arrives as ordinary Claude Code hook events, because the session
+ * Coucou spawns runs the same hooks any terminal session does. See agent.rs.
+ * Used by views/chat.ts and views/consoles.ts; module-level lets hold the
+ * lists they render.
+ */
 
 import { Bridge, onEvent } from "../core/bridge";
 import type { Console, KeptMessage, OllamaModel, ProviderProfile, SlashCommand } from "../core/bridge";
@@ -30,6 +34,7 @@ export let slashCommands: SlashCommand[] = [];
 /** The island, so the chat can hold it open. Set once, at boot. */
 let island: Island | null = null;
 
+/** Keeps a reference to the island and subscribes to the "agent-clis" and "agent-folder" events. */
 export function registerAgentHandlers(host: Island) {
   island = host;
 
@@ -49,6 +54,11 @@ export function registerAgentHandlers(host: Island) {
   });
 }
 
+/**
+ * Boot-time load: installed CLIs, the remembered project and CLI (dropped if
+ * that CLI is gone; otherwise the first installed one is the default), the
+ * saved conversation and the `/` commands.
+ */
 export async function loadAgentEnvironment() {
   availableClis = (await Bridge.agentClis()) ?? [];
   // Rust restored the project it was in when it last ran, so the chat opens on
@@ -127,6 +137,7 @@ export async function reloadConsoles() {
   State.notify();
 }
 
+/** Re-reads the `/` commands for the current project. Callers `notify()` afterwards. */
 export async function refreshSlashCommands() {
   slashCommands = (await Bridge.agentCommands()) ?? [];
 }

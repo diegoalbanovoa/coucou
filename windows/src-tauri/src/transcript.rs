@@ -1,10 +1,11 @@
-// The last stretch of the island's conversation, kept across restarts.
-//
-// Not in settings.json. This is text that grows, and one long reply would make
-// a preference file unreadable; it also has nothing to do with preferences.
-//
-// The CLI session is resumed on the Rust side (see agent::Session), so without
-// this the island would come back continuing a conversation it showed none of.
+//! The last stretch of the island's conversation, kept across restarts.
+//!
+//! Not in settings.json. This is text that grows, and one long reply would make
+//! a preference file unreadable; it also has nothing to do with preferences.
+//!
+//! The CLI session is resumed on the Rust side (see agent::Session), so without
+//! this the island would come back continuing a conversation it showed none of.
+//! Stored as `chat.json` in the private config dir; writes are best-effort.
 
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -44,12 +45,16 @@ pub struct Message {
     pub content: String,
     /// Milliseconds since the epoch, as the webview counts them.
     pub at: f64,
+    /// Tool or progress lines the agent showed for this reply. Defaulted so older
+    /// files without the field still load.
     #[serde(default)]
     pub steps: Vec<String>,
+    /// Chips for files attached to the message. Defaulted for older files.
     #[serde(default)]
     pub attachments: Vec<Attachment>,
 }
 
+/// Location of the stored conversation inside the config dir.
 fn path() -> PathBuf {
     platform::config_dir().join("chat.json")
 }
@@ -73,6 +78,7 @@ pub fn save(messages: &[Message]) {
     }
 }
 
+/// Atomically writes `kept` (temporary file, then rename) into a private config dir.
 fn write(file: &std::path::Path, kept: &[Message]) -> std::io::Result<()> {
     platform::ensure_private_dir(&platform::config_dir())?;
     let bytes = serde_json::to_vec_pretty(kept)

@@ -1,13 +1,18 @@
-// The whole i18n surface: t()/tn() to read strings, fmt* to read numbers and
-// dates the same locale-aware way, resolveLocale() to turn the setting
-// ("system" | "en" | "es") into a real Locale. See docs/plan-v2.md § 2.1.
-//
-// No dependency: everything here is Intl, already in the webview.
+/**
+ * The whole i18n surface: t()/tn() to read strings, fmt* to read numbers and
+ * dates the same locale-aware way, resolveLocale() to turn the setting
+ * ("system" | "en" | "es") into a real Locale. See docs/plan-v2.md § 2.1.
+ *
+ * No dependency: everything here is Intl, already in the webview. Used by every
+ * view, both windows' entry points (main.ts, settings/main.ts) and island/*.
+ */
 
 import { en, type En } from "./en";
 import { es } from "./es";
 
+/** A language the app ships strings for. */
 export type Locale = "en" | "es";
+/** The user's language preference: a locale, or "system" to follow the OS. */
 export type LocaleSetting = "system" | Locale;
 
 // ── The shape every locale file must have ──────────────────────────────────────
@@ -15,6 +20,7 @@ export type LocaleSetting = "system" | Locale;
 /** Every leaf string in `T` widened to `string`, structure untouched — what
  *  lets es.ts hold different words at the same keys en.ts declares. */
 export type DeepStrings<T> = { [K in keyof T]: T[K] extends string ? string : DeepStrings<T[K]> };
+/** The shape every dictionary (en, es) must match; en.ts is the source of truth. */
 export type Messages = DeepStrings<En>;
 
 /** Dot-path union of every plain-string leaf — what `t()` accepts. */
@@ -35,26 +41,33 @@ type PluralPaths<T, Prefix extends string = ""> = {
       : PluralPaths<T[K], `${Prefix}${K}.`>;
 }[keyof T & string];
 
+/** Valid keys for `t()`; a typo is a compile error. */
 export type MessageKey = StringPaths<En>;
+/** Valid keys for `tn()`. */
 export type PluralKey = PluralPaths<En>;
 
 const DICTS: Record<Locale, Messages> = { en, es };
 
+/** Walks a dot path through a dictionary; `undefined` when any segment is missing. */
 function lookup(dict: Messages, path: string): unknown {
   return path.split(".").reduce<unknown>((node, part) => (node as Record<string, unknown> | undefined)?.[part], dict);
 }
 
+/** Replaces `{name}` placeholders from `params`; unknown placeholders are left as written. */
 function interpolate(template: string, params?: Record<string, string | number>): string {
   if (!params) return template;
   return template.replace(/\{(\w+)\}/g, (whole, name) => (name in params ? String(params[name]) : whole));
 }
 
+/** Module-level on purpose: `t()` is called from everywhere and must not take a locale. */
 let currentLocale: Locale = "en";
 
+/** Switches the active locale; views must re-render to pick it up. */
 export function setLocale(locale: Locale) {
   currentLocale = locale;
 }
 
+/** The active locale. */
 export function getLocale(): Locale {
   return currentLocale;
 }

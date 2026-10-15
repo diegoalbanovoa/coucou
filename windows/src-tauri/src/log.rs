@@ -1,11 +1,19 @@
-// Small append-only log at %LOCALAPPDATA%\Coucou\coucou.log (Windows) or
-// ~/.local/share/coucou/coucou.log (Linux) — the equivalent of nbLog() in
-// HookServer.swift. Nothing leaves the machine.
+//! Small append-only log at `%LOCALAPPDATA%\Coucou\coucou.log` (Windows) or
+//! `~/.local/share/coucou/coucou.log` (Linux) — the equivalent of `nbLog()` in
+//! `HookServer.swift`. Nothing leaves the machine.
+//!
+//! Called from every other module for diagnostics. Callers must never pass
+//! secrets or file contents: the log is plain text (though owner-only on Unix).
+//! All I/O errors are swallowed on purpose; logging must never break a caller.
 
 use std::io::Write;
 
 use crate::{platform, settings};
 
+/// Appends one timestamped (local time) line to the log file.
+///
+/// Creates the private data directory if needed and truncates the file by
+/// deleting it once it passes ~1 MB. Best effort: failures are ignored.
 pub fn line(message: impl AsRef<str>) {
     let t = platform::local_time();
     let stamp = format!(

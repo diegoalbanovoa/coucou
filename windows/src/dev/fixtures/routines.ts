@@ -2,6 +2,7 @@
 
 import type { Routine, RoutineResult } from "../../core/bridge";
 
+/** One enabled weekday-morning routine for the Settings → Routines pane. */
 export const MOCK_ROUTINES: Routine[] = [
   {
     id: "r-morning",
@@ -18,6 +19,7 @@ export const MOCK_ROUTINES: Routine[] = [
 
 const now = Date.now();
 
+/** Newest first: a successful digest, then a failed run (index 0 and 1 back `?view=digest[-error]`). */
 export const MOCK_ROUTINE_RESULTS: RoutineResult[] = [
   {
     routineId: "r-morning",

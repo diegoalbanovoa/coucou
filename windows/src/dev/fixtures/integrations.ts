@@ -16,6 +16,7 @@ export const MOCK_ACTIVE_INTEGRATIONS = [
   "integration_stripe",
 ];
 
+/** Poller payload per integration id, in the shapes `views/integrations.ts` reads. */
 export const MOCK_INTEGRATION_DATA: Record<string, Record<string, unknown>> = {
   integration_n8n: {
     runs: [

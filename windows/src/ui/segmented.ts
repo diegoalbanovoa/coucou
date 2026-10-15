@@ -6,19 +6,26 @@
 
 import { h, clear } from "../views/dom";
 
+/** One segment: the value it selects and its visible label. */
 export interface SegmentedItem<T extends string> {
   value: T;
   label: string;
 }
 
+/** Options for `segmented`. */
 export interface SegmentedOptions<T extends string> {
   items: SegmentedItem<T>[];
+  /** Initially selected value. */
   value: T;
+  /** Fires on user selection only (click or arrow keys). */
   onChange: (value: T) => void;
+  /** Defaults to "md". */
   size?: "sm" | "md";
 }
 
+/** Handle returned by `segmented`. */
 export interface Segmented<T extends string> {
+  /** Mount this in the view. */
   el: HTMLElement;
   /** Updates the shown selection without firing `onChange` — for when
    *  something other than a click changed the value (e.g. a setting synced
@@ -26,6 +33,7 @@ export interface Segmented<T extends string> {
   setValue(value: T): void;
 }
 
+/** Builds a tablist-style segmented control (roving tabindex, arrows wrap around). */
 export function segmented<T extends string>(opts: SegmentedOptions<T>): Segmented<T> {
   const size = opts.size ?? "md";
   let current = opts.value;

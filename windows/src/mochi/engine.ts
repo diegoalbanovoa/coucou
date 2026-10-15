@@ -3,6 +3,11 @@
 // difference is the `happy`/`wink` eye arc, which follows the prototype
 // (design/prototype/notch-buddy.html, the visual source of truth) — the Swift
 // arc angles produce a different shape.
+//
+// One `BotEngine` per canvas: the island owns the big Mochi, `minibots.ts` owns
+// one per pill/grid cell. The engine is pure state + Canvas 2D drawing; callers
+// drive it with `update(dt)` then `draw(ctx, w, h)` from their frame loop and
+// stop looping when `busy` is false (0 % CPU when idle).
 
 import { Ease, lerp, type EaseFn } from "../core/anim";
 import { Sound } from "../core/sound";
@@ -15,18 +20,22 @@ import { lerpMood, MOOD_BLEND_MS, MOODS, MoodScheduler, type HealthLevel, type M
  *  blush and the thermometer do not, since plan-v2.md § 7.4 keeps those
  *  under reduced motion — they are a read of a static fact, not movement. */
 export let REDUCED_MOTION = false;
+/** Updates [REDUCED_MOTION]; called from island.ts when the media query changes. */
 export function setReducedMotion(on: boolean) {
   REDUCED_MOTION = on;
 }
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
+/** Every eye drawing the engine knows (states, emotes and moods pick from these). */
 export type EyeShape =
   | "pill" | "wide" | "dot" | "line" | "flat" | "happy" | "closed"
   | "spiral" | "heart" | "star" | "tired" | "wink" | "cup";
 
+/** Corner badge glyph: typing dots, "!", "?" or a plain status dot. */
 export type BadgeKind = "dots" | "bang" | "question" | "dot";
 
+/** Badge shown at the body's top-left; `color` is a 0..1 RGB. */
 export interface Badge {
   kind: BadgeKind;
   color: RGB;
@@ -34,35 +43,46 @@ export interface Badge {
 
 export type RGB = readonly [number, number, number]; // components 0…1
 
+/** One tween segment: go to `target` in `durationMs` using `ease`. */
 export type TweenKey = readonly [target: number, durationMs: number, ease: EaseFn];
 
+/** A running keyframe animation of one property; segments play in order. */
 interface Tween {
   prop: PropKey;
   keys: TweenKey[];
+  /** Current segment. */
   index: number;
+  /** Value at the start of the current segment. */
   from: number;
   startMs: number;
   onComplete?: () => void;
 }
 
+/** Numeric engine fields that can be tweened (and are locked while tweening). */
 type PropKey =
   | "yaw" | "pitch" | "roll" | "tilt" | "open" | "sx" | "sy"
   | "oy" | "ox" | "tint" | "morph" | "hands" | "blush" | "es" | "badgeS";
 
+/** Static look and behaviour of one agent state. */
 interface BotStateCfg {
   color: RGB;
+  /** 0..1 strength of the colour gradient over the body. */
   tint: number;
   eye: EyeShape;
   badge: Badge | null;
+  /** Hops continuously (approval). */
   bounces: boolean;
   scans: boolean;
   breathes: boolean;
   zz: boolean;
   sweat: boolean;
+  /** Fixed gaze (yaw, pitch) overriding the mouse, or null. */
   look: readonly [number, number] | null;
+  /** Resting head tilt in radians. */
   tilt: number;
 }
 
+/** A short-lived floating effect; positions are in body-radius units. A negative `age` delays the start. */
 interface Particle {
   type: "heart" | "star" | "spark" | "sweat" | "z" | "vapor" | "sparkle";
   x: number; y: number; vx: number; vy: number;
@@ -71,15 +91,19 @@ interface Particle {
 
 // ── Constants (MochiConst / PISTES.mochi) ─────────────────────────────────────
 
+/** Eye geometry as fractions of the body radius (EYE_SP = horizontal spread in radians, EYE_P = base pitch). */
 const EYE_W = 0.25;
 const EYE_H = 0.27;
 const EYE_SP = 0.37;
 const EYE_P = -0.12;
+/** Mochi's body gradient endpoints (top-right to bottom-left). */
 const BASE_TOP: RGB = [0.929, 0.929, 0.937]; // #EDEDEF
 const BASE_BOTTOM: RGB = [0.769, 0.773, 0.792]; // #C4C5CA
+/** Eye colour; the mini variant is slightly bluer to read on coloured bodies. */
 const INK = "rgb(26,20,18)"; // #1A1412
 const MINI_INK = "rgb(16,19,26)"; // #10131A
 
+/** Per-state body colours (0..1 RGB). */
 const C = {
   idle: [0.902, 0.914, 0.933] as RGB,
   working: [0.231, 0.62, 1] as RGB,
@@ -94,11 +118,13 @@ const C = {
   dizzy: [0.957, 0.447, 0.714] as RGB,
 };
 
+/** Defaults shared by every state config. */
 const base = {
   bounces: false, scans: false, breathes: false, zz: false, sweat: false,
   look: null, tilt: 0,
 };
 
+/** State name -> look/behaviour table consumed by `setState`. */
 export const BOT_STATES: Record<BotStateName, BotStateCfg> = {
   idle: { ...base, color: C.idle, tint: 0, eye: "pill", badge: null },
   working: { ...base, color: C.working, tint: 0.72, eye: "pill", badge: { kind: "dots", color: C.working } },
@@ -120,6 +146,7 @@ export const STATE_SOUND: Partial<Record<BotStateName, string>> = {
   sleeping: "sleep", dizzy: "dizzy",
 };
 
+/** Which eye shape each emote switches to. */
 const EMOTE_EYE: Record<BotEmoteName, EyeShape> = {
   love: "heart", surprised: "dot", proud: "star", wink: "wink",
   yawn: "tired", happy: "happy", annoyed: "line",
@@ -127,21 +154,26 @@ const EMOTE_EYE: Record<BotEmoteName, EyeShape> = {
 
 // ── Small helpers ─────────────────────────────────────────────────────────────
 
+/** Engine clock in seconds (monotonic). Tweens use raw `performance.now()` ms. */
 const now = () => performance.now() / 1000;
 
+/** Parses `#rrggbb` into 0..1 RGB components. */
 export function hexToRGB(hex: string): RGB {
   const h = hex.replace("#", "");
   const v = parseInt(h, 16);
   return [((v >> 16) & 255) / 255, ((v >> 8) & 255) / 255, (v & 255) / 255];
 }
 
+/** Formats a 0..1 RGB plus alpha as a CSS `rgba()` string. */
 const rgba = (c: RGB, a = 1) =>
   `rgba(${Math.round(c[0] * 255)},${Math.round(c[1] * 255)},${Math.round(c[2] * 255)},${a})`;
 
+/** Component-wise blend of two RGB colours. */
 const mix3 = (a: RGB, b: RGB, t: number): RGB => [
   lerp(a[0], b[0], t), lerp(a[1], b[1], t), lerp(a[2], b[2], t),
 ];
 
+/** Begins a rounded-rect path (radius clamped to half the shorter side). */
 function roundRectPath(x: CanvasRenderingContext2D, X: number, Y: number, W: number, H: number, R: number) {
   const r = Math.max(0, Math.min(R, W / 2, H / 2));
   x.beginPath();
@@ -153,6 +185,7 @@ function roundRectPath(x: CanvasRenderingContext2D, X: number, Y: number, W: num
   x.closePath();
 }
 
+/** Begins a heart path of size `s` centred on the origin. */
 function heartPath(x: CanvasRenderingContext2D, s: number) {
   x.beginPath();
   x.moveTo(0, s * 0.38);
@@ -161,6 +194,7 @@ function heartPath(x: CanvasRenderingContext2D, s: number) {
   x.closePath();
 }
 
+/** Begins a 5-point star path with outer radius `ro` and inner radius `ri`. */
 function starPath(x: CanvasRenderingContext2D, ro: number, ri: number) {
   x.beginPath();
   for (let i = 0; i < 10; i++) {
@@ -171,16 +205,25 @@ function starPath(x: CanvasRenderingContext2D, ro: number, ri: number) {
   x.closePath();
 }
 
+/** Font stack for badge glyphs and the sleeping "z" particles. */
 const FONT = `system-ui, "Segoe UI Variable Text", "Segoe UI", sans-serif`;
 
 // ── Engine ────────────────────────────────────────────────────────────────────
 
+/**
+ * Animation state and renderer for one Mochi. Targets (`tg*`) are eased
+ * towards each frame; `anim()` tweens take ownership of a property (lock)
+ * until they finish, during which the spring easing leaves it alone.
+ */
 export class BotEngine {
+  /** Compact variant: flat colour, wandering gaze, no mood layer. */
   isMini = false;
   /** Solid body colour for mini bots / integration pills (null = Mochi gradient). */
   bodyColor: RGB | null = null;
 
-  // Animated state (BotEngine `s`)
+  // Animated state (BotEngine `s`): yaw/pitch/roll = gaze and spin, tilt = head
+  // roll, open = eyelid, sx/sy = squash, ox/oy = offset (in body radii),
+  // tint/blush/morph(mailbox)/hands/es(eye scale)/badgeS = 0..1 effects.
   yaw = 0; pitch = 0; roll = 0; tilt = 0; open = 1;
   sx = 1; sy = 1; oy = 0; ox = 0;
   tint = 0; morph = 0; hands = 0; blush = 0; es = 1; badgeS = 0;
@@ -191,40 +234,53 @@ export class BotEngine {
   /** Extra canvas height above the body so hearts can fly out without clipping. */
   particleOverhang = 0;
 
-  // Mouth spring (fraction of R)
+  // Mouth spring (fraction of R) for the mailbox gulp
   slotH = 0; slotHTarget = 0; slotHVel = 0; isChewing = false;
 
+  /** Current and target tint colour; `col` eases towards `colT`. */
   col: RGB = C.idle;
   colT: RGB = C.idle;
 
+  /** Current agent state and its config row. */
   state: BotStateName = "idle";
   cfg: BotStateCfg = BOT_STATES.idle;
 
+  /** Temporary eye shape, valid until `eyeOverrideUntil` (seconds; Infinity = held). */
   eyeOverride: EyeShape | null = null;
   eyeOverrideUntil = 0;
+  /** Eye restored when an override expires (set by permanent emotes). */
   permanentEye: EyeShape | null = null;
   permanentEmote: BotEmoteName | null = null;
+  /** When a mini bot next plays its idle behaviour for `permanentEmote`. */
   miniNextBehavior = 0;
 
+  /** Badge currently drawn (lags `cfg.badge` by the shrink animation). */
   badge: Badge | null = null;
+  /** Dedup key and cancellation token for the badge swap animation. */
   private badgeKey = "none";
   private badgeToken = 0;
 
+  /** Active tweens and the properties they currently own. */
   private tweens = new Map<PropKey, Tween>();
   private locks = new Set<PropKey>();
   private particles: Particle[] = [];
 
+  /** Mouse-follow gaze, set by the island (-1..1 each axis). */
   lookX = 0;
   lookY = 0;
 
   lastTime = now();
   private t0 = now() - Math.random() * 5;
   private nextBlink = now() + 1.5 + Math.random() * 2;
+  /** Wave window in seconds (engine clock); 0 = not waving. */
   waveUntil = 0;
   waveStart = 0;
+  /** Invalidates pending greeting timeouts when interrupted or restarted. */
   private greetToken = 0;
   private lastAmbient = 0;
+  /** Recent slap timestamps; three within 1.7 s trigger dizzy. */
   private slapTimes: number[] = [];
+  /** Random wandering gaze for mini bots and when it next changes. */
   private miniLookTarget = { x: 0, y: 0 };
   private miniLookNextTime = 0;
 
@@ -234,15 +290,21 @@ export class BotEngine {
   // ── Health mood (plan-v2.md § 7.4) — a layer on top of everything above,
   // not a replacement for it. See moods.ts for why the blink/sweat/cough
   // calendar lives in its own small class instead of here.
+  /** Current (blended) mood parameters and the level they are heading to. */
   mood: MoodParams = MOODS.ok;
   moodLevel: HealthLevel = "ok";
   private moodFrom: MoodParams = MOODS.ok;
   private moodBlendStart = 0;
   private moodScheduler = new MoodScheduler();
+  /** Engine-clock time until which the shiver offset is applied. */
   private shiverUntil = 0;
 
   // ── Public API ──────────────────────────────────────────────────────────────
 
+  /**
+   * Switches agent state: retargets colour/tint/tilt/badge and plays the
+   * entry animation (roll, shake, hop...). No-op if unchanged unless `force`.
+   */
   setState(next: BotStateName, force = false) {
     if (this.state === next && !force) return;
     const prev = this.state;
@@ -299,6 +361,7 @@ export class BotEngine {
     if (level === "ok" && wasWorse) this.playRecovery();
   }
 
+  /** Shake and sparkle played when health returns to ok; the sparkle is skipped under reduced motion. */
   private playRecovery() {
     this.blink();
     if (REDUCED_MOTION) return;
@@ -308,6 +371,7 @@ export class BotEngine {
     this.emit("sparkle", 4);
   }
 
+  /** Mood cough: sound always, squash and vapor unless reduced motion; skipped while awaiting approval. */
   private cough() {
     if (this.state === "approval") return;
     Sound.play("cough");
@@ -320,6 +384,7 @@ export class BotEngine {
     this.emit("vapor", 3);
   }
 
+  /** Swaps the corner badge with a shrink-then-pop; stale swaps are cancelled by token. */
   setBadge(b: Badge | null) {
     const key = b ? `${b.kind}-${b.color.join(",")}` : "none";
     if (key === this.badgeKey) return;
@@ -333,11 +398,13 @@ export class BotEngine {
     }, 100);
   }
 
+  /** Quick eyelid close/open (skipped while `open` is tweened by something else). */
   blink() {
     if (this.locks.has("open")) return;
     this.anim("open", [[0.06, 70, Ease.inOut], [1, 130, Ease.out]]);
   }
 
+  /** Squash-and-stretch bounce used as a reaction to a poke. */
   squash() {
     this.anim("sy", [[0.78, 70, Ease.out], [1.1, 130, Ease.out], [1, 170, Ease.inOut]]);
     this.anim("sx", [[1.16, 70, Ease.out], [0.95, 130, Ease.out], [1, 170, Ease.inOut]]);
@@ -356,6 +423,10 @@ export class BotEngine {
     this.blink();
   }
 
+  /**
+   * Reaction to a click/slap: squash, annoyed eyes, and `onDizzy` on the third
+   * slap within 1.7 s. Also cancels an ongoing greeting.
+   */
   slap() {
     this.interruptGreet();
     if (this.state === "dizzy") return;
@@ -374,6 +445,7 @@ export class BotEngine {
     }
   }
 
+  /** Spins the body `turns` full rotations over `durationMs`. */
   doRoll(durationMs: number, turns: number) {
     this.roll = 0;
     this.anim("roll", [[Math.PI * 2 * turns, durationMs, Ease.inOut]], () => { this.roll = 0; });
@@ -412,6 +484,7 @@ export class BotEngine {
     }, 1750);
   }
 
+  /** Drops the hands and cancels pending greeting timeouts, if a greeting is in progress. */
   interruptGreet() {
     if (this.hands <= 0.01 && now() >= this.waveUntil) return;
     this.greetToken++;
@@ -420,6 +493,10 @@ export class BotEngine {
     this.anim("hands", [[0, 150, Ease.inOut]]);
   }
 
+  /**
+   * Holds an emote's eyes indefinitely (mini bots). `wink` is special: it is
+   * played periodically by the behaviour loop instead of being held.
+   */
   setPermanentEmote(emote: BotEmoteName | null) {
     this.permanentEmote = emote;
     if (emote === "wink") {
@@ -437,6 +514,7 @@ export class BotEngine {
     this.miniNextBehavior = now() + 0.8 + Math.random() * 1.7;
   }
 
+  /** Plays a one-shot emote for `duration` seconds (eyes, body motion, particles). */
   triggerEmote(emote: BotEmoteName, duration = 1.8) {
     const t = now();
     this.eyeOverride = EMOTE_EYE[emote];
@@ -484,6 +562,7 @@ export class BotEngine {
     }
   }
 
+  /** Spawns `count` particles of `type` above the body, staggered by 0.14 s each. */
   emit(type: Particle["type"], count: number) {
     for (let i = 0; i < count; i++) {
       const isZ = type === "z";
@@ -501,11 +580,13 @@ export class BotEngine {
     }
   }
 
+  /** Morphs between Mochi and the mailbox shape (target 0..1). */
   animateMorph(target: number, durationMs?: number) {
     const dur = durationMs ?? (target > 0.5 ? 550 : 650);
     this.anim("morph", [[target, dur, Ease.inOut]]);
   }
 
+  /** Snaps back to the Mochi shape, cancelling any morph tween. */
   resetMorph() {
     this.tweens.delete("morph");
     this.locks.delete("morph");
@@ -535,6 +616,7 @@ export class BotEngine {
 
   // ── Tweens ──────────────────────────────────────────────────────────────────
 
+  /** Starts (replacing any previous) a keyframe tween on `prop` from its current value. */
   anim(prop: PropKey, keys: TweenKey[], onComplete?: () => void) {
     this.tweens.set(prop, {
       prop, keys, index: 0, from: this[prop], startMs: performance.now(), onComplete,
@@ -544,6 +626,10 @@ export class BotEngine {
 
   // ── Update ──────────────────────────────────────────────────────────────────
 
+  /**
+   * Advances the simulation by `dt` seconds: tweens, mood, gaze, breathing,
+   * blinking, ambient particles and the mouth spring. Call before `draw`.
+   */
   update(dt: number) {
     const n = now();
     const nowMs = performance.now();
@@ -707,6 +793,7 @@ export class BotEngine {
     }
   }
 
+  /** Picks and plays the next idle behaviour of a mini bot from its permanent emote. */
   private doMiniBehaviorLoop() {
     const n = now();
     switch (this.permanentEmote) {
@@ -790,6 +877,7 @@ export class BotEngine {
     this.drawParticles(x, R, cx, cy);
   }
 
+  /** Body outline: a superellipse, blended into a rounded rect by `morph`. */
   private bodyPath(rx: number, ry: number, R: number): Path2D {
     const n = 72;
     const expN = 2.0 / 2.7;
@@ -818,6 +906,7 @@ export class BotEngine {
     return p;
   }
 
+  /** Fills the body: flat for minis, otherwise gradient + state tint + mood tint + shading + highlight. */
   private drawBody(x: CanvasRenderingContext2D, body: Path2D, R: number, rx: number, ry: number) {
     if (this.bodyColor) {
       // Mini bots: flat solid fill — no gradient, no reflection, no highlight
@@ -876,6 +965,7 @@ export class BotEngine {
     return null;
   }
 
+  /** Draws both eyes projected on the sphere (yaw/pitch/roll); eyes behind the horizon are skipped. */
   private drawEyes(x: CanvasRenderingContext2D, body: Path2D, R: number, rx: number, ry: number) {
     let shape: EyeShape = this.eyeOverride ?? this.moodEyeShape() ?? this.cfg.eye;
     if (this.morph > 0.5) {
@@ -913,6 +1003,7 @@ export class BotEngine {
     x.restore();
   }
 
+  /** Draws one eye of `shape` at the origin; `sd` is -1 (left) or +1 (right). */
   private drawEyeShape(
     x: CanvasRenderingContext2D, shape: EyeShape,
     w: number, h: number, sd: number, ink: string,
@@ -1165,6 +1256,7 @@ export class BotEngine {
     }
   }
 
+  /** Draws the status badge at the body's top-left corner. */
   private drawBadge(x: CanvasRenderingContext2D, badge: Badge, R: number, cx: number, cy: number) {
     const bs = this.badgeS * (this.isMini ? 1.25 : 1);
     const bx = cx - R * 0.72 * this.sx;
@@ -1232,6 +1324,7 @@ export class BotEngine {
     x.restore();
   }
 
+  /** Draws and fades the live particles, positioned relative to the body centre. */
   private drawParticles(x: CanvasRenderingContext2D, R: number, cx: number, cy: number) {
     for (const p of this.particles) {
       if (p.age <= 0) continue;

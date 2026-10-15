@@ -12,8 +12,10 @@
 import { h } from "../views/dom";
 import { icon, type IconName } from "../views/icons";
 
+/** Corner marker on a tile; "live" means a session is running right now. */
 export type TileBadge = "approval" | "finished" | "error" | "live";
 
+/** Options for `tile`. */
 export interface TileOptions {
   /** The 24px face — an animated mini-bot canvas, a still one, whatever the
    *  caller's list is made of. `tile()` never builds one itself. */
@@ -25,6 +27,7 @@ export interface TileOptions {
   onSelect: () => void;
 }
 
+/** Fill of each badge; may be a CSS variable reference, so never suffix alpha onto it. */
 const BADGE_COLORS: Record<TileBadge, string> = {
   approval: "#F5A524",
   finished: "var(--c-green)",
@@ -46,6 +49,10 @@ export function lighten(hex: string, amount: number): string {
   return `rgb(${c[0]},${c[1]},${c[2]})`;
 }
 
+/**
+ * Builds a pill tile: face, name, optional badge. Hover styling is applied
+ * inline from `opts.color` (the colour is dynamic, so CSS classes cannot hold it).
+ */
 export function tile(opts: TileOptions): HTMLElement {
   const el = h(
     "div",

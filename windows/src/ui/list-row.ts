@@ -4,14 +4,19 @@
 
 import { h } from "../views/dom";
 
+/** Options for `listRow`. */
 export interface ListRowOptions {
+  /** Glyph or avatar at the start. */
   leading?: Node;
   title: string;
   subtitle?: string;
+  /** Value or control at the end. */
   trailing?: Node;
+  /** When set, the row becomes clickable and keyboard-focusable. */
   onClick?: () => void;
 }
 
+/** Builds a `.ui-row`; only rows with `onClick` get the clickable class and a tabindex. */
 export function listRow(opts: ListRowOptions): HTMLElement {
   const text = h(
     "span",

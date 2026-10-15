@@ -1,21 +1,35 @@
-// Credential redactor: hides secrets in tool output before it reaches the
-// model. Hand-written scanner (no regex dependency) over known token
-// prefixes, PEM private-key blocks, passwords in URLs and `name = value`
-// assignments whose name says "secret". No entropy detection on purpose, so
-// git hashes, UUIDs and base64 stay intact.
+//! Credential redactor: hides secrets in tool output before it reaches the
+//! model. Hand-written scanner (no regex dependency) over known token
+//! prefixes, PEM private-key blocks, passwords in URLs and `name = value`
+//! assignments whose name says "secret". No entropy detection on purpose, so
+//! git hashes, UUIDs and base64 stay intact.
+//!
+//! Applied by the quick assistant (`quick_assistant` / `quick_loop`) to the
+//! output of every tool before it is added to the model's context. It is a
+//! best-effort safety net, not a guarantee: unknown token formats pass
+//! through. Scanning is byte-based, so every slice boundary is checked with
+//! `is_char_boundary` before touching a `&str`.
 
+/// Result of [`redact`].
 pub struct Redaction {
+    /// The input with each detected secret replaced by `[REDACTED:<label>]`.
     pub text: String,
+    /// How many spans were replaced.
     pub count: usize,
 }
 
 /// A span of the input to replace with `[REDACTED:<label>]`.
 struct Hit {
+    /// Byte offset where the secret begins (inclusive).
     start: usize,
+    /// Byte offset where it ends (exclusive).
     end: usize,
+    /// Short kind name shown in the replacement marker.
     label: &'static str,
 }
 
+/// Variable names (matched as a case-insensitive suffix, so `DB_PASSWORD`
+/// and `config.secret` count) whose assigned value is treated as a secret.
 const ASSIGNMENT_NAMES: &[&str] = &[
     "password",
     "passwd",
@@ -33,6 +47,11 @@ const ASSIGNMENT_NAMES: &[&str] = &[
     "secret_key",
 ];
 
+/// Replaces every secret found in `input` with `[REDACTED:<label>]`.
+///
+/// Single left-to-right pass trying each detector at each byte offset;
+/// matches never overlap (a hit starting before the end of the previous one
+/// is ignored). Already-redacted markers are not redacted again.
 pub fn redact(input: &str) -> Redaction {
     let b = input.as_bytes();
     let mut out = String::with_capacity(input.len());
@@ -57,6 +76,10 @@ pub fn redact(input: &str) -> Redaction {
     Redaction { text: out, count }
 }
 
+/// Tries every detector at byte offset `i`. Structural detectors (PEM block,
+/// URL password, assignment) fire at their own delimiter; token-prefix
+/// detectors only fire at a word boundary so `xsk-...` inside a longer
+/// identifier is not mistaken for a key.
 fn find_at(s: &str, i: usize) -> Option<Hit> {
     if !s.is_char_boundary(i) {
         return None;
@@ -84,6 +107,7 @@ fn find_at(s: &str, i: usize) -> Option<Hit> {
     token(s, i)
 }
 
+/// Bytes that can be part of a token-like word (used for the boundary check).
 fn is_token_byte(c: u8) -> bool {
     c.is_ascii_alphanumeric() || c == b'_' || c == b'-'
 }
@@ -93,6 +117,9 @@ fn run(b: &[u8], from: usize, ok: impl Fn(u8) -> bool) -> usize {
     b[from..].iter().take_while(|&&c| ok(c)).count()
 }
 
+/// A `-----BEGIN ... PRIVATE KEY-----` block starting at `i`, through the end
+/// of its `-----END` line. With no END marker (output cut short) the rest of
+/// the input is hidden, erring on the side of hiding too much.
 fn private_key(s: &str, i: usize) -> Option<Hit> {
     let header_from = i + "-----BEGIN ".len();
     let header_end = header_from + s[header_from..].find("-----")?;
@@ -115,6 +142,8 @@ fn private_key(s: &str, i: usize) -> Option<Hit> {
     Some(Hit { start: i, end, label: "private_key" })
 }
 
+/// The password in `scheme://user:password@host`, with `from` just after the
+/// `://`. Only the password span is hit, so the user and host stay readable.
 fn url_password(s: &str, from: usize) -> Option<Hit> {
     let b = s.as_bytes();
     let stop = |c: u8| c.is_ascii_whitespace() || matches!(c, b'/' | b'"' | b'\'' | b'<' | b'>');
@@ -130,6 +159,13 @@ fn url_password(s: &str, from: usize) -> Option<Hit> {
     Some(Hit { start: pass_start, end: pass_end, label: "url_password" })
 }
 
+/// The value of a `name = value` / `name: value` assignment where `i` is the
+/// `=` or `:` and the name ends with one of [`ASSIGNMENT_NAMES`].
+///
+/// Rejects comparison/arrow operators (`==`, `=>`, `::`), placeholders
+/// (`$VAR`, `<x>`, `{{x}}`, `%x%`) and, for unquoted values, anything shorter
+/// than 8 chars or lacking a digit/symbol (so plain words like `token: string`
+/// in type declarations survive). Quoted values need 4+ chars.
 fn assignment(s: &str, i: usize) -> Option<Hit> {
     let b = s.as_bytes();
     if i + 1 < b.len() && matches!(b[i + 1], b'=' | b'>' | b':') {
@@ -193,6 +229,10 @@ fn assignment(s: &str, i: usize) -> Option<Hit> {
     Some(Hit { start: v, end: v + n, label: "assignment" })
 }
 
+/// Well-known credential formats starting at `i`: Anthropic/OpenAI/Stripe
+/// keys, AWS access key ids, GitHub, Slack and Google API tokens, JWTs and
+/// `Bearer <token>` headers. Each needs a minimum run length so short
+/// look-alikes are left alone; for `Bearer` only the token is hit, not the word.
 fn token(s: &str, i: usize) -> Option<Hit> {
     let b = s.as_bytes();
     let rest = &s[i..];

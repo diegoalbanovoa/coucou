@@ -8,12 +8,14 @@
 
 const GB = 1024 ** 3;
 
+/** Local copy of `Drive` from core/bridge.ts (bytes). */
 export interface MockDrive {
   name: string;
   free: number;
   total: number;
 }
 
+/** Local copy of `ProcInfo` from core/bridge.ts. */
 export interface MockProcInfo {
   pid: number;
   name: string;
@@ -24,6 +26,7 @@ export interface MockProcInfo {
   startTime: string;
 }
 
+/** Local copy of `Stats` from core/bridge.ts. */
 export interface MockStats {
   drives: MockDrive[];
   memoryUsed: number;
@@ -33,6 +36,7 @@ export interface MockStats {
   diskCleanupAvailable: boolean;
 }
 
+/** Value of the `?scenario=` URL param; same names as the health levels. */
 export type MockScenario = "ok" | "strained" | "sick";
 
 const TOTAL_MEMORY = 16 * GB;
@@ -45,6 +49,7 @@ export const MOCK_CPU: Record<MockScenario, number> = {
   sick: 91,
 };
 
+/** Full `system_stats` payload per scenario. */
 export const MOCK_SCENARIOS: Record<MockScenario, MockStats> = {
   ok: {
     drives: [

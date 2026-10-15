@@ -1,8 +1,12 @@
-// Loop guard for the quick assistant's tool loop: warns, then blocks, a model
-// that repeats the same call or goes round in a cycle. Calls are compared by
-// a hash of tool name + canonical arguments (never by name alone: searching a
-// folder then reading a file, twice with different arguments, is legitimate).
-// The guard only ever stops a call from being made; it never runs a tool.
+//! Loop guard for the quick assistant's tool loop: warns, then blocks, a model
+//! that repeats the same call or goes round in a cycle. Calls are compared by
+//! a hash of tool name + canonical arguments (never by name alone: searching a
+//! folder then reading a file, twice with different arguments, is legitimate).
+//! The guard only ever stops a call from being made; it never runs a tool.
+//!
+//! Used by `quick_assistant` / `quick_loop`, one [`LoopGuard`] per request.
+//! The hashes are only compared within a single process run, so
+//! `DefaultHasher` stability across versions does not matter.
 
 use std::collections::hash_map::DefaultHasher;
 use std::collections::{HashMap, VecDeque};
@@ -12,34 +16,53 @@ use serde_json::Value;
 
 /// The call is blocked on the 4th identical call; warned on the 3rd.
 pub const MAX_IDENTICAL: u32 = 3;
+/// How many most-recent call hashes are kept for cycle detection (enough for
+/// two repetitions of a period-3 cycle).
 const RECENT: usize = 6;
 
+/// What kind of repetition the guard detected.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum LoopKind {
+    /// The exact same call (same tool, same arguments) made too many times.
     Identical,
+    /// A short pattern of distinct calls (period 2 or 3) repeating.
     Cycle,
 }
 
+/// The guard's decision for one call about to be made.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Verdict {
+    /// Run the call normally.
     Allow,
+    /// Run the call, but append [`warning_text`] to its result.
     Warn(LoopKind),
+    /// Do not run the call; the request should be stopped.
     Block(LoopKind),
 }
 
+/// Per-request state of the loop detector. Create a fresh one for each user
+/// request; it is never shared across requests.
 #[derive(Default)]
 pub struct LoopGuard {
+    /// How many times each call hash has been seen so far.
     counts: HashMap<u64, u32>,
+    /// Sliding window of the last [`RECENT`] call hashes, oldest first.
     recent: VecDeque<u64>,
+    /// A cycle warning was already issued; the next detection blocks.
     cycle_warned: bool,
 }
 
 impl LoopGuard {
+    /// Creates an empty guard (no calls seen).
     pub fn new() -> Self {
         Self::default()
     }
 
     /// Judges one call about to be made. Every call counts, in order.
+    ///
+    /// Precedence when several conditions hit at once: block-identical, then
+    /// block-cycle, then warn-cycle, then warn-identical. Blocked calls still
+    /// count, so a model that ignores a block keeps being blocked.
     pub fn check(&mut self, name: &str, args: &Value) -> Verdict {
         let h = call_hash(name, args);
         let n = {
@@ -78,6 +101,9 @@ impl LoopGuard {
         }
     }
 
+    /// True when the tail of the recent window is a period-2 or period-3
+    /// repetition. A single call repeated is excluded here (that is the
+    /// `Identical` case, handled by the counters).
     fn in_cycle(&self) -> bool {
         let r: Vec<u64> = self.recent.iter().copied().collect();
         let len = r.len();
@@ -115,6 +141,8 @@ pub fn canonical_json(v: &Value) -> String {
     }
 }
 
+/// Hash identifying a call: tool name, a NUL separator (so `("ab","c")` and
+/// `("a","bc")` differ) and the canonical JSON of the arguments.
 pub fn call_hash(name: &str, args: &Value) -> u64 {
     let mut h = DefaultHasher::new();
     name.hash(&mut h);

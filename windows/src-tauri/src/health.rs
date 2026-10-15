@@ -1,25 +1,29 @@
-// The team's health — a mood for Mochi, not a system state. See
-// plan-v2.md § 7.1.
-//
-// Samples CPU and memory every 2 s (the system drive, only when the user
-// opted in, every 60 s), smooths each with an exponential moving average so
-// one noisy tick cannot swing the reading, and turns the smoothed value into
-// one of three levels with hysteresis: a level is entered only after the
-// metric has held past its threshold for a sustained stretch, and left only
-// after it has held clear of a slightly lower threshold for longer still —
-// which is what keeps Mochi from flickering sick/ok/sick as a build spikes
-// the CPU for a second and lets go.
-//
-// `threshold` (settings, default 70) is the only knob a person turns. Sick's
-// own threshold is never configured directly — it is always `threshold + 15`,
-// which is where plan-v2.md § 7.1's literal "70 enters strained, 85 enters
-// sick" table comes from (70 + 15 = 85), and the same relationship carries
-// through if someone moves the slider. Disk gets its own, independently
-// configured threshold (`diskThreshold`, default 90) and its own hysteresis,
-// composed with the load reading by taking whichever is worse — folding a
-// disk percentage straight into the same 70/85 scale load uses would make an
-// ordinarily-full disk read as "sick" the moment `includeDisk` is switched
-// on, which is exactly the false alarm § 7.1 says disk must not cause.
+//! The team's health — a mood for Mochi, not a system state. See
+//! plan-v2.md § 7.1.
+//!
+//! Samples CPU and memory every 2 s (the system drive, only when the user
+//! opted in, every 60 s), smooths each with an exponential moving average so
+//! one noisy tick cannot swing the reading, and turns the smoothed value into
+//! one of three levels with hysteresis: a level is entered only after the
+//! metric has held past its threshold for a sustained stretch, and left only
+//! after it has held clear of a slightly lower threshold for longer still —
+//! which is what keeps Mochi from flickering sick/ok/sick as a build spikes
+//! the CPU for a second and lets go.
+//!
+//! `threshold` (settings, default 70) is the only knob a person turns. Sick's
+//! own threshold is never configured directly — it is always `threshold + 15`,
+//! which is where plan-v2.md § 7.1's literal "70 enters strained, 85 enters
+//! sick" table comes from (70 + 15 = 85), and the same relationship carries
+//! through if someone moves the slider. Disk gets its own, independently
+//! configured threshold (`diskThreshold`, default 90) and its own hysteresis,
+//! composed with the load reading by taking whichever is worse — folding a
+//! disk percentage straight into the same 70/85 scale load uses would make an
+//! ordinarily-full disk read as "sick" the moment `includeDisk` is switched
+//! on, which is exactly the false alarm § 7.1 says disk must not cause.
+//!
+//! `start` runs the loop (spawned from `lib.rs`) and emits `health` to the
+//! island window; `state` serves the last event to a window that just opened.
+//! While paused or disabled the loop reads no OS counters.
 
 use std::sync::atomic::Ordering;
 use std::sync::Mutex;
@@ -43,11 +47,18 @@ const HEARTBEAT_EVERY_SECS: f64 = 10.0;
 /// N = 5 samples (~10 s at the 2 s cadence) ⇒ α = 2/(N+1).
 const EMA_ALPHA: f64 = 2.0 / 6.0;
 
+/// Seconds a metric must stay past its enter threshold to raise the level.
 const ENTER_HOLD_SECS: f64 = 10.0;
+/// Seconds a metric must stay clear of its exit threshold to lower the level;
+/// longer than entering so the mood does not flicker.
 const EXIT_HOLD_SECS: f64 = 20.0;
+/// Points below an enter threshold where the matching exit threshold sits.
 const EXIT_MARGIN: f64 = 5.0;
+/// Points above the strained threshold where `Sick` begins (70 -> 85).
 const SICK_GAP: f64 = 15.0;
 
+/// Mochi's health mood. Ordered `Ok < Strained < Sick`, so `max` picks the
+/// worse of two readings.
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
 #[serde(rename_all = "lowercase")]
 pub enum Level {
@@ -58,6 +69,7 @@ pub enum Level {
 
 #[derive(Serialize, Clone, Copy, PartialEq, Debug)]
 #[serde(rename_all = "lowercase")]
+/// Which metric is responsible for the current level, shown in the tooltip.
 pub enum Cause {
     Cpu,
     Memory,
@@ -66,11 +78,15 @@ pub enum Cause {
 
 #[derive(Serialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
+/// Payload of the `health` event sent to the island.
 pub struct HealthEvent {
     pub level: Level,
     pub cause: Cause,
+    /// Smoothed CPU use, percent.
     pub cpu: f64,
+    /// Smoothed memory use, percent.
     pub memory: f64,
+    /// Last system-drive used share, percent (0 until first read).
     pub disk: f64,
 }
 
@@ -81,6 +97,8 @@ pub struct HealthEvent {
 struct Ema(Option<f64>);
 
 impl Ema {
+    /// Folds in a sample and returns the new average; the first sample seeds
+    /// the average exactly, so there is no ramp from zero.
     fn push(&mut self, value: f64) -> f64 {
         let next = match self.0 {
             Some(prev) => prev + EMA_ALPHA * (value - prev),
@@ -103,10 +121,15 @@ struct Hysteresis {
 }
 
 impl Hysteresis {
+    /// Starts at `Ok` with no pending hold.
     fn new() -> Self {
         Self { level: Level::Ok, timer: 0.0 }
     }
 
+    /// Advances the track by `dt` seconds with the latest `value` and returns
+    /// the (possibly new) level. Moves one step at a time: `Sick` always drops
+    /// to `Strained` first.
+    ///
     /// `enter` is the threshold that takes this metric from `Ok` to
     /// `Strained`; sick's own enter/exit thresholds and strained's exit
     /// threshold are all derived from it, per this file's own top note.
@@ -145,9 +168,13 @@ impl Hysteresis {
 /// whole `Settings` struct, so the pure core here does not depend on it.
 #[derive(Clone, Copy)]
 pub struct Config {
+    /// Master switch (`health_enabled`); off means the loop only idles.
     pub enabled: bool,
+    /// Load (CPU/memory) enter threshold, percent; sick is this plus `SICK_GAP`.
     pub threshold: f64,
+    /// Whether the disk track counts toward the level.
     pub include_disk: bool,
+    /// Disk enter threshold, percent, independent of the load scale.
     pub disk_threshold: f64,
 }
 
@@ -159,8 +186,11 @@ pub struct Config {
 pub struct Monitor {
     cpu_ema: Ema,
     mem_ema: Ema,
+    /// Track for the worse of CPU and memory.
     load: Hysteresis,
+    /// Track for the system drive; reset while disk is excluded.
     disk: Hysteresis,
+    /// Reused on ticks that do not re-read the drive.
     last_disk_pct: f64,
     /// Seconds since the last heartbeat was emitted — accumulated in real
     /// time (via each call's own `dt`) rather than counted in ticks, so it
@@ -169,6 +199,7 @@ pub struct Monitor {
 }
 
 impl Monitor {
+    /// A monitor at `Ok` with empty averages.
     pub fn new() -> Self {
         Self {
             cpu_ema: Ema::default(),
@@ -186,7 +217,7 @@ impl Monitor {
     /// value read is reused until the next one.
     ///
     /// Returns the event to emit, if any: on a level change, or every
-    /// `HEARTBEAT_EVERY_TICKS` while not `Ok`.
+    /// `HEARTBEAT_EVERY_SECS` while not `Ok`.
     pub fn sample(
         &mut self,
         cpu_pct: f64,
@@ -236,6 +267,7 @@ impl Monitor {
         Some(HealthEvent { level: after, cause, cpu, memory: mem, disk: self.last_disk_pct })
     }
 
+    /// The worse of the load and disk levels.
     fn overall(&self) -> Level {
         self.load.level.max(self.disk.level)
     }
@@ -253,6 +285,7 @@ static LAST: Mutex<Option<HealthEvent>> = Mutex::new(None);
 #[cfg(debug_assertions)]
 static SIMULATE: Mutex<Option<Level>> = Mutex::new(None);
 
+/// Narrows the full settings to the fields this module needs.
 fn config_from(settings: &crate::settings::Settings) -> Config {
     Config {
         enabled: settings.health_enabled,
@@ -262,10 +295,14 @@ fn config_from(settings: &crate::settings::Settings) -> Config {
     }
 }
 
+/// The last emitted event, or `None` if nothing has been reported yet
+/// (including while the level has always been `Ok`). Backs the `health_state`
+/// command.
 pub fn state() -> Option<HealthEvent> {
     LAST.lock().unwrap().clone()
 }
 
+/// Debug builds only: force (`Some`) or stop forcing (`None`) a simulated level.
 #[cfg(debug_assertions)]
 pub fn simulate(level: Option<Level>) {
     *SIMULATE.lock().unwrap() = level;
@@ -334,6 +371,7 @@ fn disk_percent() -> f64 {
     (drive.total - drive.free) as f64 / drive.total as f64 * 100.0
 }
 
+/// Canned readings for a forced level, so the UI shows plausible numbers.
 #[cfg(debug_assertions)]
 fn simulated_event(level: Level) -> HealthEvent {
     let (cpu, memory) = match level {

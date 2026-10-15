@@ -6,12 +6,14 @@
 // reset timer let two rows land on the same line when steps arrived in bursts,
 // and any step that arrived mid-animation was dropped outright. Steps are now
 // queued instead, so a burst scrolls past rather than vanishing.
+// Created and ticked by the overview in views.ts.
 
 import { h } from "./dom";
 import { icon } from "./icons";
 import { cubicBezier, clamp, lerp } from "../core/anim";
 import type { AgentTask } from "../core/state";
 
+/** Height of one ticker row, px; also the distance a step scrolls. */
 const ROW_H = 22;
 /** One step transition, milliseconds. */
 const DURATION = 380;
@@ -20,15 +22,18 @@ const MAX_QUEUE = 4;
 const COMPLETED_SCALE = 11.5 / 13; // 0.885 — the completed font size
 const EASE = cubicBezier(0.4, 0, 0.2, 1);
 
+/** One ticker line; the text is drawn twice (shimmer = current, dim = done) and crossfaded. */
 interface Row {
   el: HTMLElement;
   chevron: SVGElement;
   check: SVGElement;
   shimmer: HTMLElement;
   dim: HTMLElement;
+  /** Last text written, to skip redundant DOM writes. */
   text: string;
 }
 
+/** Builds an empty row with both icons and both text layers stacked. */
 function makeRow(): Row {
   const chevron = icon("chevronRight", { size: 9 });
   const check = icon("check", { size: 8 });
@@ -49,6 +54,7 @@ function makeRow(): Row {
   return { el, chevron, check, shimmer, dim, text: "" };
 }
 
+/** Writes `text` into both layers of `row` only if it changed. */
 function setText(row: Row, text: string) {
   if (row.text === text) return;
   row.text = text;
@@ -70,6 +76,10 @@ function place(row: Row, y: number, phase: number, opacity: number) {
   row.dim.style.opacity = String(clamp(phase * 2 - 0.4, 0, 1));
 }
 
+/**
+ * Three-row animated task ticker. Feed it with `sync(task)` on state changes
+ * and call `tick(now)` every frame while visible.
+ */
 export class Ticker {
   readonly el: HTMLElement;
   private a = makeRow(); // completed
@@ -91,10 +101,15 @@ export class Ticker {
     place(this.c, ROW_H * 2, 0, 0);
   }
 
+  /** True while a step is mid-transition or queued, i.e. frames are needed. */
   get animating(): boolean {
     return this.startMs != null || this.queue.length > 0;
   }
 
+  /**
+   * Reconciles with `task`: the first call and any backwards jump re-seed
+   * without animating; forward steps are queued (capped at MAX_QUEUE).
+   */
   sync(task: AgentTask | null) {
     const steps = task && task.steps.length > 0 ? task.steps : ["…"];
     const idx = task ? Math.min(task.stepIndex, steps.length - 1) : -1;

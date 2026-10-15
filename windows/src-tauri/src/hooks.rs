@@ -1,13 +1,18 @@
-// Claude Code hook installation.
-//
-// The rule from CLAUDE.md is strict and is followed to the letter:
-// read %USERPROFILE%\.claude\settings.json, take a dated backup, merge without
-// touching anybody else's hooks, show the diff, and write only after an explicit
-// click. Uninstall removes Coucou's entries and nothing else.
-//
-// The command is only the quoted exe path in forward slashes plus the event name:
-// on Windows Claude Code runs hook commands through Git Bash, and anything with
-// PowerShell or cmd in it breaks.
+//! Claude Code hook installation.
+//!
+//! The rule from CLAUDE.md is strict and is followed to the letter:
+//! read %USERPROFILE%\.claude\settings.json, take a dated backup, merge without
+//! touching anybody else's hooks, show the diff, and write only after an explicit
+//! click. Uninstall removes Coucou's entries and nothing else.
+//!
+//! The command is only the quoted exe path in forward slashes plus the event name:
+//! on Windows Claude Code runs hook commands through Git Bash, and anything with
+//! PowerShell or cmd in it breaks.
+//!
+//! The `install`/`preview`/`write` commands in `lib.rs` drive the public API
+//! here; `ensure_hook_exe` runs at launch to keep the `coucou-hook` relay in
+//! place. Hook commands must never block Claude Code, so the relay exits at
+//! once when the app does not answer.
 
 use std::path::{Path, PathBuf};
 
@@ -36,19 +41,27 @@ pub const HOOK_EVENTS: &[(&str, u64)] = &[
 /// Marker that identifies a Coucou entry inside settings.json.
 const MARKER: &str = "coucou-hook";
 
+/// What the Settings window shows about the Claude Code hooks.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HookStatus {
+    /// Whether any entry in settings.json carries Coucou's marker.
     pub installed: bool,
+    /// Path of Claude Code's `settings.json`.
     pub settings_path: String,
+    /// Path where the `coucou-hook` relay is expected.
     pub hook_path: String,
+    /// Whether the relay file exists; if not, installed hooks would do nothing.
     pub hook_ready: bool,
 }
 
+/// The change the user is asked to confirm before anything is written.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HookPreview {
+    /// Unified-style diff of settings.json, with a few lines of context.
     pub diff: String,
+    /// Where the dated backup will be written on confirm.
     pub backup: String,
     pub settings_path: String,
     /// Identifies the bytes this diff was computed from; handed back to `write`
@@ -56,6 +69,7 @@ pub struct HookPreview {
     pub fingerprint: String,
 }
 
+/// Claude Code's user settings file, `~/.claude/settings.json`.
 pub fn settings_path() -> PathBuf {
     platform::home_dir().join(".claude").join("settings.json")
 }
@@ -103,6 +117,8 @@ fn read_settings_lossy() -> Value {
     read_settings().unwrap_or_else(|_| json!({}))
 }
 
+/// The command written for `event`: the quoted relay path (forward slashes,
+/// for Git Bash) plus the event name.
 #[cfg(windows)]
 fn hook_command(event: &str) -> String {
     let exe = settings::hook_exe_path().to_string_lossy().replace('\\', "/");
@@ -124,6 +140,7 @@ fn sh_quote(s: &str) -> String {
     format!("'{}'", s.replace('\'', r"'\''"))
 }
 
+/// Whether a hooks-list entry contains a command carrying [`MARKER`].
 fn entry_is_ours(entry: &Value) -> bool {
     entry
         .get("hooks")
@@ -198,6 +215,7 @@ fn without_ours(existing: &Value) -> Value {
     Value::Object(root)
 }
 
+/// Pretty-printed JSON (empty string on the unreachable serialisation error).
 fn pretty(v: &Value) -> String {
     serde_json::to_string_pretty(v).unwrap_or_default()
 }
@@ -212,6 +230,7 @@ fn stamp() -> String {
     )
 }
 
+/// Timestamped sibling of settings.json that `write` copies the original to.
 fn backup_path() -> PathBuf {
     let p = settings_path();
     p.with_file_name(format!("settings.json.bak-{}", stamp()))
@@ -228,6 +247,8 @@ fn fingerprint(bytes: &[u8]) -> String {
     format!("{hash:016x}")
 }
 
+/// Fingerprint of settings.json as it is on disk now (a missing file counts as
+/// empty, matching what `read_settings` treats it as).
 fn current_fingerprint() -> String {
     match std::fs::read(settings_path()) {
         Ok(bytes) => fingerprint(&bytes),
@@ -237,6 +258,7 @@ fn current_fingerprint() -> String {
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
+/// Current hook state. Never fails: unreadable settings read as not installed.
 pub fn status() -> HookStatus {
     let current = read_settings_lossy();
     let installed = current
@@ -259,6 +281,9 @@ pub fn status() -> HookStatus {
     }
 }
 
+/// Computes the diff for installing (`true`) or removing (`false`) Coucou's
+/// hooks without writing anything. Errors when settings.json cannot be read
+/// or parsed, so the UI can tell the user instead of offering a destructive write.
 pub fn preview(install: bool) -> Result<HookPreview, String> {
     let current = read_settings()?;
     let next = if install { merged(&current) } else { without_ours(&current) };
@@ -271,6 +296,7 @@ pub fn preview(install: bool) -> Result<HookPreview, String> {
 }
 
 /// Writes the merged (or cleaned) settings after taking a dated backup.
+/// Returns the backup path (as a string) on success, or a message for the user.
 ///
 /// `fingerprint` is the one the preview was computed from. If the file changed
 /// in between — another tool, another window, the user's own editor — we stop
@@ -391,6 +417,8 @@ pub fn ensure_hook_exe(app: &AppHandle) {
     install_relay(&src, &dest);
 }
 
+/// Windows: copies the relay unless the destination already has the same size
+/// and modification time. A failed copy is only logged if no relay exists yet.
 #[cfg(windows)]
 fn install_relay(src: &Path, dest: &Path) {
     let same = match (std::fs::metadata(src), std::fs::metadata(dest)) {
@@ -431,6 +459,9 @@ fn install_relay(src: &Path, dest: &Path) {
 
 // ── Minimal unified diff (LCS) ────────────────────────────────────────────────
 
+/// Line diff of two texts: `  ` unchanged, `- ` removed, `+ ` added, with three
+/// lines of context and `…` marking elided runs. Returns "No change." when equal.
+///
 /// settings.json is short, so a plain O(n·m) LCS is the simplest honest diff.
 fn unified_diff(before: &str, after: &str) -> String {
     let a: Vec<&str> = before.lines().collect();

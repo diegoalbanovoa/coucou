@@ -1,6 +1,9 @@
-// Integration events → island state. Port of the `handle…` methods in the Swift
-// pollers: a genuinely new item flips the pill to finished/error, badges it when
-// the pill isn't focused, plays a sound, and clears itself after 60 s.
+/**
+ * Integration events → island state. Port of the `handle…` methods in the Swift
+ * pollers: a genuinely new item flips the pill to finished/error, badges it when
+ * the pill isn't focused, plays a sound, and clears itself after 60 s.
+ * Registered once from main.ts; Rust's pollers emit the "integration" event.
+ */
 
 import { onEvent, Bridge, type IntegrationUpdate } from "../core/bridge";
 import { Sound } from "../core/sound";
@@ -18,14 +21,19 @@ const KEY_FOR: Record<string, string> = {
   integration_calcom: "calcom-api-key",
 };
 
+/** Pending "back to idle" timer per pill id, so a newer event restarts the 60 s. */
 const clearTimers = new Map<string, number>();
 
+/** Subscribes to "integration" events and seeds the `configured` flags. */
 export function registerIntegrationHandlers(island: Island) {
   void onEvent<IntegrationUpdate>("integration", (update) => handle(island, update));
   void refreshConfigured();
 }
 
-/** Asks Rust which keys exist so the idle cards can say so. */
+/**
+ * Asks Rust which keys exist so the idle cards can say so. Only presence is
+ * ever read, never the secret. Claude Code's flag comes from the hooks setting.
+ */
 export async function refreshConfigured() {
   for (const [id, key] of Object.entries(KEY_FOR)) {
     const present = (await Bridge.secretPresent(key)) ?? false;
@@ -40,6 +48,12 @@ export async function refreshConfigured() {
   State.notify();
 }
 
+/**
+ * Applies one poller result. On error the previous data is kept (so a blip
+ * does not blank the card). A notable `event` flips the pill to finished/error,
+ * and a 60 s timer returns it to idle unless something newer replaced it.
+ * Ignored while paused.
+ */
 function handle(island: Island, update: IntegrationUpdate) {
   if (State.paused) return;
 

@@ -7,14 +7,18 @@ import { h } from "../views/dom";
 import { icon } from "../views/icons";
 import { t } from "../i18n/index";
 
+/** Options for `sheet`. */
 export interface SheetOptions {
   title: string;
   body: Node;
   footer?: Node;
+  /** Called by the close button and by Esc; the caller removes the sheet. */
   onClose: () => void;
+  /** Accessible name of the close button; defaults to the translated "Cancel". */
   closeLabel?: string;
 }
 
+/** Builds the sheet dialog and focuses it on the next frame so Esc works at once. */
 export function sheet(opts: SheetOptions): HTMLElement {
   const closeBtn = h(
     "button",

@@ -10,6 +10,7 @@
 // turn — the shapes Fase 4's redesign has to hold without the chat growing
 // past the screen.
 
+/** Local copy of `KeptMessage` (minus attachments); see the header for why it is not imported. */
 export interface MockMessage {
   role: "user" | "assistant" | "error";
   content: string;
@@ -31,6 +32,7 @@ const LONG_MESSAGE_20K = LONG_MESSAGE.length >= 20_000
   ? LONG_MESSAGE.slice(0, 20_000)
   : LONG_MESSAGE.padEnd(20_000, " ·");
 
+/** The seeded conversation returned by the mock `chatLoad`. */
 export const MOCK_CHAT_MESSAGES: MockMessage[] = [
   { role: "user", content: "hola", at: minutesAgo(180), steps: [] },
   {

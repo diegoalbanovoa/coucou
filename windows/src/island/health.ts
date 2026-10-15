@@ -1,6 +1,8 @@
-// The health monitor's events → Mochi's mood and the tab badge. See
-// plan-v2.md § 7.3. Rust decides the level (src-tauri/src/health.rs); this
-// file only ever applies whatever it said.
+/**
+ * The health monitor's events → Mochi's mood and the tab badge. See
+ * plan-v2.md § 7.3. Rust decides the level (src-tauri/src/health.rs); this
+ * file only ever applies whatever it said. Registered from main.ts.
+ */
 
 import { Bridge, onEvent, type HealthEvent } from "../core/bridge";
 import { State } from "../core/state";
@@ -15,12 +17,14 @@ export function healthTooltip(e: HealthEvent): string {
   return t(`health.mochiSays.${e.level}` as "health.mochiSays.strained" | "health.mochiSays.sick", { cause });
 }
 
+/** Mirrors the OS "reduce motion" preference into Mochi's engine, and follows later changes. */
 function applyReducedMotionPreference() {
   const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
   setReducedMotion(mq.matches);
   mq.addEventListener("change", () => setReducedMotion(mq.matches));
 }
 
+/** Starts listening: applies the monitor's last reading right away, then every "health" event. */
 export function registerHealthHandlers(island: Island) {
   applyReducedMotionPreference();
 
@@ -31,6 +35,7 @@ export function registerHealthHandlers(island: Island) {
   void onEvent<HealthEvent>("health", (e) => apply(island, e));
 }
 
+/** Stores the reading, sets Mochi's mood and tooltip (empty when `ok`), and re-renders. */
 function apply(island: Island, e: HealthEvent) {
   State.health = e;
   island.setHealthLevel(e.level);

@@ -15,11 +15,18 @@ import { t } from "../i18n/index";
  *  empties it, including when it is already the view on screen. */
 let resetCurrent: (() => void) | null = null;
 
+/** Empties the quick-ask view (input, reply, in-flight request); called by the global shortcut handler in main.ts. */
 export function resetQuickAsk() {
   resetCurrent?.();
 }
 
-/** `<kind>:<detail>` from Rust → the message the user reads. */
+/**
+ * Maps a quick-ask error from Rust (`<kind>:<detail>`, possibly prefixed by
+ * `Error:`) to localized text; unknown kinds fall back to the endpoint error
+ * with the raw detail. Also reused by the digest view for failed routines.
+ *
+ * `<kind>:<detail>` from Rust -> the message the user reads.
+ */
 export function errorText(raw: unknown): string {
   const text = String(raw).replace(/^Error:\s*/, "");
   const cut = text.indexOf(":");
@@ -41,6 +48,11 @@ export function errorText(raw: unknown): string {
   }
 }
 
+/**
+ * Builds the quick-ask view. Submitting calls `Bridge.quickAsk`; Enter sends,
+ * Escape collapses the island. `generation` discards replies that belong to a
+ * request made before a reset.
+ */
 export function buildQuick(actions: ViewActions): ViewHost {
   const input = h("input", {
     class: "quick-input",
@@ -59,6 +71,7 @@ export function buildQuick(actions: ViewActions): ViewHost {
   let generation = 0;
   let busy = false;
 
+  /** Shows `text` in the reply area, styled as an error when asked. */
   function show(text: string, isError: boolean) {
     reply.textContent = text;
     reply.classList.toggle("error", isError);
@@ -70,6 +83,7 @@ export function buildQuick(actions: ViewActions): ViewHost {
     if (State.mode === "expanded" && State.view !== "quick") actions.setView("quick");
   }
 
+  /** Back to a blank, enabled view; invalidates any request in flight. */
   function reset() {
     generation++;
     busy = false;
@@ -79,6 +93,7 @@ export function buildQuick(actions: ViewActions): ViewHost {
   }
   resetCurrent = reset;
 
+  /** Sends the input to the quick assistant and renders the answer or error. */
   async function submit() {
     const prompt = input.value.trim();
     if (!prompt || busy) return;

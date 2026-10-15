@@ -1,4 +1,12 @@
-// Windows: Win32 for the island window and the cursor, %APPDATA% for files.
+//! Windows: Win32 for the island window and the cursor, %APPDATA% for files.
+//!
+//! Exports the same names as `platform/linux.rs`; see `platform/mod.rs`. The
+//! island is a topmost, non-activating tool window: click-through and focus are
+//! driven by extended window styles and the 60 Hz cursor poll, not by input
+//! regions. Native dialogs (folder and file pickers) run on their own thread
+//! with their own COM apartment and are owned by the island so they appear above
+//! it. Most Win32 calls here are `unsafe` FFI; failures degrade to `None`,
+//! `false`, empty or zero rather than panicking.
 
 use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
@@ -53,8 +61,7 @@ pub fn config_dir() -> PathBuf {
     base.join("Coucou")
 }
 
-/// %LOCALAPPDATA%\Coucou — where coucou-hook.exe, the inbox and the log live.
-/// Obsidian's own settings, which hold its list of vaults.
+/// Obsidian's own settings, which hold its list of vaults (`%APPDATA%\obsidian`).
 pub fn obsidian_config() -> PathBuf {
     std::env::var_os("APPDATA")
         .map(PathBuf::from)
@@ -63,6 +70,7 @@ pub fn obsidian_config() -> PathBuf {
         .join("obsidian.json")
 }
 
+/// %LOCALAPPDATA%\Coucou -- where coucou-hook.exe, the inbox and the log live.
 pub fn local_dir() -> PathBuf {
     let base = std::env::var_os("LOCALAPPDATA")
         .map(PathBuf::from)
@@ -78,6 +86,7 @@ pub fn ensure_private_dir(dir: &std::path::Path) -> std::io::Result<()> {
 /// Nothing to set up before the webview starts.
 pub fn prepare_environment() {}
 
+/// Current local wall-clock time from `GetLocalTime`.
 pub fn local_time() -> LocalTime {
     let t = unsafe { GetLocalTime() };
     LocalTime {
@@ -111,11 +120,14 @@ pub fn no_console(cmd: &mut Command) -> &mut Command {
     cmd.creation_flags(CREATE_NO_WINDOW)
 }
 
+/// Opens `url` in the default browser via `rundll32 url.dll,FileProtocolHandler`,
+/// without a console flash. Fire and forget: a failed spawn is ignored.
 pub fn open_url(url: &str) {
     let _ = no_console(Command::new("rundll32.exe").args(["url.dll,FileProtocolHandler", url]))
         .spawn();
 }
 
+/// Opens a folder in Explorer. Fire and forget.
 pub fn reveal_folder(path: &str) {
     let _ = Command::new("explorer").arg(path).spawn();
 }
@@ -245,6 +257,7 @@ pub fn left_button_down() -> bool {
 
 // ── Island window ─────────────────────────────────────────────────────────────
 
+/// The native handle of `win`, or `None` if it has no window yet (null handle).
 fn hwnd_of(win: &WebviewWindow) -> Option<HWND> {
     let raw = win.hwnd().ok()?.0 as isize;
     if raw == 0 {
@@ -292,6 +305,9 @@ pub fn unblock_webview_drops(app: &AppHandle) {
     }
 }
 
+/// `EnumChildWindows` callback: revokes the OLE drop target of WebView2's
+/// `Chrome_RenderWidgetHostHWND`, leaving wry's parent target to receive drops.
+/// Always returns true so the enumeration continues.
 unsafe extern "system" fn revoke_render_widget(hwnd: HWND, _: LPARAM) -> BOOL {
     let mut name = [0u16; 64];
     let len = unsafe { GetClassNameW(hwnd, &mut name) };
@@ -376,6 +392,8 @@ fn pick_folder_owned(owner: Option<isize>) -> Option<String> {
 /// error here that is not a problem.
 const CANCELLED: ::windows::core::HRESULT = ::windows::core::HRESULT(0x8007_04C7u32 as i32);
 
+/// Runs the folder dialog. Returns `None` on cancel and, after logging, on a real
+/// failure. Must be called on a thread with an initialised COM apartment.
 unsafe fn show_folder_dialog(owner: Option<HWND>) -> Option<String> {
     match open_folder_dialog(owner) {
         Ok(path) => path,
@@ -392,6 +410,8 @@ unsafe fn show_folder_dialog(owner: Option<HWND>) -> Option<String> {
     }
 }
 
+/// Shows the shell's folder picker owned by `owner` and returns the chosen file
+/// system path. A cancel surfaces as the `CANCELLED` error.
 unsafe fn open_folder_dialog(owner: Option<HWND>) -> ::windows::core::Result<Option<String>> {
     let dialog: IFileOpenDialog = CoCreateInstance(&FileOpenDialog, None, CLSCTX_INPROC_SERVER)?;
     let options = dialog.GetOptions()?;
@@ -414,6 +434,8 @@ pub fn pick_files(win: &WebviewWindow, title: &str) -> Vec<String> {
     pick_files_owned(hwnd_of(win).map(|h| h.0 as isize), title.to_string())
 }
 
+/// Runs the multi-file picker on its own thread/apartment (see
+/// `pick_folder_owned`); an empty list for cancel or failure.
 fn pick_files_owned(owner: Option<isize>, title: String) -> Vec<String> {
     // Same reasoning as pick_folder_owned: its own thread and COM apartment,
     // since the dialog runs a modal message loop on whichever thread shows it.
@@ -429,6 +451,8 @@ fn pick_files_owned(owner: Option<isize>, title: String) -> Vec<String> {
     .unwrap_or_default()
 }
 
+/// Runs the file dialog. Cancel gives an empty list; a real failure is logged and
+/// also gives an empty list.
 unsafe fn show_files_dialog(owner: Option<HWND>, title: &str) -> Vec<String> {
     match open_files_dialog(owner, title) {
         Ok(paths) => paths,
@@ -440,6 +464,8 @@ unsafe fn show_files_dialog(owner: Option<HWND>, title: &str) -> Vec<String> {
     }
 }
 
+/// Shows the shell's multi-select file picker titled `title` and returns the
+/// chosen paths. A cancel surfaces as the `CANCELLED` error.
 unsafe fn open_files_dialog(owner: Option<HWND>, title: &str) -> ::windows::core::Result<Vec<String>> {
     let dialog: IFileOpenDialog = CoCreateInstance(&FileOpenDialog, None, CLSCTX_INPROC_SERVER)?;
     let options = dialog.GetOptions()?;
@@ -471,6 +497,7 @@ pub fn temp_dir() -> Option<PathBuf> {
     dir.is_dir().then_some(dir)
 }
 
+/// Where npm keeps its cache on Windows (`%LOCALAPPDATA%\npm-cache`).
 pub fn npm_cache_dir() -> PathBuf {
     std::env::var_os("LOCALAPPDATA")
         .map(PathBuf::from)
@@ -478,6 +505,7 @@ pub fn npm_cache_dir() -> PathBuf {
         .join("npm-cache")
 }
 
+/// Where pip keeps its cache on Windows (`%LOCALAPPDATA%\pip\Cache`).
 pub fn pip_cache_dir() -> PathBuf {
     std::env::var_os("LOCALAPPDATA")
         .map(PathBuf::from)

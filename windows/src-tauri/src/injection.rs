@@ -1,11 +1,12 @@
-// Prompt-injection scanner for what the quick assistant's tools hand back to
-// the model. A detector with known false positives, not a defence: it flags
-// text that tries to give the model instructions so the model is told it does
-// not come from the user. The real defence stays the closed tool list and the
-// approval card. Phrases follow OpenJarvis's injection scanner (reimplemented
-// here), minus the patterns that protect nothing in a tool set with no shell
-// and no network, and plus Spanish and Llama 3 chat tokens.
+//! Prompt-injection scanner for what the quick assistant's tools hand back to
+//! the model. A detector with known false positives, not a defence: it flags
+//! text that tries to give the model instructions so the model is told it does
+//! not come from the user. The real defence stays the closed tool list and the
+//! approval card. Phrases follow OpenJarvis's injection scanner (reimplemented
+//! here), minus the patterns that protect nothing in a tool set with no shell
+//! and no network, and plus Spanish and Llama 3 chat tokens.
 
+/// Names of the detection categories, in the fixed order `scan` reports them.
 const KINDS: [&str; 4] = ["prompt_override", "identity_override", "jailbreak", "delimiter_injection"];
 
 /// Chat-template tokens neutralised by `annotate` (`<|name|>` becomes `[name]`).
@@ -21,6 +22,8 @@ const TEMPLATE_TOKENS: &[&str] = &[
     "endoftext",
 ];
 
+/// Lowercases and collapses whitespace runs to one space so phrase matching
+/// is not defeated by case, newlines or padding.
 fn normalize(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut in_space = false;
@@ -38,7 +41,8 @@ fn normalize(text: &str) -> String {
     out
 }
 
-/// Every phrase `lead + a + b + ...`, one choice from each part.
+/// Every phrase built by concatenating one choice from each part (cartesian
+/// product), so phrase variants are listed compactly.
 fn combos(parts: &[&[&str]]) -> Vec<String> {
     let mut acc = vec![String::new()];
     for options in parts {
@@ -53,6 +57,7 @@ fn combos(parts: &[&[&str]]) -> Vec<String> {
     acc
 }
 
+/// Phrases that try to cancel earlier instructions (English and Spanish).
 fn prompt_override_phrases() -> Vec<String> {
     let mut v = combos(&[
         &["ignore "],
@@ -79,6 +84,7 @@ fn prompt_override_phrases() -> Vec<String> {
     v
 }
 
+/// Phrases that try to reassign the model's identity (English and Spanish).
 const IDENTITY_PHRASES: &[&str] = &[
     "you are now a different",
     "you are now different",
@@ -90,6 +96,7 @@ const IDENTITY_PHRASES: &[&str] = &[
     "ahora eres otro asistente",
 ];
 
+/// Well-known jailbreak phrases (DAN, "pretend you have no rules" variants).
 fn jailbreak_phrases() -> Vec<String> {
     let mut v = vec!["do anything now".to_string(), "dan mode".to_string(), "dan jailbreak".to_string()];
     v.extend(combos(&[
@@ -102,6 +109,8 @@ fn jailbreak_phrases() -> Vec<String> {
     v
 }
 
+/// True if a ```` ```word ```` code fence opens with exactly `word` (so
+/// ```` ```systemd ```` does not match ```` ```system ````). `norm` is normalized.
 fn has_fence(norm: &str, word: &str) -> bool {
     let needle = format!("```{word}");
     norm.match_indices(&needle).any(|(at, _)| {
@@ -109,12 +118,13 @@ fn has_fence(norm: &str, word: &str) -> bool {
     })
 }
 
+/// True if the text contains any `<|token|>` chat-template delimiter.
 fn has_template_token(norm: &str) -> bool {
     TEMPLATE_TOKENS.iter().any(|t| norm.contains(&format!("<|{t}|>")))
 }
 
 /// The kinds found, without repeats, in the fixed order of `KINDS`. Empty
-/// means clean.
+/// means clean. Heuristic: false positives and misses are expected.
 pub fn scan(text: &str) -> Vec<&'static str> {
     let norm = normalize(text);
     let any = |phrases: &[String]| phrases.iter().any(|p| norm.contains(p.as_str()));

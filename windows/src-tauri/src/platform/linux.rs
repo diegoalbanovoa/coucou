@@ -1,14 +1,18 @@
-// Linux: XDG directories for files, xdg-open for links and folders, and
-// gtk-layer-shell for the island window.
-//
-// Wayland gives an app no global cursor position and no say over where its
-// window goes, so the island works differently from Windows:
-//   * it is a layer-shell surface anchored to the top edge, above everything,
-//     on compositors that support it (COSMIC, KDE, wlroots — not GNOME);
-//   * click-through is the window's input region, set to the island shape, so
-//     the compositor itself sends every other click to whatever is underneath;
-//   * the cursor comes from the page's own mouse events, which only fire over
-//     the island — Mochi's eyes follow the pointer there, not across the screen.
+//! Linux: XDG directories for files, xdg-open for links and folders, and
+//! gtk-layer-shell for the island window.
+//!
+//! Wayland gives an app no global cursor position and no say over where its
+//! window goes, so the island works differently from Windows:
+//!   * it is a layer-shell surface anchored to the top edge, above everything,
+//!     on compositors that support it (COSMIC, KDE, wlroots -- not GNOME);
+//!   * click-through is the window's input region, set to the island shape, so
+//!     the compositor itself sends every other click to whatever is underneath;
+//!   * the cursor comes from the page's own mouse events, which only fire over
+//!     the island -- Mochi's eyes follow the pointer there, not across the screen.
+//!
+//! This file exports the same names as `platform/windows.rs`; functions with no
+//! Linux counterpart are inert stubs (`false`, `None`, empty) so callers need no
+//! `cfg`. Memory, CPU and process data come straight from `/proc`.
 
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
@@ -39,7 +43,6 @@ fn xdg(var: &str, fallback: &str) -> PathBuf {
         .unwrap_or_else(|| home_dir().join(fallback))
 }
 
-/// ~/.config/coucou — preferences.
 /// Obsidian's own settings, which hold its list of vaults.
 pub fn obsidian_config() -> PathBuf {
     std::env::var_os("XDG_CONFIG_HOME")
@@ -49,6 +52,7 @@ pub fn obsidian_config() -> PathBuf {
         .join("obsidian.json")
 }
 
+/// ~/.config/coucou -- preferences (`$XDG_CONFIG_HOME/coucou` when set).
 pub fn config_dir() -> PathBuf {
     xdg("XDG_CONFIG_HOME", ".config").join("coucou")
 }
@@ -78,6 +82,7 @@ pub fn prepare_environment() {
     }
 }
 
+/// Current local wall-clock time via `localtime_r` (thread-safe).
 pub fn local_time() -> LocalTime {
     let mut tm: libc::tm = unsafe { std::mem::zeroed() };
     unsafe {
@@ -143,10 +148,13 @@ pub fn no_console(cmd: &mut Command) -> &mut Command {
     cmd
 }
 
+/// Opens `url` in the default handler with `xdg-open`. Fire and forget: failure to
+/// spawn is ignored.
 pub fn open_url(url: &str) {
     let _ = Command::new("xdg-open").arg(url).spawn();
 }
 
+/// Opens a folder in the default file manager with `xdg-open`. Fire and forget.
 pub fn reveal_folder(path: &str) {
     let _ = Command::new("xdg-open").arg(path).spawn();
 }
@@ -192,10 +200,12 @@ pub fn extra_bin_dirs() -> Vec<PathBuf> {
 /// input region decides click-through (see the top of this file).
 pub const CURSOR_POLL: bool = false;
 
+/// Always `None`: Wayland gives no global cursor position (see `CURSOR_POLL`).
 pub fn cursor_physical() -> Option<(f64, f64)> {
     None
 }
 
+/// Always `false`: there is no global button state to poll on Wayland.
 pub fn left_button_down() -> bool {
     false
 }
@@ -233,6 +243,7 @@ static LAYER_SURFACE: AtomicBool = AtomicBool::new(false);
 type Region = Option<(f64, f64, f64, f64)>;
 static INPUT_REGION: Mutex<Region> = Mutex::new(Some((0.0, 0.0, 0.0, 0.0)));
 
+/// Raw `GtkWindow` pointer, as the layer-shell C functions need it.
 fn gtk_window_ptr(win: &gtk::ApplicationWindow) -> *mut gtk::ffi::GtkWindow {
     let w: &gtk::Window = win.upcast_ref();
     w.to_glib_none().0
@@ -377,6 +388,9 @@ pub fn pick_files(_win: &WebviewWindow, _title: &str) -> Vec<String> {
     Vec::new()
 }
 
+/// Applies `rect` as the window's input shape, so clicks outside it fall through
+/// to the window underneath. `None` makes the whole window take input. A no-op
+/// until the window has a GDK surface (it is re-applied on every map).
 fn apply_input_region(gw: &impl IsA<gtk::Widget>, rect: Region) {
     match rect {
         None => gw.input_shape_combine_region(None),
@@ -441,15 +455,18 @@ mod tests {
 
 // ── Disk, memory and the trash ───────────────────────────────────────────────
 
+/// The system temp dir, if it exists.
 pub fn temp_dir() -> Option<PathBuf> {
     let dir = std::env::temp_dir();
     dir.is_dir().then_some(dir)
 }
 
+/// Where npm keeps its download cache (`~/.npm`).
 pub fn npm_cache_dir() -> PathBuf {
     super::home_dir().join(".npm")
 }
 
+/// Where pip keeps its cache (`~/.cache/pip`).
 pub fn pip_cache_dir() -> PathBuf {
     super::home_dir().join(".cache").join("pip")
 }
@@ -535,6 +552,7 @@ pub fn recycle_bin_size() -> Option<(u64, u64)> {
     None
 }
 
+/// Always `false`: the freedesktop trash is handled as a regular folder.
 pub fn empty_recycle_bin() -> bool {
     false
 }

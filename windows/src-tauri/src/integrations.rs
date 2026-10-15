@@ -1,12 +1,16 @@
-// Integration pollers — the Rust side of StripePoller / GithubPoller /
-// VercelPoller / N8nPoller / ResendPoller / NotionPoller / CalcomPoller.
-//
-// Same endpoints, same first-run delays and intervals as the Swift pollers. Each
-// one emits an `integration` event; the island owns the badge, the sound and the
-// 60 s auto-clear, exactly as the Swift handlers do.
-//
-// Nothing is polled until its key exists in the Credential Manager, and no
-// request goes anywhere the user has not configured.
+//! Integration pollers — the Rust side of StripePoller / GithubPoller /
+//! VercelPoller / N8nPoller / ResendPoller / NotionPoller / CalcomPoller.
+//!
+//! Same endpoints, same first-run delays and intervals as the Swift pollers. Each
+//! one emits an `integration` event; the island owns the badge, the sound and the
+//! 60 s auto-clear, exactly as the Swift handlers do.
+//!
+//! Nothing is polled until its key exists in the Credential Manager, and no
+//! request goes anywhere the user has not configured.
+//!
+//! `start` is called once from `lib.rs`; `poll_once` backs the Refresh buttons
+//! and `set_paused` the tray's Pause item. Pollers skip work (and the network)
+//! while paused or switched off in settings, per CLAUDE.md.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
@@ -20,6 +24,7 @@ use crate::island::WINDOW_LABEL;
 use crate::log;
 use crate::secrets;
 
+/// Per-request timeout for every integration call.
 const TIMEOUT: Duration = Duration::from_secs(10);
 /// How often a poller that is switched off wakes up — often enough to notice
 /// that it was switched on, and no more. Its own cadence is for when it has
@@ -31,24 +36,35 @@ const IDLE_EVERY: Duration = Duration::from_secs(300);
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct IntegrationUpdate {
+    /// Integration id, e.g. `integration_stripe` (a stable pill id).
     pub id: &'static str,
+    /// Integration-specific payload for the card; `{}` on error.
     pub data: Value,
+    /// User-facing failure message; the card shows it instead of data.
     pub error: Option<String>,
+    /// Set only when something new happened since the last poll.
     pub event: Option<IntegrationEvent>,
 }
 
+/// Something worth a badge and a sound: a payment, a deploy, a workflow run.
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct IntegrationEvent {
+    /// Picks the success or failure sound and colour.
     pub success: bool,
+    /// Short headline (project, workflow or payment description).
     pub label: String,
+    /// Optional extra lines shown under the label.
     pub detail: Option<String>,
 }
 
+/// Sends an update to the island window; delivery failures are ignored.
 fn emit(app: &AppHandle, update: IntegrationUpdate) {
     let _ = app.emit_to(WINDOW_LABEL, "integration", update);
 }
 
+/// A fresh HTTP client with the shared timeout (falls back to defaults if the
+/// builder fails).
 fn client() -> reqwest::Client {
     reqwest::Client::builder()
         .timeout(TIMEOUT)
@@ -60,6 +76,7 @@ fn client() -> reqwest::Client {
 /// pausing Coucou has to mean pausing Coucou, not just hiding the island.
 pub static PAUSED: AtomicBool = AtomicBool::new(false);
 
+/// Sets or clears the global pause (see [`PAUSED`]).
 pub fn set_paused(on: bool) {
     PAUSED.store(on, Ordering::Relaxed);
 }
@@ -85,6 +102,8 @@ fn enabled(app: &AppHandle, id: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// Runs `poll` forever on the async runtime: first after `delay_secs`, then
+/// every `every_secs` while the integration `id` is enabled and not paused.
 fn spawn<F, Fut>(app: AppHandle, id: &'static str, delay_secs: u64, every_secs: u64, poll: F)
 where
     F: Fn(AppHandle) -> Fut + Send + 'static,
@@ -138,6 +157,7 @@ pub async fn poll_once(app: AppHandle, id: &str) {
 /// Remembers the newest id per integration so an event fires once, not on every poll.
 struct Seen(Mutex<std::collections::HashMap<&'static str, String>>);
 
+/// Process-wide last-seen ids, keyed by short integration name (`stripe`...).
 static SEEN: std::sync::LazyLock<Seen> =
     std::sync::LazyLock::new(|| Seen(Mutex::new(std::collections::HashMap::new())));
 
@@ -151,6 +171,8 @@ fn is_new(key: &'static str, id: &str) -> bool {
     }
 }
 
+/// User-facing message for a non-success HTTP status; `unauthorised_hint` is
+/// the service-specific explanation for a 403.
 fn status_error(code: u16, unauthorised_hint: &str) -> String {
     match code {
         401 => "Invalid API key (401)".into(),
@@ -161,6 +183,9 @@ fn status_error(code: u16, unauthorised_hint: &str) -> String {
 
 // ── Stripe ────────────────────────────────────────────────────────────────────
 
+/// Stripe: balance (available + pending) and the three latest charges.
+/// Fires an event when a new charge shows up. Uses Basic auth with the secret
+/// key; a failed charges call after a good balance call is silently dropped.
 async fn poll_stripe(app: AppHandle) {
     let Some(key) = secrets::get("stripe-api-key") else { return };
     let auth =
@@ -283,6 +308,8 @@ async fn poll_stripe(app: AppHandle) {
 
 // ── GitHub ────────────────────────────────────────────────────────────────────
 
+/// GitHub: repo count (public + private) and total stars over the user's
+/// first 100 owned repos. Never fires events.
 async fn poll_github(app: AppHandle) {
     let Some(token) = secrets::get("github-token") else { return };
     let http = client();
@@ -344,6 +371,8 @@ async fn poll_github(app: AppHandle) {
 
 // ── Vercel ────────────────────────────────────────────────────────────────────
 
+/// Vercel: the latest finished deployments (READY, ERROR, CANCELED); an event
+/// fires for a new latest one, successful only when READY.
 async fn poll_vercel(app: AppHandle) {
     let Some(token) = secrets::get("vercel-token") else { return };
     let response = client()
@@ -416,6 +445,7 @@ async fn poll_vercel(app: AppHandle) {
 
 // ── Resend ────────────────────────────────────────────────────────────────────
 
+/// Resend: the five latest emails and the account total. Never fires events.
 async fn poll_resend(app: AppHandle) {
     let Some(key) = secrets::get("resend-api-key") else { return };
     let response = client()
@@ -473,6 +503,7 @@ async fn poll_resend(app: AppHandle) {
 
 // ── Notion ────────────────────────────────────────────────────────────────────
 
+/// Notion: the three most recently edited pages or databases. No events.
 async fn poll_notion(app: AppHandle) {
     let Some(token) = secrets::get("notion-api-key") else { return };
     let response = client()
@@ -511,6 +542,8 @@ async fn poll_notion(app: AppHandle) {
     });
 }
 
+/// One search result as card data. Titles come from the database title or the
+/// page's `title`-typed property; `None` when the id or edit time is missing.
 fn parse_notion_page(obj: &Value) -> Option<Value> {
     let id = obj.get("id")?.as_str()?;
     let is_database = obj.get("object").and_then(Value::as_str) == Some("database");
@@ -565,6 +598,7 @@ fn parse_notion_page(obj: &Value) -> Option<Value> {
 
 // ── Cal.com ───────────────────────────────────────────────────────────────────
 
+/// Cal.com: upcoming bookings (v2 API). No events.
 async fn poll_calcom(app: AppHandle) {
     let Some(key) = secrets::get("calcom-api-key") else { return };
     let response = client()
@@ -626,6 +660,9 @@ async fn poll_calcom(app: AppHandle) {
 
 // ── n8n ───────────────────────────────────────────────────────────────────────
 
+/// n8n: the latest execution. Tries the public API, then `/rest`, as the Swift
+/// poller does. Fires an event once per finished execution id (not for
+/// running ones) with a detail built by `n8n_detail`.
 async fn poll_n8n(app: AppHandle) {
     let (Some(key), Some(raw_base)) = (secrets::get("n8n-api-key"), secrets::get("n8n-url")) else {
         return;
@@ -714,6 +751,8 @@ async fn poll_n8n(app: AppHandle) {
     });
 }
 
+/// Multi-line summary of an execution: node and message for a failure, or the
+/// last node, its item count and the first item's first fields for a success.
 fn n8n_detail(json: &Value, success: bool) -> Option<String> {
     let result = json.get("data")?.get("resultData")?;
     if !success {
@@ -774,6 +813,7 @@ fn n8n_detail(json: &Value, success: bool) -> Option<String> {
     })
 }
 
+/// Compact one-line rendering of a JSON value for the n8n detail text.
 fn fmt_value(v: &Value) -> String {
     match v {
         Value::String(s) => s.chars().take(50).collect(),

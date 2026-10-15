@@ -9,8 +9,10 @@
 import { h } from "../views/dom";
 import { icon } from "../views/icons";
 
+/** Ring colour, chosen by `toneFor`. */
 export type GaugeTone = "green" | "orange" | "red";
 
+/** Cut-offs (in the gauge's 0..100 scale) between the tones. */
 export interface GaugeThresholds {
   /** Value at and above which the ring turns orange. */
   warn: number;
@@ -24,18 +26,24 @@ export const LOAD_THRESHOLDS: GaugeThresholds = { warn: 70, danger: 85 };
  *  normal and must not read as alarming the way 70% memory does. */
 export const DISK_THRESHOLDS: GaugeThresholds = { warn: 90, danger: 95 };
 
+/** Maps a value to a tone; at or above `danger` is red, at or above `warn` orange. */
 export function toneFor(value: number, thresholds: GaugeThresholds = LOAD_THRESHOLDS): GaugeTone {
   if (value >= thresholds.danger) return "red";
   if (value >= thresholds.warn) return "orange";
   return "green";
 }
 
+/** Options for `gauge`. */
 export interface GaugeOptions {
   /** 0..100 */
   value: number;
+  /** Caption under the ring. */
   label: string;
+  /** Smaller second line, e.g. "11.4 of 15 GB". */
   detail: string;
+  /** Ring diameter in px; defaults to 64. */
   size?: number;
+  /** Defaults to `LOAD_THRESHOLDS`. */
   thresholds?: GaugeThresholds;
   /** The whole reading, in words — see the file note above. */
   ariaLabel: string;
@@ -44,6 +52,7 @@ export interface GaugeOptions {
 const NS = "http://www.w3.org/2000/svg";
 const STROKE = 6;
 
+/** Builds the SVG: a grey track plus a rounded arc whose dash offset encodes `pct`. */
 function ring(size: number, tone: GaugeTone, pct: number): SVGSVGElement {
   const r = (size - STROKE) / 2;
   const circumference = 2 * Math.PI * r;
@@ -81,6 +90,7 @@ function ring(size: number, tone: GaugeTone, pct: number): SVGSVGElement {
   return svg;
 }
 
+/** Builds a ring gauge with its label and detail; `value` is clamped to 0..100. */
 export function gauge(opts: GaugeOptions): HTMLElement {
   const size = opts.size ?? 64;
   const pct = Math.max(0, Math.min(100, opts.value));

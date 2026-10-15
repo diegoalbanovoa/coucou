@@ -10,6 +10,10 @@
 //
 // Polling only happens while this view is on screen, and the heavier
 // process poll only while its own pane is the one showing.
+//
+// Created once by views.ts (`buildSystem`); `focus()`/`blur()` start and stop
+// every timer and subscription. The pure helpers exported here (size,
+// groupProcesses, overallTone, usageRowParts...) are unit-tested without a DOM.
 
 import { h, clear, dot } from "./dom";
 import { icon } from "./icons";
@@ -67,10 +71,12 @@ function targetLabel(id: string): string {
  *  the extra warning line. */
 const AGENT_STEMS = ["claude", "gemini", "codex", "copilot", "cursor-agent", "qwen", "opencode"];
 
+/** Lower-case executable name without a trailing `.exe`. */
 function exeStem(name: string): string {
   return name.toLowerCase().replace(/\.exe$/, "");
 }
 
+/** True when the process name is one of the known agent CLIs. */
 export function isAgentProcess(name: string): boolean {
   return AGENT_STEMS.includes(exeStem(name));
 }
@@ -134,6 +140,7 @@ export function groupProcesses(list: ProcInfo[]): ProcGroup[] {
   return [...groups.values()].sort((a, b) => b.memory - a.memory);
 }
 
+/** Severity order of gauge tones, to pick the worst of two. */
 const TONE_RANK: Record<GaugeTone, number> = { green: 0, orange: 1, red: 2 };
 
 /** The worse of the two readings — what the headline and its dot answer
@@ -144,6 +151,7 @@ export function overallTone(cpuPercent: number, memoryPercent: number): GaugeTon
   return TONE_RANK[cpu] >= TONE_RANK[memory] ? cpu : memory;
 }
 
+/** Headline i18n key for each overall tone. */
 const STATUS_KEY: Record<GaugeTone, "system.statusOk" | "system.statusStrained" | "system.statusSick"> = {
   green: "system.statusOk",
   orange: "system.statusStrained",
@@ -157,6 +165,7 @@ export function gaugeAria(tone: GaugeTone, label: string, value: number, detail:
   return t(key, { label, value, detail });
 }
 
+/** CSS variables a process avatar may be coloured with. */
 const AVATAR_PALETTE = ["--c-blue", "--c-purple", "--c-teal", "--c-green", "--c-yellow", "--c-accent"];
 
 /** A stable colour for a process name this tab has no better face for —
@@ -168,6 +177,7 @@ function hashColor(name: string): string {
   return `var(${AVATAR_PALETTE[hash % AVATAR_PALETTE.length]})`;
 }
 
+/** Row avatar: the console's still Mochi for agent CLIs, else a coloured letter. */
 function avatarFor(name: string): HTMLElement {
   const stem = exeStem(name);
   if (AGENT_STEMS.includes(stem)) return stillMiniBot(consoleColor(stem), 20);
@@ -178,6 +188,7 @@ function avatarFor(name: string): HTMLElement {
   );
 }
 
+/** The four panes behind the segmented switch. */
 type Pane = "processes" | "storage" | "agents" | "usage";
 
 /** A duration as a person reads it: "340 ms", "2.3 s". */
@@ -197,6 +208,7 @@ export interface UsageRowParts {
   cost: string | null;
 }
 
+/** Formats one backend's usage summary for display in `locale` (see UsageRowParts). */
 export function usageRowParts(s: BackendSummary, locale: string): UsageRowParts {
   const subtitle = [
     tn("system.usageTurns", s.turns),
@@ -228,8 +240,15 @@ export function usageRowParts(s: BackendSummary, locale: string): UsageRowParts 
 
   return { title: s.label, subtitle, tokens, cost };
 }
+
+/** Phases of the cleanup sheet: scan, pick, delete, show outcome. */
 type SheetStep = "closed" | "analyzing" | "results" | "cleaning" | "result";
 
+/**
+ * Builds the System tab: headline, three gauges, a four-pane switch
+ * (processes, storage, agents, usage) and the cleanup sheet. Nothing polls
+ * until the host calls `focus()`; `blur()` stops everything.
+ */
 export function buildSystem() {
   const headDot = dot("var(--c-green)", 8);
   const headlineText = h("b", { class: "sys-headline" });
@@ -241,6 +260,7 @@ export function buildSystem() {
 
   let pane: Pane = "processes";
 
+  /** (Re)creates the pane switch; rebuilt on locale change to refresh its labels. */
   function buildSegmented(): Segmented<Pane> {
     return segmented<Pane>({
       items: [
@@ -269,13 +289,17 @@ export function buildSystem() {
   const body = h("div", { class: "sys-body" }, content);
   const el = h("div", { class: "view" }, h("div", { class: "card wash sys-card" }, body));
 
+  /** Latest system_stats and process snapshot (null/empty until the first poll lands). */
   let stats: Stats | null = null;
   let procs: ProcInfo[] = [];
+  /** Whether the process list shows 20 groups instead of 8. */
   let expanded = false;
+  /** Process group (by key) whose action menu, end-confirm or member list is open. */
   let openMenuKey: string | null = null;
   let confirmKey: string | null = null;
   let membersKey: string | null = null;
 
+  // Cleanup sheet state: scan results, outcome, selected targets and progress.
   let sheetStep: SheetStep = "closed";
   let sheetEl: HTMLElement | null = null;
   let foundList: Found[] = [];
@@ -284,20 +308,24 @@ export function buildSystem() {
   let cleaned = 0;
   let cleanTotal = 0;
 
+  // Poll handles; all null while the tab is not on screen.
   let statsTimer: number | null = null;
   let procsTimer: number | null = null;
   let agentsUnsub: (() => void) | null = null;
   let usageRows: BackendSummary[] = [];
   let usageTimer: number | null = null;
+  /** True while the "reset usage?" inline confirm is showing. */
   let usageConfirming = false;
   let shownLocale = getLocale();
 
   // ── Headline and gauges ─────────────────────────────────────────────────
 
+  /** Memory in use as a percentage of total (0 when the total is unknown). */
   function memPercent(s: Stats): number {
     return s.memoryTotal > 0 ? (s.memoryUsed / s.memoryTotal) * 100 : 0;
   }
 
+  /** Updates the status dot, headline and detail line from the worse of CPU and memory. */
   function drawHead(s: Stats) {
     const tone = overallTone(s.cpuPercent, memPercent(s));
     headDot.style.background = `var(--c-${tone})`;
@@ -308,16 +336,19 @@ export function buildSystem() {
     });
   }
 
+  /** Wraps a gauge in a button so clicking it jumps to the relevant pane. */
   function gaugeButton(inner: HTMLElement, onClick: () => void): HTMLElement {
     return h("button", { class: "sys-gauge-btn", onclick: onClick }, inner);
   }
 
+  /** Switches pane programmatically, keeping the switch in step. */
   function goTo(next: Pane) {
     pane = next;
     seg.setValue(next);
     drawPanel();
   }
 
+  /** Rebuilds the CPU, memory and first-drive gauges. */
   function drawGauges(s: Stats) {
     clear(gaugesRow);
     const mem = memPercent(s);
@@ -370,6 +401,7 @@ export function buildSystem() {
 
   // ── Processes pane ───────────────────────────────────────────────────────
 
+  /** Draws the current pane and starts/stops the usage poll to match. */
   function drawPanel() {
     // The usage numbers are polled only while their own pane is on screen.
     if (pane === "usage") startUsagePoll();
@@ -428,6 +460,7 @@ export function buildSystem() {
     }
   }
 
+  /** One process-group row: avatar, name (x count), memory bar and menu (or lock if protected). */
   function procRow(g: ProcGroup, largest: number): HTMLElement {
     const barPct = Math.min(100, (g.memory / largest) * 100);
     const main = h(
@@ -460,6 +493,7 @@ export function buildSystem() {
     return row;
   }
 
+  /** Inline menu of a row: view member processes or end the group. */
   function procMenu(g: ProcGroup): HTMLElement {
     return h(
       "div",
@@ -485,6 +519,10 @@ export function buildSystem() {
     );
   }
 
+  /**
+   * Inline confirmation to end a group; ending sends pid + start time of each
+   * member (so a recycled pid is never killed) and toasts how many failed.
+   */
   function procConfirm(g: ProcGroup): HTMLElement {
     const message = isAgentProcess(g.name)
       ? `${tn("system.endConfirmGroup", g.count, { name: g.name })} ${t("system.agentWarning")}`
@@ -509,6 +547,7 @@ export function buildSystem() {
     });
   }
 
+  /** Expanded list of the group's PIDs and their memory. */
   function procMembers(g: ProcGroup): HTMLElement {
     return h(
       "div",
@@ -526,6 +565,7 @@ export function buildSystem() {
 
   // ── Storage pane ─────────────────────────────────────────────────────────
 
+  /** Drive list with usage bars and the "Free up space" button. */
   function drawStorage() {
     clear(panel);
     if (!stats) return;
@@ -560,6 +600,7 @@ export function buildSystem() {
   // already listens to. See design.md for why this isn't a 4th header tab
   // and doesn't read eventos.jsonl.
 
+  /** Live subagent activity: newest action per agent plus up to five earlier ones. */
   function drawAgents() {
     clear(panel);
     const agents = SubagentActivity.agents;
@@ -591,6 +632,7 @@ export function buildSystem() {
   // Turns, latency, tokens and, only when the source reports one, cost, per
   // backend. Held in memory by Rust for the session; nothing leaves the PC.
 
+  /** Fetches per-backend usage from Rust and redraws if the pane is showing. */
   async function refreshUsage() {
     const rows = await Bridge.usageSummary();
     if (!rows) return;
@@ -598,18 +640,21 @@ export function buildSystem() {
     if (pane === "usage") drawUsage();
   }
 
+  /** Starts the usage poll (idempotent) with an immediate fetch. */
   function startUsagePoll() {
     if (usageTimer != null) return;
     void refreshUsage();
     usageTimer = window.setInterval(() => void refreshUsage(), STATS_POLL_MS);
   }
 
+  /** Stops the usage poll if running. */
   function stopUsagePoll() {
     if (usageTimer == null) return;
     window.clearInterval(usageTimer);
     usageTimer = null;
   }
 
+  /** Usage rows (turns, timings, tokens, cost) plus the reset action with inline confirm. */
   function drawUsage() {
     clear(panel);
     if (usageRows.length === 0) {
@@ -670,6 +715,7 @@ export function buildSystem() {
 
   // ── The cleanup sheet ────────────────────────────────────────────────────
 
+  /** Opens the cleanup sheet and scans the selected targets (nothing is deleted yet). */
   function openSheet() {
     sheetStep = "analyzing";
     drawSheet();
@@ -680,11 +726,13 @@ export function buildSystem() {
     })();
   }
 
+  /** Closes the cleanup sheet. */
   function closeSheet() {
     sheetStep = "closed";
     drawSheet();
   }
 
+  /** Re-mounts the sheet for the current step (it is rebuilt wholesale on every change). */
   function drawSheet() {
     sheetEl?.remove();
     sheetEl = null;
@@ -699,6 +747,7 @@ export function buildSystem() {
     content.append(sheetEl);
   }
 
+  /** Body content for the current sheet step. */
   function sheetBody(): Node {
     if (sheetStep === "analyzing") return sheetSkeleton();
     if (sheetStep === "cleaning") return sheetCleaning();
@@ -706,6 +755,7 @@ export function buildSystem() {
     return sheetResults();
   }
 
+  /** Placeholder rows shown while scanning. */
   function sheetSkeleton(): Node {
     return h(
       "div",
@@ -715,6 +765,7 @@ export function buildSystem() {
     );
   }
 
+  /** Scan results: a toggle row per target, disabled admin-only rows and the Disk Cleanup link when available. */
   function sheetResults(): Node {
     const byId = new Map(foundList.map((f) => [f.id, f]));
     const rows = TARGETS.map((id) => {
@@ -766,6 +817,7 @@ export function buildSystem() {
     return h("div", { class: "sheet-results" }, ...rows, ...disabled, openCleanupLink);
   }
 
+  /** Progress bar while targets are cleaned one by one. */
   function sheetCleaning(): Node {
     const pct = cleanTotal > 0 ? (cleaned / cleanTotal) * 100 : 0;
     return h(
@@ -776,6 +828,7 @@ export function buildSystem() {
     );
   }
 
+  /** Final summary: totals and one line per cleaned target. */
   function sheetResult(): Node {
     const totalFiles = sweptList.reduce((sum, s) => sum + s.files, 0);
     const totalBytes = sweptList.reduce((sum, s) => sum + s.bytes, 0);
@@ -792,6 +845,7 @@ export function buildSystem() {
     );
   }
 
+  /** Footer button: delete (disabled with nothing to delete) or done; none while scanning/cleaning. */
   function sheetFooter(): Node | undefined {
     if (sheetStep === "results") {
       const total = [...chosen].reduce(
@@ -818,6 +872,7 @@ export function buildSystem() {
     return undefined;
   }
 
+  /** Cleans the chosen, non-empty targets sequentially so progress can advance, then refreshes stats. */
   async function startCleaning() {
     const ids = TARGETS.filter((id) => chosen.has(id) && (foundList.find((f) => f.id === id)?.files ?? 0) > 0);
     sheetStep = "cleaning";
@@ -840,6 +895,7 @@ export function buildSystem() {
 
   // ── Polling ──────────────────────────────────────────────────────────────
 
+  /** Polls system stats and redraws headline, gauges and (if idle) the storage pane. */
   async function refresh() {
     const s = await Bridge.systemStats();
     if (!s) return;
@@ -849,6 +905,7 @@ export function buildSystem() {
     if (pane === "storage" && sheetStep === "closed") drawPanel();
   }
 
+  /** Polls the process list and redraws it when that pane is showing. */
   async function refreshProcs() {
     const list = await Bridge.systemProcesses();
     if (!list) return;
@@ -876,6 +933,7 @@ export function buildSystem() {
       drawPanel();
       if (sheetStep !== "closed") drawSheet();
     },
+    /** Starts polling and subscriptions; honours a requested initial pane or an open-cleanup request from State. */
     focus() {
       if (State.systemInitialPane) {
         const initial = State.systemInitialPane;

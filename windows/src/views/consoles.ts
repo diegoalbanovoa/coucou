@@ -7,6 +7,7 @@
 // That toggle is now a user choice (`settings.homeRightPane`), not an
 // auto-detection — someone who configures integrations should still be able
 // to look at their consoles without unconfiguring them first.
+// Built by views.ts for both the overview and the empty (start) screen.
 
 import { h, clear } from "./dom";
 import type { Console } from "../core/bridge";
@@ -24,12 +25,14 @@ import { pushNav } from "../ui/push-nav";
 import { orderConsoles, pages, selectedConsoleMissing, tileStateFor } from "../consoles/order";
 import { consoleColor } from "../consoles/palette";
 
+/** Tiles per grid page (both panes). */
 const PER_PAGE = 4;
 /** How long after a focus a re-scan is worth doing. */
 const RESCAN_AFTER_MS = 5_000;
 /** How long a press has to hold before it counts as "hold to open detail". */
 const HOLD_MS = 500;
 
+/** Timestamp of the last focus-triggered rescan, for throttling. */
 let lastScan = 0;
 
 /**
@@ -87,11 +90,20 @@ function servicePill(task: AgentTask, setFocus: (id: string) => void): HTMLEleme
   return el;
 }
 
+/** Callbacks the host view gives the card. */
 export interface HomeCardOptions {
+  /** Focuses a service pill (overview left card shows it). */
   setFocus: (id: string) => void;
+  /** Called after a console is chosen (the start screen jumps to the chat). */
   onPick?: () => void;
 }
 
+/**
+ * Builds the two-pane card: a segmented switch between a paged grid of
+ * consoles (select, hold/right-click/Shift+Enter for detail, rescan) and the
+ * service pills. Returns a view host; `sync()` redraws only when the visible
+ * data changes shape, so it is cheap to call on every state notification.
+ */
 export function buildHomeRightCard(opts: HomeCardOptions) {
   let pane: "consoles" | "services" = State.settings.homeRightPane;
   let consolePage = 0;
@@ -126,12 +138,14 @@ export function buildHomeRightCard(opts: HomeCardOptions) {
 
   // ── Detail (push-nav) ──────────────────────────────────────────────────────
 
+  /** Pops the detail frame and returns to the grid. */
   function closeDetail() {
     detailId = null;
     nav.pop();
     draw();
   }
 
+  /** Pushes a detail frame for `console`: capabilities, running sessions and a "use" button. */
   function openDetail(console: Console) {
     detailId = console.id;
     const sessions = liveSessionRows();
@@ -175,6 +189,7 @@ export function buildHomeRightCard(opts: HomeCardOptions) {
 
   // ── Rescan ────────────────────────────────────────────────────────────────
 
+  /** Re-detects installed CLIs with a spinner and a toast saying how many are new. */
   async function rescan() {
     const before = new Set(availableClis.map((c) => c.id));
     rescanBtn.classList.add("spinning");
@@ -189,6 +204,11 @@ export function buildHomeRightCard(opts: HomeCardOptions) {
 
   // ── Grid (either pane) ────────────────────────────────────────────────────
 
+  /**
+   * Makes a tile focusable and gives it three ways to open `open`: hold the
+   * pointer 500 ms, right-click, or Shift+Enter. The click that follows a hold
+   * is swallowed so it does not also select the console.
+   */
   function attachHoldAndDetail(el: HTMLElement, open: () => void) {
     el.tabIndex = 0;
     let holdTimer: number | null = null;
@@ -227,6 +247,7 @@ export function buildHomeRightCard(opts: HomeCardOptions) {
     });
   }
 
+  /** Renders the console pane: empty state, page dots, ghost for a missing selection, and the current page of tiles. */
   function drawConsolesGrid() {
     clear(grid);
     grid.classList.toggle("empty", availableClis.length === 0);
@@ -302,6 +323,7 @@ export function buildHomeRightCard(opts: HomeCardOptions) {
     }
   }
 
+  /** Renders the services pane: the first PER_PAGE service pills. */
   function drawServicesGrid() {
     clear(grid);
     dots.style.display = "none";
@@ -321,8 +343,10 @@ export function buildHomeRightCard(opts: HomeCardOptions) {
     draw();
   });
 
+  /** Fingerprint of the data last drawn; sync() skips redraws when unchanged. */
   let shownShape = "";
 
+  /** Redraws the active pane and the running-sessions list below it. */
   function draw() {
     rescanBtn.style.display = pane === "consoles" ? "" : "none";
     if (pane === "consoles") {

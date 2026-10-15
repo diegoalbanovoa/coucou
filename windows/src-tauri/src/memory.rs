@@ -1,10 +1,16 @@
-// Memory for the provider chat (plan v4, Fase 5): notes the user pinned and a
-// cached summary of the part of a long conversation that no longer fits.
-//
-// Stored under `local_dir()/memory/` — data, not preferences. Never a key: the
-// only things written here are the user's own notes and a summary the model
-// wrote. Retrieval is plain keyword scoring (TF-IDF), no crate and no
-// embeddings (those are decision D5b, out of v4).
+//! Memory for the provider chat (plan v4, Fase 5): notes the user pinned and a
+//! cached summary of the part of a long conversation that no longer fits.
+//!
+//! Stored under `local_dir()/memory/` — data, not preferences. Never a key: the
+//! only things written here are the user's own notes and a summary the model
+//! wrote. Retrieval is plain keyword scoring (TF-IDF), no crate and no
+//! embeddings (those are decision D5b, out of v4).
+//!
+//! Callers: the provider chat in `providers` / `lib` (retrieval and summary
+//! cache) and the Settings commands that list, add and delete notes. Every
+//! write goes through a temp file + rename (or a single append), so a crash
+//! never leaves a half-written list. The `*_in(dir, ..)` variants take the
+//! directory explicitly so tests can run in a scratch folder.
 
 use std::collections::{hash_map::DefaultHasher, HashMap};
 use std::hash::{Hash, Hasher};
@@ -15,17 +21,25 @@ use serde::{Deserialize, Serialize};
 
 use crate::platform;
 
+/// Maximum number of notes kept; past it the oldest are dropped.
 pub const MAX_NOTES: usize = 500;
+/// Maximum characters per note; longer text is truncated, not refused.
 pub const MAX_NOTE_CHARS: usize = 2000;
 /// How many notes, and how many characters of them, go along with one turn.
 pub const RETRIEVE_K: usize = 3;
+/// Character budget for all the notes retrieved for one turn (see [`RETRIEVE_K`]).
 pub const RETRIEVE_MAX_CHARS: usize = 2000;
 
+/// One pinned note, a line of `notes.jsonl`. Serialized with camelCase keys
+/// because it also crosses to the frontend.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Note {
+    /// Unique id (UUID v4), used to delete the note.
     pub id: String,
+    /// Creation time, milliseconds since the Unix epoch.
     pub at: u64,
+    /// The note body, trimmed and capped at [`MAX_NOTE_CHARS`].
     pub text: String,
 }
 
@@ -33,29 +47,38 @@ pub struct Note {
 /// what it covers no longer matches, it is regenerated.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct Summary {
+    /// Number of leading messages the summary stands for.
     pub covered: usize,
+    /// Hash of those messages (see [`hash_covered`]); the cache key.
     pub covered_hash: u64,
+    /// The summary text the model wrote.
     pub text: String,
 }
 
+/// Directory holding the memory files (`<local_dir>/memory`).
 pub fn dir() -> PathBuf {
     platform::local_dir().join("memory")
 }
 
+/// Path of the JSON-lines file with the notes, one [`Note`] per line.
 fn notes_file(dir: &Path) -> PathBuf {
     dir.join("notes.jsonl")
 }
 
+/// Path of the single-object JSON file with the cached [`Summary`].
 fn summary_file(dir: &Path) -> PathBuf {
     dir.join("summary.json")
 }
 
+/// Trims and truncates note text to [`MAX_NOTE_CHARS`] characters (not bytes).
 fn cap_text(text: &str) -> String {
     text.trim().chars().take(MAX_NOTE_CHARS).collect()
 }
 
 // ── Notes ─────────────────────────────────────────────────────────────────
 
+/// Reads every note, skipping a UTF-8 BOM and any line that does not parse
+/// (a corrupt line loses only itself). A missing file is an empty list.
 fn read_notes(dir: &Path) -> Vec<Note> {
     let Ok(text) = std::fs::read_to_string(notes_file(dir)) else { return Vec::new() };
     let text = text.strip_prefix('\u{feff}').unwrap_or(&text);
@@ -79,6 +102,9 @@ fn write_notes(dir: &Path, notes: &[Note]) -> std::io::Result<()> {
     std::fs::rename(&temp, &file)
 }
 
+/// Appends a note and returns it. Errors with `InvalidInput` if the text is
+/// empty after trimming. At the cap it rewrites the file without the oldest
+/// notes; below it, a single append avoids rewriting the whole file.
 fn add_note_in(dir: &Path, text: &str, at: u64, id: String) -> std::io::Result<Note> {
     let note = Note { id, at, text: cap_text(text) };
     if note.text.is_empty() {
@@ -102,23 +128,29 @@ fn add_note_in(dir: &Path, text: &str, at: u64, id: String) -> std::io::Result<N
     Ok(note)
 }
 
+/// Saves a new note stamped with the current time and a fresh id. The error
+/// is a display string (empty text or an I/O failure), ready for the UI.
 pub fn add_note(text: &str) -> Result<Note, String> {
     add_note_in(&dir(), text, crate::usage::now_ms(), crate::agent::uuid_v4()).map_err(|e| e.to_string())
 }
 
+/// All notes, oldest first.
 pub fn list_notes() -> Vec<Note> {
     read_notes(&dir())
 }
 
+/// Rewrites the file without the note `id`; an unknown id is not an error.
 fn delete_note_in(dir: &Path, id: &str) -> std::io::Result<()> {
     let notes: Vec<Note> = read_notes(dir).into_iter().filter(|n| n.id != id).collect();
     write_notes(dir, &notes)
 }
 
+/// Deletes one note by id (no-op if absent).
 pub fn delete_note(id: &str) -> Result<(), String> {
     delete_note_in(&dir(), id).map_err(|e| e.to_string())
 }
 
+/// Deletes every note (Settings "clear memory").
 pub fn clear_notes() -> Result<(), String> {
     write_notes(&dir(), &[]).map_err(|e| e.to_string())
 }
@@ -151,6 +183,8 @@ const STOPWORDS: &[&str] = &[
     "mis", "tus", "mio", "mia", "hay", "muy", "sin", "sobre", "entre",
 ];
 
+/// Splits text into normalized alphanumeric words of 3+ characters, dropping
+/// stopwords. Used for both the query and the notes so they compare fairly.
 pub fn tokens(s: &str) -> Vec<String> {
     normalize(s)
         .split(|c: char| !c.is_alphanumeric())
@@ -220,12 +254,15 @@ pub fn hash_covered(messages: &[(String, String)]) -> u64 {
     h.finish()
 }
 
+/// Reads the cached summary, tolerating a UTF-8 BOM. A missing or corrupt
+/// file yields `None` (the summary is then simply regenerated).
 fn read_summary_in(dir: &Path) -> Option<Summary> {
     let bytes = std::fs::read(summary_file(dir)).ok()?;
     let text = bytes.strip_prefix(&[0xEF, 0xBB, 0xBF]).unwrap_or(&bytes);
     serde_json::from_slice(text).ok()
 }
 
+/// Replaces the cached summary atomically (temp file + rename).
 fn write_summary_in(dir: &Path, summary: &Summary) -> std::io::Result<()> {
     platform::ensure_private_dir(dir)?;
     let bytes = serde_json::to_vec(summary).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
@@ -241,10 +278,13 @@ pub fn cached_summary_in(dir: &Path, messages: &[(String, String)]) -> Option<St
     (s.covered == messages.len() && s.covered_hash == hash_covered(messages)).then_some(s.text)
 }
 
+/// [`cached_summary_in`] against the real memory directory.
 pub fn cached_summary(messages: &[(String, String)]) -> Option<String> {
     cached_summary_in(&dir(), messages)
 }
 
+/// Caches `text` as the summary of exactly `messages` (`(role, content)`
+/// pairs). Best effort: a write failure only means it is regenerated later.
 pub fn store_summary(messages: &[(String, String)], text: &str) {
     let s = Summary { covered: messages.len(), covered_hash: hash_covered(messages), text: text.to_string() };
     let _ = write_summary_in(&dir(), &s);

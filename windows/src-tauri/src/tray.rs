@@ -1,4 +1,8 @@
-// Notification-area icon: Open, Settings, Pause, Quit.
+//! Notification-area icon: Open, Settings, Pause, Quit.
+//!
+//! Built once from `setup()`; `Quit` and `Settings` are handled here, any other
+//! item is forwarded to the island window as a `tray` event. The labels follow
+//! the language setting via [`rebuild`].
 
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::TrayIconBuilder;
@@ -7,8 +11,11 @@ use tauri::{AppHandle, Emitter, Wry};
 use crate::i18n::{tr, Key, Locale};
 use crate::island::WINDOW_LABEL;
 
+/// Id used to find the tray icon again in [`rebuild`].
 const TRAY_ID: &str = "coucou";
 
+/// Builds the tray menu with labels in `locale`. Item ids (`open`, `settings`,
+/// `pause`, `quit`) are the contract with the event handler and the front end.
 fn build_menu(app: &AppHandle, locale: Locale) -> tauri::Result<Menu<Wry>> {
     let open = MenuItem::with_id(app, "open", tr(locale, Key::Open), true, None::<&str>)?;
     let settings = MenuItem::with_id(app, "settings", tr(locale, Key::Settings), true, None::<&str>)?;
@@ -19,6 +26,7 @@ fn build_menu(app: &AppHandle, locale: Locale) -> tauri::Result<Menu<Wry>> {
     Menu::with_items(app, &[&open, &sep1, &settings, &pause, &sep2, &quit])
 }
 
+/// Creates the tray icon and wires its menu events. Called once at startup.
 pub fn build(app: &AppHandle, locale: Locale) -> tauri::Result<()> {
     let menu = build_menu(app, locale)?;
 

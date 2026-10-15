@@ -1,17 +1,19 @@
-// Importable skills in the open agentskills.io format (plan v4, Fase 6): a
-// folder with a `SKILL.md` — YAML frontmatter with a `name` and a
-// `description`, then Markdown.
-//
-// A skill here is INSTRUCTIONS and nothing else. Hard rules:
-//   * only `SKILL.md` is ever copied — `scripts/`, `references/` and `assets/`
-//     are not, and nothing from `scripts/` is ever run;
-//   * `allowed-tools` is read and ignored: it approves nothing in advance;
-//   * the model can only get a skill's text through the `load_skill` tool,
-//     which `quick_assistant::dispatch` gates like every other tool.
-//
-// The frontmatter parser is written by hand (no crate). It understands what a
-// SKILL.md needs: top-level `key: value` scalars, quoted or not, plus `>` / `|`
-// block scalars; anything indented under another key (`metadata:`) is skipped.
+//! Importable skills in the open agentskills.io format (plan v4, Fase 6): a
+//! folder with a `SKILL.md` -- YAML frontmatter with a `name` and a
+//! `description`, then Markdown.
+//!
+//! A skill here is INSTRUCTIONS and nothing else. Hard rules:
+//!   * only `SKILL.md` is ever copied -- `scripts/`, `references/` and `assets/`
+//!     are not, and nothing from `scripts/` is ever run;
+//!   * `allowed-tools` is read and ignored: it approves nothing in advance;
+//!   * the model can only get a skill's text through the `load_skill` tool,
+//!     which `quick_assistant::dispatch` gates like every other tool.
+//!
+//! The frontmatter parser is written by hand (no crate). It understands what a
+//! SKILL.md needs: top-level `key: value` scalars, quoted or not, plus `>` / `|`
+//! block scalars; anything indented under another key (`metadata:`) is skipped.
+//! Skills live under the config dir; the settings window imports and lists them
+//! and routines / the quick assistant load them.
 
 use std::path::{Path, PathBuf};
 
@@ -24,6 +26,8 @@ pub const MAX_SKILL_BYTES: u64 = 256 * 1024;
 /// What `load_skill` hands back at most.
 pub const MAX_LOADED_BYTES: usize = 64 * 1024;
 
+/// An installed skill as the model receives it: name, one-line description and
+/// the Markdown body (the frontmatter is stripped).
 #[derive(Clone, Debug, PartialEq)]
 pub struct Skill {
     pub name: String,
@@ -43,6 +47,7 @@ pub struct SkillView {
     pub ignored: Vec<String>,
 }
 
+/// The parsed frontmatter of a SKILL.md, already validated.
 #[derive(Debug, PartialEq)]
 pub struct Frontmatter {
     pub name: String,
@@ -51,6 +56,7 @@ pub struct Frontmatter {
     pub keys: Vec<String>,
 }
 
+/// Folder holding one subfolder per installed skill, each with its `SKILL.md`.
 pub fn skills_dir() -> PathBuf {
     platform::config_dir().join("skills")
 }
@@ -65,6 +71,7 @@ pub fn valid_name(name: &str) -> bool {
         && !name.contains("--")
 }
 
+/// Trims a scalar and removes one pair of matching single or double quotes.
 fn unquote(value: &str) -> String {
     let v = value.trim();
     for q in ['"', '\''] {
@@ -75,6 +82,10 @@ fn unquote(value: &str) -> String {
     v.to_string()
 }
 
+/// Splits a SKILL.md into validated frontmatter and trimmed body.
+/// Errors (user-facing text) if the `---` fences are missing or unclosed, or if
+/// `name` / `description` are absent or invalid (name per [`valid_name`],
+/// description 1 to 1024 characters).
 pub fn parse_skill_md(text: &str) -> Result<(Frontmatter, String), String> {
     let text = text.strip_prefix('\u{feff}').unwrap_or(text);
     let mut lines = text.lines();
@@ -144,6 +155,7 @@ pub fn parse_skill_md(text: &str) -> Result<(Frontmatter, String), String> {
     Ok((Frontmatter { name, description, keys }, body))
 }
 
+/// Reads a SKILL.md as UTF-8, refusing non-files and files over `MAX_SKILL_BYTES`.
 fn read_skill_md(file: &Path) -> Result<String, String> {
     let meta = std::fs::metadata(file).map_err(|_| "there is no SKILL.md in that folder".to_string())?;
     if !meta.is_file() {
@@ -196,10 +208,14 @@ pub fn import_to(root: &Path, src_dir: &Path, replace: bool) -> Result<SkillView
     })
 }
 
+/// Imports a skill from `src_dir` into the user's skills folder; see [`import_to`].
+/// `replace` allows overwriting an installed skill of the same name.
 pub fn import(src_dir: &Path, replace: bool) -> Result<SkillView, String> {
     import_to(&skills_dir(), src_dir, replace)
 }
 
+/// Installed skills under `root`, sorted by name. Entries whose folder name does
+/// not match their frontmatter name, or that fail to parse, are skipped.
 fn list_in(root: &Path, enabled: &[String]) -> Vec<SkillView> {
     let Ok(entries) = std::fs::read_dir(root) else { return Vec::new() };
     let mut out: Vec<SkillView> = entries
@@ -222,10 +238,13 @@ fn list_in(root: &Path, enabled: &[String]) -> Vec<SkillView> {
     out
 }
 
+/// Installed skills, flagged `enabled` when their name is in `enabled`.
 pub fn list(enabled: &[String]) -> Vec<SkillView> {
     list_in(&skills_dir(), enabled)
 }
 
+/// Removes an installed skill. A skill that is already gone is not an error; the
+/// name is validated first so it cannot escape the skills folder.
 pub fn delete(name: &str) -> Result<(), String> {
     if !valid_name(name) {
         return Err("not a skill name".to_string());
@@ -237,6 +256,7 @@ pub fn delete(name: &str) -> Result<(), String> {
     }
 }
 
+/// Loads one skill by name from `root`; `None` if invalid, missing or mismatched.
 fn load_in(root: &Path, name: &str) -> Option<Skill> {
     if !valid_name(name) {
         return None;
@@ -246,6 +266,8 @@ fn load_in(root: &Path, name: &str) -> Option<Skill> {
     (front.name == name).then_some(Skill { name: front.name, description: front.description, body })
 }
 
+/// Loads an installed skill by name, whether or not the user has it enabled
+/// (callers must check `skills_enabled` themselves).
 pub fn load(name: &str) -> Option<Skill> {
     load_in(&skills_dir(), name)
 }

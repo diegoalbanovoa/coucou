@@ -20,6 +20,7 @@ import { MOCK_CHAT_MESSAGES } from "./fixtures/chat";
 import { MOCK_ROUTINES, MOCK_ROUTINE_RESULTS } from "./fixtures/routines";
 import { MOCK_CPU, MOCK_PROCESSES, MOCK_SCENARIOS, MOCK_USAGE, type MockScenario } from "./fixtures/system";
 
+/** Always false: mock mode runs in a plain browser. */
 export const IS_TAURI = false;
 
 // ── URL state (see plan-v2.md § 0.2) ───────────────────────────────────────────
@@ -248,6 +249,7 @@ async function systemProcesses() {
 // Provider profiles: none saved and no Ollama in the browser. The mock stopped
 // loading when chat.ts began importing `providerKeyFor` (provider-chat-profiles)
 // without the mock exporting it; see docs/plan-v4-notas.md, Fase 4.
+/** Mirror of the real `providerKeyFor` in core/bridge.ts (this module replaces that one in mock mode). */
 export function providerKeyFor(id: string): string {
   return `provider-profile-${id}-api-key`;
 }
@@ -464,6 +466,7 @@ const noop = (name: string) => async (...args: unknown[]) => {
   console.info(`[mock] ${name}`, ...args);
 };
 
+/** Drop-in replacement for the real `Bridge`: same method names, fixture-backed or logged no-ops. */
 export const Bridge = {
   boot,
   screenInfo,
@@ -570,6 +573,7 @@ export const Bridge = {
 /** CPU/RAM fixture for whatever Fase 7 wires up to read it meanwhile. */
 export const MOCK_HEALTH = { cpu: MOCK_CPU[scenario], scenario };
 
+/** Mock `onEvent`: never fires; resolves to a no-op unlisten function. */
 export async function onEvent<T>(_name: string, _handler: (payload: T) => void) {
   // No fixture emits events yet — boot-time data covers Fase 0's four views.
   // Later phases (console rescans, health changes, hook sessions) add fixture
@@ -577,6 +581,7 @@ export async function onEvent<T>(_name: string, _handler: (payload: T) => void) 
   return () => {};
 }
 
+/** Mock `onDragDrop`: never fires (a static capture seeds `State.fileDragOver` instead). */
 export async function onDragDrop(_handler: (e: { type: string; paths?: string[] }) => void) {
   return () => {};
 }

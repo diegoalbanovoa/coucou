@@ -1,19 +1,24 @@
-// The island chat, run through the agent CLIs already installed on this
-// machine — Claude Code first among them.
-//
-// The alternative was our own tool loop against the Anthropic API, which would
-// need an API key, reimplement a worse version of tools the CLI already has,
-// and know nothing about the user's CLAUDE.md. Shelling out to `claude -p`
-// instead means the chat gets the real agent: the user's own subscription,
-// every tool Claude Code ships, their skills and MCP servers, and their
-// CLAUDE.md — including, for this user, where the Obsidian vault lives.
-//
-// Permissions come for free and are the nicest part: the session we spawn runs
-// the hooks in ~/.claude/settings.json, so its PreToolUse/PermissionRequest
-// events reach Coucou through coucou-hook and the named pipe like any other
-// session, and the island shows its existing Allow / Deny card. Headless mode
-// has no terminal to fall back on, so the island is the only thing that can
-// answer — which is exactly the point.
+//! The island chat, run through the agent CLIs already installed on this
+//! machine — Claude Code first among them.
+//!
+//! The alternative was our own tool loop against the Anthropic API, which would
+//! need an API key, reimplement a worse version of tools the CLI already has,
+//! and know nothing about the user's CLAUDE.md. Shelling out to `claude -p`
+//! instead means the chat gets the real agent: the user's own subscription,
+//! every tool Claude Code ships, their skills and MCP servers, and their
+//! CLAUDE.md — including, for this user, where the Obsidian vault lives.
+//!
+//! Permissions come for free and are the nicest part: the session we spawn runs
+//! the hooks in ~/.claude/settings.json, so its PreToolUse/PermissionRequest
+//! events reach Coucou through coucou-hook and the named pipe like any other
+//! session, and the island shows its existing Allow / Deny card. Headless mode
+//! has no terminal to fall back on, so the island is the only thing that can
+//! answer — which is exactly the point.
+//!
+//! The chat commands in `lib.rs` call `send_measured`; `consoles.rs` supplies
+//! the CLI table and `agents.rs` the per-CLI tunables read on every turn. A
+//! turn always runs inside an attached project folder, never in Coucou's own
+//! working directory, and the child process is killed on cancel or timeout.
 
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -44,12 +49,14 @@ const MAX_OUTPUT: usize = 100_000;
 pub struct SlashCommand {
     /// Without the slash.
     pub name: String,
+    /// One-line summary from the file's front matter (may be empty).
     pub description: String,
     /// "user", "project" or "skill" — where it came from.
     pub source: &'static str,
 }
 
-/// What `/` can reach in the current project.
+/// What `/` can reach in the current project: user commands, project commands
+/// and user skills, sorted by name and de-duplicated (first source wins).
 ///
 /// These are read off disk rather than asked of the CLI: `claude` has no
 /// headless "list my commands" flag, and the layout under ~/.claude is the
@@ -85,6 +92,8 @@ pub fn slash_commands(project: &Project) -> Vec<SlashCommand> {
     out
 }
 
+/// Appends every `*.md` file in `dir` as a command named after its file stem.
+/// A missing or unreadable directory is simply skipped.
 fn collect_commands(dir: &Path, source: &'static str, out: &mut Vec<SlashCommand>) {
     let Ok(entries) = std::fs::read_dir(dir) else { return };
     for entry in entries.flatten() {
@@ -205,6 +214,9 @@ pub fn folder_for_turn(attached: Option<PathBuf>, default: Option<&str>) -> Opti
 pub struct Project(Mutex<Option<PathBuf>>);
 
 impl Project {
+    /// Attaches the folder at `path`, snapped up to its project root (see
+    /// `root_of`). Returns the root as shown to the user, or a user-facing
+    /// error when `path` is not a folder or cannot be opened.
     pub fn attach(&self, path: &str) -> Result<String, String> {
         let root = PathBuf::from(path);
         if !root.is_dir() {
@@ -227,10 +239,12 @@ impl Project {
         Ok(shown)
     }
 
+    /// Forgets the attached project; turns refuse to run until one is attached.
     pub fn detach(&self) {
         *self.0.lock().unwrap() = None;
     }
 
+    /// The attached project root, if any.
     pub fn current(&self) -> Option<PathBuf> {
         self.0.lock().unwrap().clone()
     }
@@ -244,14 +258,18 @@ impl Project {
 pub struct Session(Mutex<Option<String>>);
 
 impl Session {
+    /// The id of the conversation being continued, if one has started.
     pub fn current(&self) -> Option<String> {
         self.0.lock().unwrap().clone()
     }
 
+    /// Records the id minted for a new conversation.
     pub fn set(&self, id: String) {
         *self.0.lock().unwrap() = Some(id);
     }
 
+    /// Forgets the conversation so the next message starts a fresh one (after a
+    /// failed resume, or when the user clears the chat).
     pub fn reset(&self) {
         *self.0.lock().unwrap() = None;
     }
@@ -307,6 +325,7 @@ impl Cancel {
         flag
     }
 
+    /// Clears the flag once the turn has ended, so `stop` reports nothing to stop.
     pub(crate) fn disarm(&self) {
         *self.0.lock().unwrap() = None;
     }
@@ -331,10 +350,14 @@ impl Cancel {
 /// blocks are the fallback for a CLI that ignores --include-partial-messages.
 #[derive(Default)]
 pub struct Stream {
+    /// Set once any `stream_event` text delta arrives; from then on whole
+    /// `assistant` text blocks are ignored to avoid duplicates.
     saw_delta: bool,
     /// Everything emitted as text, in case no `result` line ever arrives.
     text: String,
+    /// The `result` line's text; authoritative over `text` when present.
     result: Option<String>,
+    /// Whether the `result` line reported an error or a non-success subtype.
     failed: bool,
     /// What the `result` line reported about tokens and cost.
     usage: Usage,
@@ -394,6 +417,7 @@ impl Stream {
         }
     }
 
+    /// Records streamed text for the fallback reply and wraps it as a [`Turn`].
     fn keep(&mut self, text: &str) -> Turn {
         self.text.push_str(text);
         Turn::Text { text: text.to_string() }
@@ -455,15 +479,20 @@ fn step_label(block: &Value) -> String {
     format!("{name} {}", first_chars(&shown.replace('\n', " "), 60))
 }
 
-/// One chat turn, run through the chosen CLI in the attached project.
 /// What the agent is allowed to reach beyond the project, and what it is told
 /// about it. The vault is resolved from settings by the caller: agent.rs has no
 /// business knowing where notes live.
 pub struct Knowledge {
+    /// Notes folder granted to the agent with `--add-dir` (streaming CLIs only).
     pub vault: Option<PathBuf>,
+    /// Text telling the agent about the vault: appended to the system prompt, or
+    /// put before the first message for CLIs with no such flag.
     pub briefing: Option<String>,
 }
 
+/// One chat turn, run through the chosen CLI in the attached project.
+/// Returns the reply, or a user-facing error. `on` receives streamed text and
+/// tool steps as they happen. See [`send_measured`] for the full contract.
 #[cfg_attr(not(test), allow(dead_code))] // the app calls `send_measured`; the tests use this
 pub async fn send(
     project: &Project,
@@ -481,6 +510,11 @@ pub async fn send(
 /// `usage_out` (left as it was for a CLI that reports none). An out-parameter
 /// rather than a changed return type, so `send` and its callers stay as they
 /// were.
+///
+/// Errors (all user-facing strings): unknown or uninstalled CLI, no project
+/// attached, a failed or cancelled/timed-out turn. Builds the command line from
+/// the CLI table plus `agents::load` tunables, whose `extra_args` go last so
+/// they can override anything.
 #[allow(clippy::too_many_arguments)]
 pub async fn send_measured(
     project: &Project,
@@ -583,7 +617,10 @@ pub async fn send_measured(
     }
 }
 
-/// A turn whose output is read as it comes, line by line.
+/// A turn whose output is read as it comes, line by line (Claude Code's
+/// stream-json). Honours `cancel` and `timeout`, killing the child on either;
+/// resets the session if a resumed turn fails so the chat is not stranded on a
+/// dead id.
 ///
 /// The lines are read in their own task and arrive over a channel rather than
 /// being awaited here directly: a channel receive can be abandoned without
@@ -694,6 +731,8 @@ async fn stream_turn(
 }
 
 /// A turn from a CLI with no streaming output format: one wait, one answer.
+/// Not cancellable mid-turn; the timeout drops the future, and `kill_on_drop`
+/// (set in `send_measured`) ends the process.
 async fn one_shot(
     mut cmd: Command,
     session: &Session,

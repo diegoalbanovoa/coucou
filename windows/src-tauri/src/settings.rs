@@ -1,5 +1,11 @@
-// Preferences, stored as plain JSON in settings.json under platform::config_dir().
-// No secret ever lands here — API keys live in the OS keychain (see secrets.rs).
+//! Preferences, stored as plain JSON in settings.json under platform::config_dir().
+//! No secret ever lands here -- API keys live in the OS keychain (see secrets.rs).
+//!
+//! Loading never fails and never loses data: a missing file gives the defaults, a
+//! partly bad file keeps its good fields (`salvage`), and a file that cannot be
+//! used is copied aside before anything may overwrite it (`set_aside`,
+//! `NOT_LOADED`). Saving writes a temporary file and renames it over the target
+//! so a crash leaves the previous settings intact.
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -12,14 +18,21 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Settings {
+    /// Master switch for the island's sounds.
     pub sound_enabled: bool,
+    /// Sound volume, 0.0 to 1.0.
     pub sound_volume: f64,
+    /// Seconds of inactivity before the expanded island closes by itself.
     pub auto_close_interval: f64,
+    /// Seconds without activity before Mochi shows it is idle or away.
     pub absence_interval: f64,
+    /// Pill ids of the integrations shown; ids are stable contract values.
     pub active_integrations: Vec<String>,
     /// "primary" = the main display, "cursor" = whichever display the mouse is on.
     pub screen: String,
+    /// Whether Coucou starts with the user session (reconciled with the OS at boot).
     pub autostart: bool,
+    /// Whether the agent hooks were installed by the user; set after the confirm step.
     pub hooks_installed: bool,
     /// The folder the island chat runs in. Remembered so that a restart comes
     /// back to the project the user was working in rather than to nothing.
@@ -83,11 +96,15 @@ pub struct Settings {
 
     // ── Memory (plan v4, Fase 5). Both off: nothing is remembered unless the
     // user turns it on, and the summary costs one more model call.
+    /// Whether the assistant remembers across conversations. Off by default.
     pub memory_enabled: bool,
+    /// Whether a model call summarises each conversation into memory. Off by
+    /// default because it costs a request.
     pub memory_auto_summary: bool,
 
     // Skills (plan v4, Fase 6): the imported skills the model may load with
     // `load_skill`. Imported ones start out off.
+    /// Names of imported skills the model may load with `load_skill`.
     pub skills_enabled: Vec<String>,
 }
 
@@ -97,8 +114,11 @@ pub struct Settings {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct AllowedApp {
+    /// Stable id of the allowed app.
     pub id: String,
+    /// Display name shown in the settings window.
     pub label: String,
+    /// Absolute path of the resolved executable that `open_app` launches.
     pub exe: String,
 }
 
@@ -146,18 +166,24 @@ impl Default for Settings {
 
 pub use crate::platform::{config_dir, local_dir};
 
+/// Where the `coucou-hook` relay binary is installed (local, not roaming).
 pub fn hook_exe_path() -> PathBuf {
     local_dir().join("bin").join(crate::platform::HOOK_EXE)
 }
 
+/// Full path of settings.json.
 fn settings_path() -> PathBuf {
     config_dir().join("settings.json")
 }
 
+/// Loads the settings, falling back to defaults without ever failing. A file that
+/// exists but cannot be used is kept, not overwritten; see [`load_from`].
 pub fn load() -> Settings {
     load_from(&settings_path())
 }
 
+/// Saves the settings, creating the private config dir first. Errors if a file
+/// that was never loaded cannot be preserved, or on I/O failure.
 pub fn save(settings: &Settings) -> std::io::Result<()> {
     let dir = config_dir();
     crate::platform::ensure_private_dir(&dir)?;
@@ -173,6 +199,7 @@ const MAX_COPIES_PER_SECOND: u32 = 100;
 /// must not quietly replace them — see `keep_what_was_not_loaded`.
 static NOT_LOADED: Mutex<Vec<PathBuf>> = Mutex::new(Vec::new());
 
+/// Locks `NOT_LOADED`, ignoring poisoning (the list is still valid).
 fn not_loaded() -> MutexGuard<'static, Vec<PathBuf>> {
     NOT_LOADED.lock().unwrap_or_else(PoisonError::into_inner)
 }

@@ -1,8 +1,17 @@
 // Minimal DOM helpers — no framework, as specified.
+// Imported by practically every view and ui component.
 
+/** Attribute bag for [h]: `on*` keys with a function value become listeners. */
 type Attrs = Record<string, string | number | boolean | EventListener | undefined>;
+/** Anything [h] accepts as a child; null/undefined/false are skipped. */
 type Child = Node | string | null | undefined | false;
 
+/**
+ * Hyperscript-style element factory. Special keys: `class`, `text`
+ * (textContent), `html` (innerHTML — callers must pass trusted markup only),
+ * `style` (raw attribute string) and `onclick`-style listeners; `true` sets a
+ * boolean attribute, `false`/null skips it. Strings are added as text nodes.
+ */
 export function h<K extends keyof HTMLElementTagNameMap>(
   tag: K,
   attrs: Attrs = {},
@@ -26,6 +35,7 @@ export function h<K extends keyof HTMLElementTagNameMap>(
   return el;
 }
 
+/** Removes every child of `el`. */
 export function clear(el: Element) {
   while (el.firstChild) el.removeChild(el.firstChild);
 }

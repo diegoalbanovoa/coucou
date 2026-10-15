@@ -14,7 +14,10 @@
 // Replaced a set of filled paths ported from the macOS app's SF Symbols. Kept
 // their names where the meaning is the same, so the island's vocabulary did not
 // change along with its drawing.
+//
+// Used through `icon(name)` by every view and ui component.
 
+/** One icon: a list of SVG path strings on the 24x24 grid. */
 export interface IconDef {
   /** Paths on the 24×24 grid. */
   d: string[];
@@ -25,6 +28,7 @@ export interface IconDef {
 /** Line weight every stroked icon is drawn with. */
 export const STROKE = 1.75;
 
+/** The icon catalogue; add a name here and `IconName` picks it up. */
 export const ICONS = {
   // ── Navigation and chrome ────────────────────────────────────────────────
   house: { d: ["M3.2 11.2 12 4l8.8 7.2", "M5.6 9.8V20h12.8V9.8", "M10 20v-5.2h4V20"] },
@@ -126,8 +130,10 @@ export const ICONS = {
   disk: { d: ["M3.6 12.4h16.8v6H3.6z", "M6.2 5.2h11.6l2.6 7.2H3.6z", "M6.6 15.4h.02", "M17.4 15.4h3"] },
 } as const satisfies Record<string, IconDef>;
 
+/** Every valid icon name (keys of [ICONS]). */
 export type IconName = keyof typeof ICONS;
 
+/** SVG namespace for createElementNS. */
 const NS = "http://www.w3.org/2000/svg";
 
 /**

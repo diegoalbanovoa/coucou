@@ -1,22 +1,22 @@
-// A configuration file per agent CLI, under config_dir()/agents/.
-//
-// The table in agent.rs says how each CLI is driven, and a table in a binary
-// is a thing only a rebuild can change. When a CLI gains a flag, or a turn
-// needs longer than ten minutes, or an agent should be allowed to reach one
-// more folder, that is a line in a JSON file now.
-//
-// What the file holds is two halves, and the distinction matters:
-//
-//   - what Coucou found      (id, label, exe, promptArgs, streams)
-//     Written for the reader and refreshed on every launch. Editing these
-//     changes nothing — they are overwritten from what was detected.
-//   - what you can change    (extraArgs, turnTimeoutSeconds, extraDirs)
-//     Read back on every turn, so an edit takes effect from the next message
-//     without restarting anything.
-//
-// Claude Code is the one mapped today; the file is written for whichever CLIs
-// are found, because the shape is per-CLI and a claude.json that existed while
-// a gemini.json did not would be the surprising behaviour.
+//! A configuration file per agent CLI, under config_dir()/agents/.
+//!
+//! The table in agent.rs says how each CLI is driven, and a table in a binary
+//! is a thing only a rebuild can change. When a CLI gains a flag, or a turn
+//! needs longer than ten minutes, or an agent should be allowed to reach one
+//! more folder, that is a line in a JSON file now.
+//!
+//! What the file holds is two halves, and the distinction matters:
+//!
+//!   - what Coucou found      (id, label, exe, promptArgs, streams)
+//!     Written for the reader and refreshed on every launch. Editing these
+//!     changes nothing — they are overwritten from what was detected.
+//!   - what you can change    (extraArgs, turnTimeoutSeconds, extraDirs)
+//!     Read back on every turn, so an edit takes effect from the next message
+//!     without restarting anything.
+//!
+//! Claude Code is the one mapped today; the file is written for whichever CLIs
+//! are found, because the shape is per-CLI and a claude.json that existed while
+//! a gemini.json did not would be the surprising behaviour.
 
 use std::path::{Path, PathBuf};
 
@@ -36,7 +36,9 @@ const TURN_SECONDS_RANGE: std::ops::RangeInclusive<u64> = 10..=7200;
 #[serde(rename_all = "camelCase", default)]
 pub struct AgentConfig {
     // ── what Coucou found: overwritten, not read ──
+    /// Stable CLI id; also the file stem (`claude` -> `claude.json`).
     pub id: String,
+    /// Human-readable name shown in the UI.
     pub label: String,
     /// Where it was found. Worth seeing: which copy runs is what surprises
     /// people with four package managers installed.
@@ -55,6 +57,7 @@ pub struct AgentConfig {
     pub extra_dirs: Vec<String>,
 }
 
+/// Defaults for every field; the timeout is [`DEFAULT_TURN_SECONDS`].
 impl Default for AgentConfig {
     fn default() -> Self {
         Self {
@@ -90,10 +93,12 @@ impl AgentConfig {
     }
 }
 
+/// Directory holding the per-CLI JSON files (`config_dir()/agents`).
 pub fn dir() -> PathBuf {
     platform::config_dir().join("agents")
 }
 
+/// Path of the config file for the CLI `id`.
 pub fn path_for(id: &str) -> PathBuf {
     dir().join(format!("{id}.json"))
 }
@@ -140,6 +145,8 @@ pub fn ensure(id: &str, label: &str, exe: &Path, prompt_args: &[&str], streams: 
     fresh
 }
 
+/// Writes the config atomically (temp file + rename) into a private directory.
+/// Returns the I/O error so `ensure` can log it instead of failing a turn.
 fn write(id: &str, config: &AgentConfig) -> std::io::Result<()> {
     platform::ensure_private_dir(&dir())?;
     let bytes = serde_json::to_vec_pretty(config)

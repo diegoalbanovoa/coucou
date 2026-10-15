@@ -1,12 +1,14 @@
-// The routine scheduler (plan v4, Fase 7). The webview only SCHEDULES — with
-// `setTimeout` and local time, so no time zone is ever computed in Rust — and
-// tells Rust which routine's hour has come; Rust RUNS it (key, tools through
-// `dispatch`, approvals). Nothing here touches a key or a process.
-//
-// No polling: one timer, at most 30 minutes long, and none at all when no
-// routine is switched on. A long sleep (the machine suspended) is caught on
-// waking: a routine that is up to an hour late still runs (D7b), a later one is
-// recorded as missed.
+/**
+ * The routine scheduler (plan v4, Fase 7). The webview only SCHEDULES — with
+ * `setTimeout` and local time, so no time zone is ever computed in Rust — and
+ * tells Rust which routine's hour has come; Rust RUNS it (key, tools through
+ * `dispatch`, approvals). Nothing here touches a key or a process.
+ *
+ * No polling: one timer, at most 30 minutes long, and none at all when no
+ * routine is switched on. A long sleep (the machine suspended) is caught on
+ * waking: a routine that is up to an hour late still runs (D7b), a later one is
+ * recorded as missed. Started from main.ts; the digest it opens is views/digest.ts.
+ */
 
 import { Bridge, onEvent, type Routine, type RoutineResult } from "../core/bridge";
 import { State } from "../core/state";
@@ -18,6 +20,7 @@ export const LATE_WINDOW_MS = 60 * 60_000;
 export const MAX_SLEEP_MS = 30 * 60_000;
 const MIN_SLEEP_MS = 1_000;
 
+/** A routine occurrence: which routine and the local time it falls due. */
 export interface Due {
   id: string;
   at: Date;
@@ -112,17 +115,25 @@ export function showDigest(host: DigestHost) {
   host.alert("digest");
 }
 
+/**
+ * Starts the scheduler: loads the routines, arms one timer, and listens for
+ * "routines-changed", "settings-changed" and "routine-result". Call once.
+ */
 export function startRoutineScheduler(host: DigestHost) {
   let routines: Routine[] = [];
+  /** Everything due up to this instant has been handled; `tick` looks past it. */
   let cursor = new Date();
   let timer: number | null = null;
+  /** Guards against a second tick starting while one is still awaiting Rust. */
   let running = false;
 
+  /** Clears the pending timer. */
   function disarm() {
     if (timer != null) window.clearTimeout(timer);
     timer = null;
   }
 
+  /** Sleeps until the next due routine (capped), or does nothing if none is on. */
   function arm() {
     disarm();
     const now = new Date();
@@ -131,10 +142,12 @@ export function startRoutineScheduler(host: DigestHost) {
     timer = window.setTimeout(() => void tick(), sleepFor(next.at, now));
   }
 
+  /** Re-reads the routine list from Rust. */
   async function reload() {
     routines = (await Bridge.routineList()) ?? [];
   }
 
+  /** Runs (or records as missed) whatever came due since `cursor`, then re-arms. */
   async function tick() {
     disarm();
     if (running) return;

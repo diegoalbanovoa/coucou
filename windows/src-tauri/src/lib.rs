@@ -1,4 +1,18 @@
-// Coucou for Windows — app wiring and the commands the island calls.
+//! Coucou for Windows — app wiring and the commands the island calls.
+//!
+//! This crate root declares every module, registers the Tauri plugins and
+//! managed state, and holds the `#[tauri::command]` functions the webviews
+//! (island and settings window) invoke. Most commands are thin: they validate
+//! input, delegate to a module (`agent`, `providers`, `quick_assistant`,
+//! `hooks`, ...) and push the new state back to the page as events.
+//!
+//! Rules that are not visible in the code: the settings mutex is never held
+//! across an `.await` or file I/O (take a copy with `shared_settings`, change
+//! with `remember`); native dialogs go through `choose_folder` so only one is
+//! ever open; commands that can delete or run something re-check the guard in
+//! Rust rather than trusting the webview; and `hooks_apply` is only ever reached
+//! from an explicit click so `~/.claude/settings.json` is never touched silently.
+//! `main.rs` calls [`run`].
 
 mod agent;
 mod agents;
@@ -44,23 +58,33 @@ use island::{PollGate, ScreenInfo};
 use pipe::Pending;
 use settings::Settings;
 
+/// Tauri managed state shared by all commands and background tasks.
 pub struct Shared {
+    /// The live settings. Lock briefly and never across an `.await`.
     pub settings: Mutex<Settings>,
+    /// State the cursor poll and click-through logic read (collapsed flag,
+    /// island rectangle, active flag).
     pub gate: Arc<PollGate>,
 }
 
+/// Everything the island needs once, at startup (returned by `boot`).
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BootInfo {
+    /// Stored settings, with `hooks_installed` replaced by the real state.
     settings: Settings,
+    /// Monitor geometry for the island's placement.
     screen: ScreenInfo,
+    /// App version from `Cargo.toml`.
     version: String,
+    /// Absolute path of the `coucou-hook` relay executable.
     hook_path: String,
     /// False where the OS has no global cursor (Wayland): the page then reports
     /// the cursor from its own mouse events.
     cursor_poll: bool,
 }
 
+/// Frontend: no arguments. Returns [`BootInfo`] for the first render.
 #[tauri::command]
 fn boot(app: AppHandle, shared: State<Shared>) -> BootInfo {
     let mut settings = shared.settings.lock().unwrap().clone();
@@ -84,6 +108,12 @@ fn screen_info(app: AppHandle, shared: State<Shared>) -> ScreenInfo {
     island::screen_info(&app, &pref)
 }
 
+/// Frontend sends the full edited `Settings`; nothing is returned.
+///
+/// Stores and persists them, then applies the side effects of what changed:
+/// first poll for newly enabled integrations, autostart registration, island
+/// geometry, tray menu. Finally broadcasts `settings-changed` so the other
+/// window stays in step. A failed disk write is only logged.
 #[tauri::command]
 fn save_settings(app: AppHandle, shared: State<Shared>, settings: Settings) {
     let (screen_changed, autostart_changed, switched_on) = {
@@ -249,6 +279,9 @@ fn set_island_rect(app: AppHandle, shared: State<Shared>, x: f64, y: f64, width:
     }
 }
 
+/// Frontend passes whether the island needs keyboard focus (e.g. the chat
+/// input). The window is non-activating by default so it never steals focus
+/// from the user's app; this toggles that for the typing case.
 #[tauri::command]
 fn focus_window(app: AppHandle, focused: bool) {
     let Some(win) = island::window(&app) else { return };
@@ -258,6 +291,8 @@ fn focus_window(app: AppHandle, focused: bool) {
     }
 }
 
+/// Re-applies the island's window geometry for the current screen preference
+/// (e.g. after a display change). No arguments, nothing returned.
 #[tauri::command]
 fn reposition(app: AppHandle, shared: State<Shared>) {
     let pref = shared.settings.lock().unwrap().screen.clone();
@@ -265,6 +300,9 @@ fn reposition(app: AppHandle, shared: State<Shared>) {
     island::apply_geometry(&app, &pref, collapsed);
 }
 
+/// Opens `url` in the default browser. Only `http(s)` URLs are honoured; any
+/// other scheme is silently ignored so the webview cannot launch arbitrary
+/// handlers. Called by the frontend and by [`open_n8n`].
 #[tauri::command]
 fn open_url(url: String) {
     if !(url.starts_with("http://") || url.starts_with("https://")) {
@@ -275,6 +313,10 @@ fn open_url(url: String) {
 
 /// "Open terminal" opens the working folder in VS Code when `code` is on PATH,
 /// and falls back to the file manager otherwise.
+///
+/// Frontend passes an optional folder path. Returns `true` only when VS Code
+/// was started; `false` for the fallback or when the path is refused (not an
+/// absolute existing directory).
 #[tauri::command]
 fn open_in_vscode(path: Option<String>) -> bool {
     // No shell anywhere near this. The path is a project folder chosen by
@@ -306,6 +348,7 @@ fn open_in_vscode(path: Option<String>) -> bool {
     false
 }
 
+/// Exits the whole application (tray / island "Quit").
 #[tauri::command]
 fn quit_app(app: AppHandle) {
     app.exit(0);
@@ -320,6 +363,7 @@ fn set_paused(paused: bool) {
 
 // ── Claude Code hooks ─────────────────────────────────────────────────────────
 
+/// Whether the Coucou hooks are currently present in Claude Code's settings.
 #[tauri::command]
 fn hooks_status() -> HookStatus {
     hooks::status()
@@ -332,6 +376,10 @@ fn hooks_preview(install: bool) -> Result<HookPreview, String> {
 }
 
 /// Only ever called from an explicit click in the settings window.
+///
+/// Frontend sends `install` (add or remove the hooks) and the `fingerprint`
+/// from the preview. Returns the path of the dated backup of the settings file
+/// it just wrote, or an error string (including a changed-since-preview file).
 #[tauri::command]
 fn hooks_apply(
     app: AppHandle,
@@ -354,6 +402,9 @@ fn hooks_apply(
     Ok(backup)
 }
 
+/// The user's click on an approval card: `decision` is `allow`, `always` or
+/// anything else (deny). Routed by id prefix to the quick assistant or to the
+/// Claude Code hook relay; nothing is returned.
 #[tauri::command]
 fn approval_decision(app: AppHandle, request_id: String, decision: String) {
     if quick_assistant::is_quick_id(&request_id) {
@@ -422,6 +473,7 @@ struct AgentState {
     resuming: bool,
 }
 
+/// Frontend: no arguments. Returns the [`AgentState`] to restore the chat.
 #[tauri::command]
 fn agent_state(app: AppHandle, shared: State<Shared>) -> AgentState {
     AgentState {
@@ -446,6 +498,9 @@ fn agent_commands(app: AppHandle) -> Vec<agent::SlashCommand> {
 }
 
 /// Attaches the folder the agent runs in. Nothing runs until one is chosen.
+///
+/// Frontend sends a folder path; returns the project's display name or an
+/// error string. Also drops the current CLI session and persists the choice.
 #[tauri::command]
 fn attach_project(app: AppHandle, path: String) -> Result<String, String> {
     let name = app.state::<agent::Project>().attach(&path)?;
@@ -461,6 +516,8 @@ fn attach_project(app: AppHandle, path: String) -> Result<String, String> {
     Ok(name)
 }
 
+/// Detaches the project and forgets the CLI session, both in memory and in
+/// the stored settings.
 #[tauri::command]
 fn detach_project(app: AppHandle) {
     app.state::<agent::Project>().detach();
@@ -511,6 +568,8 @@ fn settings_or_island(app: &AppHandle) -> Option<tauri::WebviewWindow> {
     app.get_webview_window("settings").or_else(|| island::window(app))
 }
 
+/// Opens the native folder picker over the island. Returns the chosen path,
+/// or `None` if cancelled or another picker is already open.
 #[tauri::command]
 async fn pick_project(app: AppHandle) -> Option<String> {
     choose_folder(island::window(&app)?).await
@@ -519,6 +578,8 @@ async fn pick_project(app: AppHandle) -> Option<String> {
 /// The paperclip's native multi-select picker (plan-v2.md § 5.3) — any kind
 /// of file, any number. Shares `PICKING` with `choose_folder`: two native
 /// dialogs open at once would be confusing, whichever two they are.
+///
+/// Returns the chosen paths (empty if cancelled or a picker is already open).
 #[tauri::command]
 async fn pick_files(app: AppHandle, shared: State<'_, Shared>) -> Result<Vec<String>, ()> {
     let Some(win) = island::window(&app) else { return Ok(Vec::new()) };
@@ -542,6 +603,11 @@ async fn pick_files(app: AppHandle, shared: State<'_, Shared>) -> Result<Vec<Str
 /// One agent turn through the chosen CLI. Its tool calls come back to the
 /// island as ordinary hook events, and its permission card is the one Claude
 /// Code sessions already use.
+///
+/// Frontend sends the CLI id and the prompt; returns the final reply text or
+/// an error string. Streams `agent-turn` events meanwhile, records usage in
+/// the ledger, attaches the default chat folder if nothing is attached, and
+/// persists the CLI session id if the turn changed it.
 #[tauri::command]
 async fn agent_send(app: AppHandle, cli: String, prompt: String) -> Result<String, String> {
     let before = app.state::<agent::Session>().current();
@@ -614,6 +680,7 @@ fn chat_load() -> Vec<transcript::Message> {
     transcript::load()
 }
 
+/// Saves the visible conversation so it survives a restart.
 #[tauri::command]
 fn chat_keep(messages: Vec<transcript::Message>) {
     transcript::save(&messages);
@@ -736,6 +803,7 @@ struct FolderState {
     exists: bool,
 }
 
+/// Returns the default chat folder and whether it still exists on disk.
 #[tauri::command]
 fn chat_folder_state(app: AppHandle) -> FolderState {
     let path = shared_settings(&app).default_chat_folder.unwrap_or_default();
@@ -743,6 +811,8 @@ fn chat_folder_state(app: AppHandle) -> FolderState {
     FolderState { path, exists }
 }
 
+/// Opens the folder picker and stores the choice as the default chat folder.
+/// Returns the chosen path, or `None` if cancelled.
 #[tauri::command]
 async fn pick_chat_folder(app: AppHandle) -> Option<String> {
     let picked = choose_folder(settings_or_island(&app)?).await?;
@@ -752,6 +822,7 @@ async fn pick_chat_folder(app: AppHandle) -> Option<String> {
     Some(picked)
 }
 
+/// Clears the default chat folder.
 #[tauri::command]
 fn forget_chat_folder(app: AppHandle) {
     remember(&app, |s| s.default_chat_folder = None);
@@ -769,13 +840,18 @@ fn agent_cancel(app: AppHandle) -> bool {
 
 // ── Chat-only provider profiles (openspec/changes/provider-chat-profiles) ──
 
+/// Payload of [`provider_save`]: the editable fields of a profile. The API key
+/// is deliberately not here; it goes through the `secret_*` commands.
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ProviderSaveInput {
     /// Absent or empty creates a new profile; otherwise updates this one.
     id: Option<String>,
+    /// Display name.
     label: String,
+    /// Endpoint root (a trailing slash is trimmed on save).
     base_url: String,
+    /// Model identifier sent with each request.
     model: String,
 }
 
@@ -788,6 +864,8 @@ fn provider_list() -> Vec<providers::ProviderProfileView> {
     providers::list()
 }
 
+/// Creates or updates a provider profile from [`ProviderSaveInput`]. Returns
+/// the saved profile as the frontend sees it, or the I/O error as a string.
 #[tauri::command]
 fn provider_save(input: ProviderSaveInput) -> Result<providers::ProviderProfileView, String> {
     let profile = match input.id.filter(|id| !id.is_empty()) {
@@ -808,6 +886,10 @@ fn provider_delete(id: String) -> Result<(), String> {
 /// `agent::Turn::Text` on the same `"agent-turn"` event `agent_send` uses,
 /// so the chat's rendering code needs no new branch for where a chunk of
 /// text came from.
+///
+/// Frontend sends the profile id, the prompt and the visible `history`
+/// (optional). Returns the full reply text, or a `<kind>:<detail>` error the
+/// chat localizes. Usage is recorded in the ledger either way.
 #[tauri::command]
 async fn provider_send(
     app: AppHandle,
@@ -890,6 +972,10 @@ async fn memory_context(
 }
 
 /// One non-streaming call that condenses the dropped messages.
+///
+/// Sends the transcript to the profile's own endpoint (never anywhere else),
+/// with the key read from the keychain for this request only. Returns the
+/// summary text and its usage, or the endpoint error string.
 async fn summarize(
     profile: &providers::ProviderProfile,
     dropped: &[providers::HistoryMessage],
@@ -923,9 +1009,12 @@ async fn ollama_detect() -> Vec<providers::OllamaModel> {
 
 // ── Quick assistant (openspec/changes/quick-assistant-tools) ─────────────────
 
-/// The quick-ask turn: the configured provider profile, the four tools, the
+/// The quick-ask turn: the configured provider profile, the five tools, the
 /// approval card for each. Never touches the agent CLI or the chat's own
 /// provider selection. Errors are `<kind>:<detail>` strings, as provider_send's.
+///
+/// Frontend sends only the prompt; the profile, allow-lists and enabled skills
+/// come from the stored settings. Returns the model's final text.
 #[tauri::command]
 async fn quick_ask(app: AppHandle, prompt: String) -> Result<String, String> {
     let settings = shared_settings(&app);
@@ -976,21 +1065,25 @@ fn usage_summary(ledger: State<usage::Ledger>) -> Vec<usage::BackendSummary> {
 
 // ── Memory (plan v4, Fase 5) ──────────────────────────────────────────────────
 
+/// All pinned memory notes, oldest first.
 #[tauri::command]
 fn memory_notes() -> Vec<memory::Note> {
     memory::list_notes()
 }
 
+/// Pins a new note; returns it, or an error string (e.g. empty text).
 #[tauri::command]
 fn memory_add(text: String) -> Result<memory::Note, String> {
     memory::add_note(&text)
 }
 
+/// Deletes the note with this id.
 #[tauri::command]
 fn memory_delete(id: String) -> Result<(), String> {
     memory::delete_note(&id)
 }
 
+/// Deletes every pinned note.
 #[tauri::command]
 fn memory_clear() -> Result<(), String> {
     memory::clear_notes()
@@ -1002,11 +1095,14 @@ fn memory_path() -> String {
     memory::dir().display().to_string()
 }
 
+/// Clears the in-memory usage ledger.
 #[tauri::command]
 fn usage_reset(ledger: State<usage::Ledger>) {
     ledger.reset();
 }
 
+/// The last outcome of registering the quick-ask shortcut (asked, registered,
+/// error).
 #[tauri::command]
 fn quick_shortcut_status(status: State<quick_assistant::ShortcutStatus>) -> quick_assistant::ShortcutInfo {
     status.0.lock().unwrap().clone()
@@ -1022,12 +1118,14 @@ fn quick_shortcut_set(app: AppHandle, shortcut: Option<String>) -> quick_assista
     quick_assistant::apply_shortcut(&app, wanted.as_deref())
 }
 
+/// The quick assistant's folder allow-list.
 #[tauri::command]
 fn quick_folders(app: AppHandle) -> Vec<String> {
     shared_settings(&app).quick_assistant_folders
 }
 
 /// Opens the folder picker and adds the choice to the allow-list.
+/// Returns the chosen path, or `None` if cancelled or not a directory.
 #[tauri::command]
 async fn quick_folder_add(app: AppHandle) -> Option<String> {
     let picked = choose_folder(settings_or_island(&app)?).await?;
@@ -1038,17 +1136,21 @@ async fn quick_folder_add(app: AppHandle) -> Option<String> {
     Some(picked)
 }
 
+/// Removes a folder (by its stored path) from the allow-list.
 #[tauri::command]
 fn quick_folder_remove(app: AppHandle, path: String) {
     remember(&app, |s| quick_assistant::remove_folder(&mut s.quick_assistant_folders, &path));
 }
 
+/// The quick assistant's app allow-list.
 #[tauri::command]
 fn quick_apps(app: AppHandle) -> Vec<settings::AllowedApp> {
     shared_settings(&app).quick_assistant_apps
 }
 
 /// Opens the file picker on an executable and adds it to the app allow-list.
+/// The label defaults to the file name without extension. Returns the new
+/// entry, or `None` if cancelled, not a file, or a picker is already open.
 #[tauri::command]
 async fn quick_app_add(app: AppHandle) -> Option<settings::AllowedApp> {
     let win = settings_or_island(&app)?;
@@ -1076,6 +1178,7 @@ async fn quick_app_add(app: AppHandle) -> Option<settings::AllowedApp> {
     Some(added)
 }
 
+/// Removes an app from the allow-list by id.
 #[tauri::command]
 fn quick_app_remove(app: AppHandle, id: String) {
     remember(&app, |s| quick_assistant::remove_app(&mut s.quick_assistant_apps, &id));
@@ -1083,11 +1186,14 @@ fn quick_app_remove(app: AppHandle, id: String) {
 
 // ── Routines (plan v4, Fase 7) ───────────────────────────────────────────────
 
+/// All saved routines.
 #[tauri::command]
 fn routine_list() -> Vec<routines::Routine> {
     routines::list()
 }
 
+/// Creates or updates a routine; returns it, or a validation error string.
+/// Emits `routines-changed` so open windows refresh.
 #[tauri::command]
 fn routine_save(app: AppHandle, input: routines::RoutineInput) -> Result<routines::Routine, String> {
     let saved = routines::save(input)?;
@@ -1095,6 +1201,7 @@ fn routine_save(app: AppHandle, input: routines::RoutineInput) -> Result<routine
     Ok(saved)
 }
 
+/// Deletes a routine by id and emits `routines-changed`.
 #[tauri::command]
 fn routine_delete(app: AppHandle, id: String) -> Result<(), String> {
     routines::delete(&id)?;
@@ -1104,6 +1211,8 @@ fn routine_delete(app: AppHandle, id: String) -> Result<(), String> {
 
 /// Runs a routine now (the scheduler's hour, or "Run now"). Rust runs it: the
 /// webview only says which one. Everything goes through `dispatch`.
+///
+/// Returns the stored result of the run; an unknown id is an error string.
 #[tauri::command]
 async fn routine_run(app: AppHandle, id: String) -> Result<routines::RoutineResult, String> {
     let routine = routines::load(&id).ok_or_else(|| "unknown routine".to_string())?;
@@ -1111,6 +1220,7 @@ async fn routine_run(app: AppHandle, id: String) -> Result<routines::RoutineResu
     Ok(routines::run(&app, &settings, &routine).await)
 }
 
+/// The most recent routine results; `limit` defaults to 10.
 #[tauri::command]
 fn routine_results(limit: Option<usize>) -> Vec<routines::RoutineResult> {
     routines::recent_results(limit.unwrap_or(10))
@@ -1130,6 +1240,7 @@ fn routine_mark_missed(id: String) -> Option<routines::RoutineResult> {
 /// the picker a second time.
 static PENDING_SKILL: std::sync::Mutex<Option<std::path::PathBuf>> = std::sync::Mutex::new(None);
 
+/// Installed skills with their enabled flag.
 #[tauri::command]
 fn skill_list(app: AppHandle) -> Vec<skills::SkillView> {
     skills::list(&shared_settings(&app).skills_enabled)
@@ -1166,6 +1277,7 @@ async fn skill_import(app: AppHandle, replace: bool) -> Result<Option<skills::Sk
     }
 }
 
+/// Deletes an installed skill and switches it off in the settings.
 #[tauri::command]
 fn skill_delete(app: AppHandle, name: String) -> Result<(), String> {
     skills::delete(&name)?;
@@ -1173,6 +1285,8 @@ fn skill_delete(app: AppHandle, name: String) -> Result<(), String> {
     Ok(())
 }
 
+/// Switches a skill on or off. Enabling requires it to be installed and
+/// readable; the model only ever sees enabled skills.
 #[tauri::command]
 fn skill_set_enabled(app: AppHandle, name: String, enabled: bool) -> Result<(), String> {
     if enabled && skills::load(&name).is_none() {
@@ -1225,11 +1339,14 @@ fn secret_present(key: String) -> bool {
     secrets::present(&key)
 }
 
+/// Stores a secret in the OS credential store under `key` (validated there).
+/// There is deliberately no matching "get" command for the webview.
 #[tauri::command]
 fn secret_set(key: String, value: String) -> Result<(), String> {
     secrets::set(&key, &value)
 }
 
+/// Removes the secret stored under `key`.
 #[tauri::command]
 fn secret_clear(key: String) -> Result<(), String> {
     secrets::clear(&key)
@@ -1306,6 +1423,7 @@ fn create_settings_window(app: &AppHandle) {
     }
 }
 
+/// Brings the (pre-created, hidden) settings window to the front.
 pub fn show_settings_window(app: &AppHandle) {
     let Some(win) = app.get_webview_window("settings") else {
         log::line("settings window missing");
@@ -1316,11 +1434,19 @@ pub fn show_settings_window(app: &AppHandle) {
     let _ = win.set_focus();
 }
 
+/// Frontend entry point to [`show_settings_window`].
 #[tauri::command]
 fn open_settings_window(app: AppHandle) {
     show_settings_window(&app);
 }
 
+/// Builds and runs the Tauri app; returns only when the app exits.
+///
+/// Registers the single-instance, autostart and global-shortcut plugins, the
+/// managed state, every command, and in `setup` creates the settings window
+/// (before the island's webview, see `create_settings_window`), places the
+/// island, then starts the hook relay, integration pollers and health monitor.
+/// Panics if Tauri cannot start (nothing sensible to do without a UI).
 pub fn run() {
     platform::prepare_environment();
     let loaded = settings::load();

@@ -13,6 +13,11 @@ import { State } from "../core/state";
 import { button } from "../ui/button";
 import { t, fmtRelative } from "../i18n/index";
 
+/**
+ * Builds the routine digest view. `sync()` redraws only when
+ * `State.lastRoutineResult` changes identity; `actions.collapse()` closes the
+ * island from the footer button.
+ */
 export function buildDigest(actions: ViewActions): ViewHost {
   const title = h("div", { class: "digest-title" });
   const when = h("div", { class: "digest-when" });
@@ -41,6 +46,7 @@ export function buildDigest(actions: ViewActions): ViewHost {
     });
   });
 
+  /** Fills title, time and body from the current result (text, error or empty). */
   function draw() {
     const result = State.lastRoutineResult;
     clear(body);

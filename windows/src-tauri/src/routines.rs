@@ -1,12 +1,14 @@
-// Scheduled routines (plan v4, Fase 7): the counterpart of OpenJarvis'
-// `morning_digest`. A routine is a prompt, a provider profile, a time and some
-// days, optionally with a skill and a permission to use the quick assistant's
-// tools. The WEBVIEW schedules (src/island/routines.ts, with `setTimeout` and
-// local time); RUST runs: it reads the key from the keychain and every tool goes
-// through `quick_assistant::dispatch`. Nothing here runs on its own: if Coucou
-// is not open at the hour, the routine does not run.
-//
-// No continuous agents, no background loop.
+//! Scheduled routines (plan v4, Fase 7): the counterpart of OpenJarvis'
+//! `morning_digest`. A routine is a prompt, a provider profile, a time and some
+//! days, optionally with a skill and a permission to use the quick assistant's
+//! tools. The WEBVIEW schedules (src/island/routines.ts, with `setTimeout` and
+//! local time); RUST runs: it reads the key from the keychain and every tool goes
+//! through `quick_assistant::dispatch`. Nothing here runs on its own: if Coucou
+//! is not open at the hour, the routine does not run.
+//!
+//! No continuous agents, no background loop. Definitions are JSON files under
+//! the config dir (one per id); results are a capped JSONL under the local dir.
+//! Runs are serialized by `RUN_LOCK`, and the API key is never stored here.
 
 use std::future::Future;
 use std::io::Write;
@@ -29,9 +31,13 @@ pub const MAX_RESULT_CHARS: usize = 20_000;
 pub const MAX_RESULTS: usize = 50;
 /// The results file is compacted to the newest `MAX_RESULTS` once it passes this.
 const COMPACT_AT: usize = 200;
+/// Longest label kept when saving, in characters.
 const MAX_LABEL_CHARS: usize = 80;
+/// Longest prompt kept when saving, in characters.
 const MAX_PROMPT_CHARS: usize = 8_000;
 
+/// A saved routine as stored on disk and sent to the settings window.
+/// `skill` names a skill that only applies if the user has it switched on.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Routine {
@@ -65,6 +71,8 @@ pub struct RoutineInput {
     pub enabled: bool,
 }
 
+/// One stored run of a routine, shown in the island and the settings window.
+/// `at` is epoch milliseconds.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct RoutineResult {
@@ -100,24 +108,30 @@ fn valid_id(id: &str) -> bool {
     !id.is_empty() && id.len() <= 64 && id.bytes().all(|b| b.is_ascii_hexdigit() || b == b'-')
 }
 
+/// Trims whitespace and cuts to at most `max` characters (not bytes).
 fn trimmed(s: &str, max: usize) -> String {
     s.trim().chars().take(max).collect()
 }
 
 // ── Storage ────────────────────────────────────────────────────────────────
 
+/// Directory with routine definitions (user config, so it roams with settings).
 fn config_routines_dir() -> PathBuf {
     platform::config_dir().join("routines")
 }
 
+/// Directory with run results (machine-local, not synced).
 fn local_routines_dir() -> PathBuf {
     platform::local_dir().join("routines")
 }
 
+/// Path of the JSON file for a routine id; the id must already be validated.
 fn file_for(dir: &Path, id: &str) -> PathBuf {
     dir.join(format!("{id}.json"))
 }
 
+/// Writes a routine through a temporary file and a rename so a crash never
+/// leaves a half-written definition. Creates the directory as private.
 fn write_routine(dir: &Path, routine: &Routine) -> std::io::Result<()> {
     platform::ensure_private_dir(dir)?;
     let bytes = serde_json::to_vec_pretty(routine)
@@ -129,6 +143,7 @@ fn write_routine(dir: &Path, routine: &Routine) -> std::io::Result<()> {
     std::fs::rename(&temp, &file)
 }
 
+/// Parses a routine file, tolerating a UTF-8 BOM; `None` if it is not valid JSON.
 fn parse(bytes: &[u8]) -> Option<Routine> {
     let text = bytes.strip_prefix(&[0xEF, 0xBB, 0xBF]).unwrap_or(bytes);
     serde_json::from_slice(text).ok()
@@ -149,10 +164,12 @@ pub fn list_in(dir: &Path) -> Vec<Routine> {
     routines
 }
 
+/// Every saved routine from the config dir; see [`list_in`].
 pub fn list() -> Vec<Routine> {
     list_in(&config_routines_dir())
 }
 
+/// Loads one routine by id. `None` for an invalid id, a missing file or a bad file.
 pub fn load(id: &str) -> Option<Routine> {
     if !valid_id(id) {
         return None;
@@ -196,10 +213,12 @@ pub fn save_in(dir: &Path, input: RoutineInput, new_id: impl FnOnce() -> String)
     Ok(routine)
 }
 
+/// Saves a routine in the config dir with a fresh uuid when it has no id.
 pub fn save(input: RoutineInput) -> Result<Routine, String> {
     save_in(&config_routines_dir(), input, agent::uuid_v4)
 }
 
+/// Deletes a routine file. A missing file is not an error; an invalid id is.
 pub fn delete_in(dir: &Path, id: &str) -> Result<(), String> {
     if !valid_id(id) {
         return Err("not a routine id".to_string());
@@ -211,16 +230,19 @@ pub fn delete_in(dir: &Path, id: &str) -> Result<(), String> {
     }
 }
 
+/// Deletes a routine from the config dir; see [`delete_in`].
 pub fn delete(id: &str) -> Result<(), String> {
     delete_in(&config_routines_dir(), id)
 }
 
 // ── Results ────────────────────────────────────────────────────────────────
 
+/// Path of the results JSONL inside `dir`.
 fn results_file(dir: &Path) -> PathBuf {
     dir.join("results.jsonl")
 }
 
+/// Reads every result line, skipping lines that do not parse. Oldest first.
 fn read_results(dir: &Path) -> Vec<RoutineResult> {
     let Ok(text) = std::fs::read_to_string(results_file(dir)) else { return Vec::new() };
     text.lines().filter_map(|l| serde_json::from_str(l).ok()).collect()
@@ -260,10 +282,12 @@ pub fn recent_results_in(dir: &Path, limit: usize) -> Vec<RoutineResult> {
     all
 }
 
+/// The newest results from the local dir; see [`recent_results_in`].
 pub fn recent_results(limit: usize) -> Vec<RoutineResult> {
     recent_results_in(&local_routines_dir(), limit)
 }
 
+/// Stores a result, ignoring I/O errors (a failed log must not fail a run).
 pub fn record_result(result: RoutineResult) {
     let _ = append_result_in(&local_routines_dir(), result);
 }
@@ -277,6 +301,8 @@ pub fn mark_missed(id: &str) -> Option<RoutineResult> {
     Some(result)
 }
 
+/// Builds a stored result from an outcome; `ok` is true only for `done`.
+/// The text is capped at `MAX_RESULT_CHARS`.
 fn result_of(routine: &Routine, outcome: &str, text: String) -> RoutineResult {
     RoutineResult {
         routine_id: routine.id.clone(),

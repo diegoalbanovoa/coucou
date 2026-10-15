@@ -1,9 +1,9 @@
-// Island window: placement on the chosen display, the two window sizes
-// (full panel / invisible wake strip), click-through and the cursor poll.
-//
-// There is no notch on a PC, so the island is a black shape drawn at the top
-// centre of the main display inside a borderless, transparent, always-on-top
-// window that never takes focus.
+//! Island window: placement on the chosen display, the two window sizes
+//! (full panel / invisible wake strip), click-through and the cursor poll.
+//!
+//! There is no notch on a PC, so the island is a black shape drawn at the top
+//! centre of the main display inside a borderless, transparent, always-on-top
+//! window that never takes focus.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
@@ -26,6 +26,7 @@ pub const PANEL_W: f64 = 720.0;
 pub const PANEL_H: f64 = 640.0;
 /// Logical size of the invisible strip that wakes the island when it is hidden.
 pub const STRIP_W: f64 = 240.0;
+/// Height of the wake strip; thin enough not to get in the way of the top edge.
 pub const STRIP_H: f64 = 6.0;
 /// Floor under `ScreenInfo::work_height`, so a monitor reporting a bogus or
 /// tiny work area never hands the front end a ceiling the chat view's own
@@ -35,12 +36,17 @@ pub const STRIP_H: f64 = 6.0;
 /// time.
 const MIN_WORK_HEIGHT: f64 = 300.0;
 
+/// Label of the island window in `tauri.conf.json`, used to look it up and as
+/// the target of `emit_to`.
 pub const WINDOW_LABEL: &str = "island";
 
 /// Margin around the island that still counts as "on the island", in logical px.
 /// Wider than the macOS 6 pt because a click must never be swallowed.
 const HIT_MARGIN: f64 = 14.0;
 
+/// Payload of the `cursor` event: the pointer in window-logical coordinates
+/// (origin at the window's top-left), so the front end can hover-test without
+/// its own mouse events while the window is click-through.
 #[derive(Serialize, Clone)]
 pub struct CursorPayload {
     pub x: f64,
@@ -49,11 +55,15 @@ pub struct CursorPayload {
 
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
+/// Geometry of the display the island lives on, in logical px, as the front
+/// end needs it for layout.
 pub struct ScreenInfo {
+    /// Monitor origin in logical px (virtual-desktop coordinates).
     pub x: f64,
     pub y: f64,
     pub width: f64,
     pub height: f64,
+    /// Device pixel ratio of the monitor.
     pub scale: f64,
     /// How tall the island can grow, in logical px, before it would cover the
     /// taskbar (or run off a short display) — the work area's bottom edge
@@ -70,6 +80,8 @@ pub struct ScreenInfo {
 /// tick as the cursor read — an IPC round trip here loses clicks.
 #[derive(Clone, Copy, Default)]
 pub struct IslandRect {
+    /// Top-left corner and size, in window-logical px. `w == 0` means nothing
+    /// is drawn yet.
     pub x: f64,
     pub y: f64,
     pub w: f64,
@@ -78,15 +90,19 @@ pub struct IslandRect {
 
 /// Wakes / parks the cursor poll thread so a hidden island costs literally nothing.
 pub struct PollGate {
+    /// Whether the poll loop should run; the thread sleeps on `cv` while false.
     active: Mutex<bool>,
     cv: Condvar,
+    /// True while the window is the thin wake strip rather than the panel.
     pub collapsed: AtomicBool,
+    /// Latest island shape pushed by the front end.
     pub rect: Mutex<IslandRect>,
     /// Mirrors the window flag so we only call into the OS when it changes.
     ignoring: AtomicBool,
 }
 
 impl PollGate {
+    /// A gate that starts parked (inactive), collapsed and not click-through.
     pub fn new() -> Self {
         Self {
             active: Mutex::new(false),
@@ -97,6 +113,7 @@ impl PollGate {
         }
     }
 
+    /// Stores the island shape the poll thread hit-tests against.
     pub fn set_rect(&self, rect: IslandRect) {
         *self.rect.lock().unwrap() = rect;
     }
@@ -106,12 +123,14 @@ impl PollGate {
         self.ignoring.store(false, Ordering::Relaxed);
     }
 
+    /// Starts (`true`) or parks (`false`) the poll thread, waking it if needed.
     pub fn set_active(&self, on: bool) {
         let mut guard = self.active.lock().unwrap();
         *guard = on;
         self.cv.notify_all();
     }
 
+    /// Blocks the calling (poll) thread on the condvar until `set_active(true)`.
     fn wait_until_active(&self) {
         let mut guard = self.active.lock().unwrap();
         while !*guard {
@@ -119,15 +138,18 @@ impl PollGate {
         }
     }
 
+    /// Whether the poll loop should keep ticking.
     fn is_active(&self) -> bool {
         *self.active.lock().unwrap()
     }
 }
 
+/// The island webview window, if it exists yet.
 pub fn window(app: &AppHandle) -> Option<WebviewWindow> {
     app.get_webview_window(WINDOW_LABEL)
 }
 
+/// Whether the physical point (`x`, `y`) lies inside monitor `m`.
 fn monitor_contains(m: &Monitor, x: f64, y: f64) -> bool {
     let p = m.position();
     let s = m.size();
@@ -153,6 +175,8 @@ fn target_monitor(app: &AppHandle, pref: &str) -> Option<Monitor> {
         .or_else(|| monitors.into_iter().next())
 }
 
+/// Geometry of the target display (see `target_monitor`), with a 1080p
+/// fallback when no monitor can be queried.
 pub fn screen_info(app: &AppHandle, pref: &str) -> ScreenInfo {
     match target_monitor(app, pref) {
         Some(m) => {
@@ -354,6 +378,7 @@ pub fn refresh_click_through(app: &AppHandle, gate: &PollGate) {
     platform::set_input_region(&win, region);
 }
 
+/// Sets or clears click-through on the island window; no-op if it is missing.
 pub fn set_ignore_cursor(app: &AppHandle, ignore: bool) {
     if let Some(win) = window(app) {
         let _ = win.set_ignore_cursor_events(ignore);

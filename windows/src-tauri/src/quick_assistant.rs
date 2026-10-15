@@ -1,9 +1,18 @@
-// The quick assistant: a global-shortcut-reachable helper with a closed,
-// four-action tool list — search_files, read_approved_folder, open_app,
-// query_vault — and no write/delete/execute action at all. Deliberately
-// separate from agent.rs/consoles.rs: an agent CLI already has full tool
-// access through the real CLI, approved via hooks. See
-// openspec/changes/quick-assistant-tools.
+//! The quick assistant: a global-shortcut-reachable helper with a closed,
+//! five-action tool list — search_files, read_approved_folder, open_app,
+//! query_vault and load_skill — and no write/delete/execute action at all.
+//! Deliberately separate from agent.rs/consoles.rs: an agent CLI already has
+//! full tool access through the real CLI, approved via hooks. See
+//! openspec/changes/quick-assistant-tools.
+//!
+//! This module holds everything that gates a tool call: the folder and app
+//! allow-lists, the approval broker (a click on the island card, every time,
+//! except for reads inside an allow-listed folder and `load_skill`), the
+//! pause flag, the JSONL action log and the global shortcut. `quick_loop`
+//! calls [`dispatch`] for each call the model makes. Rules that are easy to
+//! miss: paths are canonicalised before any check, anything but an explicit
+//! Allow is a Deny, protected files are refused with no card, and every
+//! output is redacted and scanned for prompt injection before the model sees it.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -46,6 +55,8 @@ pub fn add_folder(folders: &mut Vec<String>, path: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Removes `path` from the allow-list. Compared as a string against the
+/// canonical form stored by [`add_folder`]; an unknown path is a no-op.
 pub fn remove_folder(folders: &mut Vec<String>, path: &str) {
     folders.retain(|f| f != path);
 }
@@ -67,6 +78,7 @@ pub fn add_app(apps: &mut Vec<AllowedApp>, label: &str, path: &str) -> Result<Al
     Ok(app)
 }
 
+/// Removes the allow-listed app with this id; an unknown id is a no-op.
 pub fn remove_app(apps: &mut Vec<AllowedApp>, id: &str) {
     apps.retain(|a| a.id != id);
 }
@@ -78,9 +90,12 @@ pub fn remove_app(apps: &mut Vec<AllowedApp>, id: &str) {
 // and a quick-assistant call has no CLI, no pipe, no hook event at all.
 // See design.md decision 1.
 
+/// The user's answer to an approval card.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Decision {
+    /// Explicit click on Allow: the only thing that lets a gated tool run.
     Allow,
+    /// Deny, or any non-answer (timeout, decline, closed channel).
     Deny,
 }
 
@@ -90,11 +105,15 @@ pub enum Decision {
 pub enum Reply {
     /// The card is on screen and a human can act on it.
     Ack,
+    /// A human clicked.
     Decision(Decision),
     /// Nobody can act on it — paused, or another card already holds the view.
     Decline,
 }
 
+/// Quick-assistant requests awaiting an answer, keyed by request id (always
+/// starting with [`ID_PREFIX`]). Registered as Tauri managed state; an entry
+/// lives from [`request_approval`] until the answer, decline or timeout.
 #[derive(Default)]
 pub struct Pending(pub Mutex<HashMap<String, mpsc::Sender<Reply>>>);
 
@@ -110,6 +129,8 @@ const DECISION_TIMEOUT: Duration = Duration::from_secs(108);
 /// `<pid>-<counter>`, so the two can never collide.
 pub const ID_PREFIX: &str = "qa-";
 
+/// True if `request_id` was minted by this module (see [`ID_PREFIX`]); used
+/// to route an approval click here instead of to the hook relay.
 pub fn is_quick_id(request_id: &str) -> bool {
     request_id.starts_with(ID_PREFIX)
 }
@@ -137,6 +158,9 @@ pub async fn wait_for_reply(
 /// Registers a request, shows the existing approval card for it (a `"hook"`
 /// event with no `coucou_agent` field, so `island/hooks.ts` treats it as an
 /// ordinary Claude-style request), and waits for the click.
+///
+/// `tool` and `input` are only what the card displays. The pending entry is
+/// always removed before returning, whatever the outcome.
 pub async fn request_approval(app: &AppHandle, tool: &str, input: Value) -> Decision {
     let id = next_request_id();
     let (tx, mut rx) = mpsc::channel::<Reply>(4);
@@ -155,6 +179,9 @@ pub async fn request_approval(app: &AppHandle, tool: &str, input: Value) -> Deci
     decision
 }
 
+/// Delivers `reply` to the request waiting on `request_id`. `keep` leaves the
+/// entry registered (for the `Ack` that precedes the decision); otherwise it
+/// is removed so a request can be answered only once.
 fn send(app: &AppHandle, request_id: &str, reply: Reply, keep: bool) {
     let sender = {
         let pending = app.state::<Pending>();
@@ -169,10 +196,13 @@ fn send(app: &AppHandle, request_id: &str, reply: Reply, keep: bool) {
     }
 }
 
+/// The island has the card on screen; the long wait for a click may begin.
 pub fn acknowledge(app: &AppHandle, request_id: &str) {
     send(app, request_id, Reply::Ack, true);
 }
 
+/// The island cannot show the card (paused, or busy with another one); the
+/// request resolves to Deny.
 pub fn decline(app: &AppHandle, request_id: &str) {
     send(app, request_id, Reply::Decline, false);
 }
@@ -187,6 +217,7 @@ pub fn answer(app: &AppHandle, request_id: &str, decision: &str) {
     send(app, request_id, Reply::Decision(d), false);
 }
 
+/// Counter behind [`next_request_id`].
 static NEXT_REQUEST: AtomicU64 = AtomicU64::new(1);
 
 /// A fresh request id — not a UUID: nothing here needs to be unguessable,
@@ -211,17 +242,23 @@ pub fn refused_while_paused(paused: bool) -> Option<String> {
 
 // ── Action log ───────────────────────────────────────────────────────────
 
+/// One line of the action log (`quick-assistant-log.jsonl`), also shown in
+/// Settings. Holds names and targets only, never file contents.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct LogEntry {
     /// Milliseconds since the epoch — plain, sortable, no timezone math.
     pub at: u64,
+    /// Tool name as the model called it (may be unknown for refused calls).
     pub tool: String,
+    /// Human-readable target (query and folder, path, app id, skill name).
     pub target: String,
     /// "approved" | "denied" | "auto-approved" | "refused-paused" | "refused-scope" | "refused-sensitive"
+    /// (the code also records "refused-loop", "redacted" and "flagged-injection").
     pub outcome: String,
 }
 
+/// Where the action log lives: the config directory in a real build.
 #[cfg(not(test))]
 fn log_path() -> PathBuf {
     platform::config_dir().join("quick-assistant-log.jsonl")
@@ -288,6 +325,8 @@ pub fn search_files(query: &str, folder: &str, folders: &[String]) -> Result<Vec
     Ok(hits)
 }
 
+/// Depth-first walk calling `visit` on every entry under `dir`. Symlinked
+/// directories are visited but not descended into; unreadable ones are skipped.
 fn walk(dir: &Path, visit: &mut impl FnMut(&Path)) {
     let Ok(entries) = std::fs::read_dir(dir) else { return };
     for entry in entries.flatten() {
@@ -336,6 +375,7 @@ pub fn read_approved_folder(path: &str, folders: &[String]) -> Result<String, St
     Ok(String::from_utf8_lossy(&bytes).to_string())
 }
 
+/// Largest slice of a single file `read_approved_folder` returns (64 KiB).
 const MAX_READ_BYTES: u64 = 64 * 1024;
 
 /// `open_app`: looks up `app_id` in the allow-list and launches the
@@ -354,10 +394,12 @@ pub fn query_vault(vault_path: Option<&str>) -> Option<String> {
 
 // ── Dispatch: pause gate, scope, approval, log ───────────────────────────
 
+/// String argument `key` of a tool call, or `""` if absent or not a string.
 fn str_arg<'a>(args: &'a Value, key: &str) -> &'a str {
     args.get(key).and_then(Value::as_str).unwrap_or("")
 }
 
+/// Appends an action-log entry stamped with the current time.
 fn record(tool: &str, target: &str, outcome: &str) {
     let at = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -409,6 +451,8 @@ where
     harden_output(tool, &target, raw)
 }
 
+/// Maps a model-supplied tool name to its `'static` name, or `None` if it is
+/// not one of the five. The closed list lives here and in `quick_loop`.
 fn known_tool(name: &str) -> Option<&'static str> {
     match name {
         "load_skill" => Some("load_skill"),
@@ -439,6 +483,9 @@ pub(crate) fn record_refusal(name: &str, args: &Value, outcome: &str) {
 
 /// Everything a tool returns on its way to the model — its own errors
 /// included, so a file that starts with "Error:" gets no free pass.
+///
+/// Redacts secrets first, then scans for prompt-injection phrasing and, if
+/// found, annotates the text; both events are logged.
 fn harden_output(tool: &str, target: &str, raw: String) -> String {
     let red = redact::redact(&raw);
     if red.count > 0 {
@@ -549,6 +596,7 @@ where
 }
 
 /// The real thing: the live pause flag and the real approval card.
+/// This is the executor `quick_loop::run` is given in production.
 pub async fn execute_tool(app: &AppHandle, name: &str, args: &Value, settings: &Settings) -> String {
     let paused = integrations::PAUSED.load(Ordering::Relaxed);
     let handle = app.clone();
@@ -565,17 +613,25 @@ pub async fn execute_tool(app: &AppHandle, name: &str, args: &Value, settings: &
 #[derive(Serialize, Clone, Default, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ShortcutInfo {
+    /// The accelerator text requested, or `None` when the feature is off.
     pub shortcut: Option<String>,
+    /// True when the OS accepted the registration.
     pub registered: bool,
+    /// Why registration failed (bad syntax, already taken), if it did.
     pub error: Option<String>,
 }
 
+/// Last outcome of [`apply_shortcut`], kept as Tauri managed state so the
+/// settings window can read it later.
 #[derive(Default)]
 pub struct ShortcutStatus(pub Mutex<ShortcutInfo>);
 
 /// Registers `wanted` (replacing whatever this module registered before) and
 /// records the outcome. Never fails loudly: a conflict is a value for the
 /// settings window to show, not a reason to stop the app.
+///
+/// Unregisters every global shortcut first (this is the app's only one). On
+/// key press it emits `quick-ask` to the island window.
 pub fn apply_shortcut(app: &AppHandle, wanted: Option<&str>) -> ShortcutInfo {
     use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
     let gs = app.global_shortcut();

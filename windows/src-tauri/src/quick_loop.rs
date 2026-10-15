@@ -1,11 +1,16 @@
-// The quick assistant's tool-calling cycle: one request with the four tool
-// definitions in the OpenAI `tools` field, a loop over `tool_calls` in the
-// answer, and the results fed back until the model replies in plain text.
-//
-// Deliberately separate from `providers::send`, which never sends `tools`
-// (Fase 1 is chat only) and streams; this is non-streaming and tool-aware.
-// The HTTP post and the tool executor are injected, so the loop itself is
-// tested with synthetic responses. See openspec/changes/quick-assistant-tools.
+//! The quick assistant's tool-calling cycle: one request with the five tool
+//! definitions in the OpenAI `tools` field, a loop over `tool_calls` in the
+//! answer, and the results fed back until the model replies in plain text.
+//!
+//! Deliberately separate from `providers::send`, which never sends `tools`
+//! (Fase 1 is chat only) and streams; this is non-streaming and tool-aware.
+//! The HTTP post and the tool executor are injected, so the loop itself is
+//! tested with synthetic responses. See openspec/changes/quick-assistant-tools.
+//!
+//! Driven by `quick_assistant`, which supplies the executor (where the user's
+//! approval clicks, allow-lists and secret redaction are enforced). This
+//! module only decides when to stop: a plain-text answer, [`MAX_ROUNDS`], or
+//! the [`LoopGuard`] blocking a repeated call. It never runs a tool itself.
 
 use std::future::Future;
 use std::time::Duration;
@@ -19,12 +24,18 @@ use crate::settings::AllowedApp;
 
 /// More rounds than this and the model is going in circles.
 const MAX_ROUNDS: usize = 6;
+/// Per-request HTTP timeout; a cold local model can be slow to answer.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
 
+/// One tool call requested by the model.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ToolCall {
+    /// Call id to echo back in the `tool` message; synthesized as `call-<n>`
+    /// if the endpoint omitted it.
     pub id: String,
+    /// Tool name; empty if the endpoint sent none (the executor then refuses).
     pub name: String,
+    /// Parsed arguments; `{}` when they were missing or unreadable.
     pub args: Value,
 }
 
@@ -110,8 +121,12 @@ pub fn system_prompt(folders: &[String], apps: &[AllowedApp], skills: &[(String,
 /// any tool calls.
 #[derive(Debug, PartialEq)]
 pub struct Completion {
+    /// The raw assistant message, pushed back verbatim into the conversation
+    /// so the following `tool` messages line up with its `tool_calls`.
     pub message: Value,
+    /// The message's text content (empty when it only carries tool calls).
     pub text: String,
+    /// The requested tool calls, in order; empty means the answer is final.
     pub calls: Vec<ToolCall>,
 }
 
@@ -182,6 +197,12 @@ where
 /// `exec` runs one tool call and returns the text to hand back. Returns the
 /// model's final plain-text reply, with the tokens (and cost, if reported)
 /// the rounds added up to.
+///
+/// Errors are `kind:detail` strings for the frontend: whatever `post` returns,
+/// plus `loop-guard:identical`, `loop-guard:cycle` (a blocked call, logged as
+/// `refused-loop`) or `loop-guard:max-rounds` after [`MAX_ROUNDS`] rounds.
+/// Calls within a round run sequentially; a warned call still runs, with the
+/// warning appended to its result.
 pub async fn run<P, PF, X, XF>(
     system: String,
     prompt: &str,
@@ -243,6 +264,9 @@ where
 
 /// The real POST against the profile's endpoint. The key is read from the
 /// keychain by the caller and only ever lives in this request.
+///
+/// Errors use the same `<kind>:<detail>` format as [`ProviderError::message`]
+/// (invalid key, no network, rate limit, endpoint) so the chat can localize them.
 pub async fn post_completion(profile: &ProviderProfile, key: Option<&str>, body: Value) -> Result<Value, String> {
     let client = reqwest::Client::builder()
         .timeout(REQUEST_TIMEOUT)

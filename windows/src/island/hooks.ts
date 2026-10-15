@@ -1,7 +1,14 @@
-// Claude Code hook events → island state.
-// Port of HookServer.processEvent / processPermissionRequest from the macOS app.
-// Difference from macOS: no terminal filter. On Windows the hook fires from any
-// terminal (Windows Terminal, VS Code, PowerShell…) and all of them are handled.
+/**
+ * Claude Code hook events → island state.
+ * Port of HookServer.processEvent / processPermissionRequest from the macOS app.
+ * Difference from macOS: no terminal filter. On Windows the hook fires from any
+ * terminal (Windows Terminal, VS Code, PowerShell…) and all of them are handled.
+ *
+ * Events arrive on the "hook" Tauri event, forwarded by the `coucou-hook`
+ * relay through Rust. This is the only place a permission card is raised; it
+ * must always answer or decline the relay's request so Claude Code never hangs
+ * on the island. Registered from main.ts.
+ */
 
 import { Bridge, onEvent } from "../core/bridge";
 import { Sound } from "../core/sound";
@@ -9,6 +16,7 @@ import { State } from "../core/state";
 import type { Island } from "./island";
 import { recordSubagentActivity } from "./subagentActivity";
 
+/** Id of the fixed Claude Code pill (see INTEGRATION_AGENTS in core/state.ts). */
 const CLAUDE_ID = "integration_claude";
 
 /** Clears the approval card if no decision was made before the hook gave up. */
@@ -17,6 +25,7 @@ let pendingTimeout: number | null = null;
 /** The return to idle that Stop arms, per pill, so the next turn can cancel it. */
 const stopTimers = new Map<string, number>();
 
+/** Cancels a pill's pending post-Stop reset; true if there was one. */
 function cancelStopTimer(id: string): boolean {
   const timer = stopTimers.get(id);
   if (timer == null) return false;
@@ -25,8 +34,10 @@ function cancelStopTimer(id: string): boolean {
   return true;
 }
 
+/** JSON the relay forwards for one Claude Code hook call (snake_case, as Claude Code sends it). */
 interface HookPayload {
   hook_event_name?: string;
+  /** Present for PermissionRequest; echoed back in the approval decision/ack/decline. */
   request_id?: string;
   session_id?: string;
   cwd?: string;
@@ -59,6 +70,7 @@ function validateAgent(raw: string | undefined): string | null {
 
 const FALLBACK_COLORS = ["#22C55E", "#EAB308", "#60A5FA", "#E879F9"];
 
+/** Stable colour for an external agent's pill, hashed from its name. */
 function agentColor(name: string): string {
   let h = 0;
   for (let i = 0; i < name.length; i++) {
@@ -73,10 +85,12 @@ const PROJECT_ALIASES: Record<string, string> = {
   notch_buddy: "Notch Buddy",
 };
 
+/** Display name for a project folder, normalising known spellings. */
 function aliasProjectName(name: string): string {
   return PROJECT_ALIASES[name.toLowerCase()] ?? name;
 }
 
+/** Last segment of a path, accepting both `\` and `/` and ignoring trailing separators. */
 function lastPathComponent(p: string): string {
   const cleaned = p.replace(/[\\/]+$/, "");
   const idx = Math.max(cleaned.lastIndexOf("\\"), cleaned.lastIndexOf("/"));
@@ -101,6 +115,7 @@ const TOOL_LABELS: Record<string, string> = {
   PowerShell: "Exécute",
 };
 
+/** One-line step text ("Exécute · cmd", "Lit · file") for the pill's step list. */
 function stepLabel(tool: string, input: Record<string, unknown>): string {
   const label = TOOL_LABELS[tool] ?? tool;
   const str = (k: string) => (typeof input[k] === "string" ? (input[k] as string) : null);
@@ -133,6 +148,7 @@ const APPROVAL_FIELDS = [
   "prompt", // Task
 ] as const;
 
+/** Text shown on the approval card: the tool plus the first identifying field of its input. */
 function approvalTarget(tool: string, input: Record<string, unknown>): string {
   for (const field of APPROVAL_FIELDS) {
     const value = input[field];
@@ -166,6 +182,7 @@ function hostOf(payload: HookPayload): string {
   return program ? program : "Terminal";
 }
 
+/** Names the Claude Code pill after the session's project and records host and cwd. */
 function upsert(projectName: string, cwd: string, host: string) {
   const t = State.tasks.find((x) => x.id === CLAUDE_ID);
   if (!t) return;
@@ -174,6 +191,7 @@ function upsert(projectName: string, cwd: string, host: string) {
   if (cwd) t.sessionCwd = cwd;
 }
 
+/** Resets the Claude Code pill after a session ends (steps, name, badge). */
 function clearSession() {
   const t = State.tasks.find((x) => x.id === CLAUDE_ID);
   if (!t) return;
@@ -185,6 +203,10 @@ function clearSession() {
   t.pillBadge = null;
 }
 
+/**
+ * Subscribes to the "hook" event. A single subscription feeds both the pill
+ * handler and the subagent activity log (see `recordSubagentActivity`).
+ */
 export function registerHookHandlers(island: Island) {
   void onEvent<HookPayload>("hook", (payload) => {
     handleHook(island, payload);
@@ -192,6 +214,12 @@ export function registerHookHandlers(island: Island) {
   });
 }
 
+/**
+ * Applies one hook event: routes it to the Claude Code pill or a dynamic
+ * `agent_*` pill, updates state/steps/badges, plays sounds and surfaces the
+ * island. A PermissionRequest raises the single approval card; every path
+ * that does not show it declines the request so the terminal asks instead.
+ */
 function handleHook(island: Island, payload: HookPayload) {
   if (State.paused) {
     // Silence here used to cost Claude Code nearly two minutes: the relay waited

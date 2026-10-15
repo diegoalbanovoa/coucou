@@ -1,16 +1,20 @@
 // Mini Mochis (pills + compact grid) — port of MiniBotCanvasView.
 // Each canvas owns a BotEngine; the island's frame loop ticks every live one.
+// Used by the island views (pills, grid) and the console picker (still variant).
 
 import { BotEngine, hexToRGB } from "./engine";
 import type { AgentTask } from "../core/state";
 
+/** One live mini Mochi: its canvas, private engine and the task it mirrors. */
 interface MiniBot {
   canvas: HTMLCanvasElement;
   engine: BotEngine;
+  /** Canvas side in CSS pixels (already divided by the 0.6 body ratio). */
   cssSize: number;
   taskId: string;
 }
 
+/** Registry of animated mini Mochis, ticked by [tickMiniBots]; keyed by canvas. */
 const live = new Map<HTMLCanvasElement, MiniBot>();
 
 /**
@@ -52,6 +56,7 @@ export function createMiniBot(task: AgentTask, bodySize: number): HTMLElement {
   return slot;
 }
 
+/** Stops ticking the mini Mochi that owns `canvas` (no-op if unknown). */
 export function releaseMiniBot(canvas: HTMLCanvasElement) {
   live.delete(canvas);
 }
@@ -63,6 +68,7 @@ export function pruneMiniBots() {
   }
 }
 
+/** Pushes each task's current state and colour into its live mini Mochi. */
 export function syncMiniBotStates(tasks: AgentTask[]) {
   for (const mb of live.values()) {
     const task = tasks.find((t) => t.id === mb.taskId);
@@ -72,6 +78,10 @@ export function syncMiniBotStates(tasks: AgentTask[]) {
   }
 }
 
+/**
+ * Advances and redraws every live mini Mochi by `dt` seconds. Called from the
+ * island frame loop, which stops when the island is hidden (0 % CPU rule).
+ */
 export function tickMiniBots(dt: number) {
   const dpr = Math.min(2, window.devicePixelRatio || 1);
   for (const mb of live.values()) {
@@ -84,6 +94,7 @@ export function tickMiniBots(dt: number) {
   }
 }
 
+/** Number of live animated mini Mochis (used to decide if the loop is needed). */
 export const miniBotCount = () => live.size;
 
 // ── Still Mochis ─────────────────────────────────────────────────────────────

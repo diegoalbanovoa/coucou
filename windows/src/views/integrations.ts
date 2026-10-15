@@ -3,6 +3,7 @@
 //
 // Cal.com is the one simplification: macOS shows a three-level calendar
 // (month → day → booking); here it is the list of upcoming bookings.
+// Called from the overview in views.ts through `renderIntegrationCard`.
 
 import { h, clear, dot } from "./dom";
 import { icon, type IconName } from "./icons";
@@ -26,6 +27,7 @@ export function timeAgo(value: unknown): string {
   return `${Math.floor(diff / 86400)}d`;
 }
 
+/** Card title row: colour dot, name, kind label and an optional trailing node. */
 function header(color: string, name: string, kind: string, extra?: Node): HTMLElement {
   const row = h("div", { class: "int-head" }, dot(color, 7), h("b", { text: name }), h("span", { text: kind }));
   if (extra) row.append(extra);
@@ -39,10 +41,12 @@ function listRow(accent: string, first: boolean, ...children: Node[]): HTMLEleme
   return row;
 }
 
+/** The raw data object the backend last returned for integration `id` ({} if none). */
 function get(id: string): Record<string, unknown> {
   return (State.integrations[id]?.data ?? {}) as Record<string, unknown>;
 }
 
+/** `get(id)[key]` as an array of records, or [] if it is missing or not an array. */
 function arr(id: string, key: string): Record<string, unknown>[] {
   const v = get(id)[key];
   return Array.isArray(v) ? (v as Record<string, unknown>[]) : [];
@@ -50,6 +54,7 @@ function arr(id: string, key: string): Record<string, unknown>[] {
 
 // ── Not configured / idle ─────────────────────────────────────────────────────
 
+/** Where the "open service" link goes, per integration id. */
 const OPEN_URLS: Record<string, string> = {
   integration_resend: "https://resend.com/emails",
   integration_vercel: "https://vercel.com/dashboard",
@@ -59,6 +64,10 @@ const OPEN_URLS: Record<string, string> = {
   integration_calcom: "https://app.cal.com/bookings",
 };
 
+/**
+ * Card for an integration with nothing to show: connection status plus
+ * contextual links (open the service, refresh, or go to settings).
+ */
 function idleCard(task: AgentTask, openSettings: () => void): HTMLElement {
   const info = State.integrations[task.id];
   const configured = info?.configured ?? false;
@@ -128,6 +137,7 @@ function idleCard(task: AgentTask, openSettings: () => void): HTMLElement {
 
 // ── Vercel ────────────────────────────────────────────────────────────────────
 
+/** Last three Vercel deployments; the first row has a button to open the detail. */
 function vercelCard(onDetail: () => void): HTMLElement {
   const deployments = arr("integration_vercel", "deployments");
   const rows = h("div", { class: "int-rows" });
@@ -149,6 +159,7 @@ function vercelCard(onDetail: () => void): HTMLElement {
   return h("div", { class: "int-card" }, header("#7C5CFF", "Vercel", t("integrations.kind.deployments")), rows);
 }
 
+/** Detail frame for the latest Vercel deployment (commit, branch, age, URL). */
 function vercelDetail(onBack: () => void): HTMLElement {
   const d = arr("integration_vercel", "deployments")[0] ?? {};
   const success = d.state === "READY";
@@ -186,6 +197,7 @@ function vercelDetail(onBack: () => void): HTMLElement {
 
 // ── Resend ────────────────────────────────────────────────────────────────────
 
+/** Last three Resend emails (recipient name, age, and the subject on the first). */
 function resendCard(): HTMLElement {
   const emails = arr("integration_resend", "emails");
   const total = get("integration_resend").total;
@@ -211,6 +223,7 @@ function resendCard(): HTMLElement {
 
 // ── GitHub ────────────────────────────────────────────────────────────────────
 
+/** One icon + label + value line of the GitHub card. */
 function statRow(name: IconName, color: string, label: string, value: string): HTMLElement {
   return h(
     "div",
@@ -221,6 +234,7 @@ function statRow(name: IconName, color: string, label: string, value: string): H
   );
 }
 
+/** GitHub overview: total stars and repositories. */
 function githubCard(): HTMLElement {
   const d = get("integration_github");
   const stars = Number(d.totalStars ?? 0);
@@ -241,6 +255,7 @@ function githubCard(): HTMLElement {
 
 // ── Stripe ────────────────────────────────────────────────────────────────────
 
+/** Stripe: balance (amounts come in cents) and the latest payments. */
 function stripeCard(): HTMLElement {
   const d = get("integration_stripe");
   const balance = (Number(d.balance ?? 0) / 100).toFixed(2);
@@ -275,6 +290,7 @@ function stripeCard(): HTMLElement {
 
 // ── Notion ────────────────────────────────────────────────────────────────────
 
+/** Notion: three recently edited pages, each opening in the browser. */
 function notionCard(): HTMLElement {
   const rows = h("div", { class: "int-rows tight" });
   for (const p of arr("integration_notion", "pages").slice(0, 3)) {
@@ -300,6 +316,7 @@ function notionCard(): HTMLElement {
 
 // ── Cal.com ───────────────────────────────────────────────────────────────────
 
+/** Cal.com: next three bookings in date order. */
 function calcomCard(): HTMLElement {
   const bookings = arr("integration_calcom", "bookings")
     .slice()
@@ -327,6 +344,7 @@ function calcomCard(): HTMLElement {
 
 // ── n8n ───────────────────────────────────────────────────────────────────────
 
+/** n8n: a pill for the last finished/failed workflow run; the idle card when there is none. */
 function n8nCard(task: AgentTask, onDetail: () => void, openSettings: () => void): HTMLElement {
   const hasActivity = task.steps.length > 0 && (task.state === "finished" || task.state === "error");
   if (!hasActivity) return idleCard(task, openSettings);
@@ -354,6 +372,7 @@ function n8nCard(task: AgentTask, onDetail: () => void, openSettings: () => void
   );
 }
 
+/** Detail frame of the last n8n run (steps[0] = workflow name, steps[1] = error/detail text). */
 function n8nDetail(task: AgentTask, onBack: () => void): HTMLElement {
   const success = task.state === "finished";
   const accent = success ? "#22C55E" : "#F4505E";
@@ -384,10 +403,13 @@ function n8nDetail(task: AgentTask, onBack: () => void): HTMLElement {
 
 // ── Dispatch ──────────────────────────────────────────────────────────────────
 
+/** What the host view provides to the integration cards. */
 export interface IntegrationCardHooks {
+  /** Whether the detail frame (Vercel/n8n) is showing instead of the summary. */
   detailOpen: boolean;
   openDetail(): void;
   closeDetail(): void;
+  /** Opens the settings window (for unconfigured integrations). */
   openSettings(): void;
 }
 
@@ -413,6 +435,10 @@ export function hasIntegrationData(id: string): boolean {
   }
 }
 
+/**
+ * Picks and builds the card for `task`: the n8n and Vercel cards (with their
+ * detail frames), a data card when `hasIntegrationData`, else the idle card.
+ */
 export function renderIntegrationCard(task: AgentTask, hooks: IntegrationCardHooks): HTMLElement {
   if (task.id === "integration_n8n") {
     const hasActivity = task.steps.length > 0 && (task.state === "finished" || task.state === "error");
@@ -441,4 +467,5 @@ export function renderIntegrationCard(task: AgentTask, hooks: IntegrationCardHoo
   }
 }
 
+/** Re-export so the overview can clear containers without a second import. */
 export { clear };

@@ -1,5 +1,10 @@
 // Chat view — DOM port of PromptView / ChatBubble / TypingDotsView from
 // IslandViewContent.swift.
+//
+// `buildPrompt` creates the whole chat: message log with search, streamed
+// draft, composer with `/` palette, attachment tray, provider/project/more
+// menus and the provider-profile editor. Turns run through the island's agent
+// layer (island/agent.ts); the island registers drops through `takeChatFiles`.
 
 import { h, clear, copyToClipboard } from "./dom";
 import { icon, type IconName } from "./icons";
@@ -80,6 +85,7 @@ function freshId(): number {
  * because the island's width is fixed and its height is what we are saving. */
 const CLIP_AT = 1400;
 
+/** Local `hh:mm` of a message timestamp, used as its hover title. */
 function clockOf(at: number): string {
   return new Date(at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
@@ -194,6 +200,12 @@ function sentAttachments(attachments: ChatAttachment[]): HTMLElement {
   return row;
 }
 
+/**
+ * Builds one message row: user bubble (with attachments), error card (with
+ * Retry when there is a prompt to resend) or assistant reply (steps, Markdown
+ * body and actions). `precedingUserText` and `onRetry` are described in the
+ * comment above `sentAttachments`.
+ */
 function bubble(message: ChatMessage, precedingUserText: string | null, onRetry: (query: string) => void): HTMLElement {
   if (message.role === "user") {
     const column = h("div", { class: "user-col" });
@@ -271,13 +283,16 @@ export function takeChatFiles(paths: string[]) {
  *  src-tauri/src/files.rs's own note on why: Rust only learns a drop's size
  *  after copying it, so the cap lives here, checked against what `ingest`
  *  already reports. */
+/** Per-message attachment count cap. */
 const MAX_ATTACHMENTS = 10;
+/** Per-file size cap for any attachment kind (20 MiB). */
 const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
 /** Tighter cap for the paste/file-picker path specifically, which can only
  *  ever carry an image (Bridge.pasteImage → files.rs's ingest_bytes, which
  *  hard-refuses anything over this) — mirrors files.rs's own MAX_IMAGE_BYTES. */
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 
+/** Extension sets that decide an attachment's kind (see `kindOf`). */
 const IMAGE_EXTS = new Set(["png", "jpg", "jpeg", "webp", "gif", "bmp"]);
 const CODE_EXTS = new Set([
   "ts", "tsx", "js", "jsx", "mjs", "cjs", "py", "rs", "go", "java", "c", "cpp", "h", "hpp",
@@ -298,11 +313,13 @@ function kindOf(name: string): ChatAttachment["kind"] {
   return "other";
 }
 
+/** File extension without the dot, or "" when the name has none. */
 function extensionOf(name: string): string {
   const ext = name.split(".").pop();
   return ext && ext !== name ? ext : "";
 }
 
+/** Glyph per non-image attachment kind. */
 const KIND_ICON: Record<Exclude<ChatAttachment["kind"], "image">, IconName> = {
   pdf: "pdf",
   code: "code",
@@ -352,6 +369,7 @@ function attachmentTile(file: DroppedFile, onRemove: () => void): HTMLElement {
   return tile;
 }
 
+/** Final segment of a Windows or POSIX path (the folder or file name). */
 function lastPathComponent(path: string): string {
   const parts = path.split(/[\\/]/).filter(Boolean);
   return parts[parts.length - 1] ?? path;
@@ -393,6 +411,12 @@ function placeholder(): string {
   return t("chat.placeholderAsk");
 }
 
+/**
+ * Builds the chat view. `onHeightChange` asks the island to re-measure and
+ * resize whenever the content height may have changed (messages, tray, find
+ * bar, palette). `sync()` is incremental: history, draft, tray and avatar are
+ * each re-rendered only when their own key changes.
+ */
 export function buildPrompt(onHeightChange: () => void): ViewHost {
   const shotRow = h("div", { class: "shot-row" });
   const log = h("div", { class: "chat-log" });
@@ -465,6 +489,7 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
   // and a click anywhere outside the open one's own item closes it too.
   let activeMenu: { item: HTMLElement; popover: HTMLElement } | null = null;
 
+  /** Closes and empties the open dropdown, if any. */
   function closeActiveMenu() {
     if (!activeMenu) return;
     activeMenu.popover.classList.remove("open");
@@ -590,13 +615,17 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
     true,
   );
 
+  /** True while an agent/provider turn is in flight. */
   let sending = false;
+  // Render sentinels: each region of the view is redrawn only when its key
+  // differs; setting one to -1 / "" forces a redraw on the next sync().
   let renderedCount = -1;
   let renderedDraft = "";
   let renderedShots = "";
   let renderedAvatar = "";
   let shownLocale = getLocale();
   let paletteKey = "";
+  /** Index of the highlighted `/` command in the palette. */
   let highlighted = 0;
   /** Whether new text should scroll into view — false once the user reads back. */
   let stick = true;
@@ -618,6 +647,7 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
     input.style.height = `${input.scrollHeight}px`;
   }
 
+  /** Shows or hides the find bar; closing clears the query and refocuses the composer. */
   function openFind(open: boolean) {
     State.chatQuery = open ? (State.chatQuery ?? "") : null;
     findBar.classList.toggle("open", open);
@@ -644,6 +674,7 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
     State.notify();
   }
 
+  /** Moves the current hit by `by` (wrapping), scrolls it into view and stops auto-follow. */
   function goToMatch(by: number) {
     if (marks.length === 0) return;
     current = step(matches, current, by);
@@ -657,6 +688,7 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
   closeFind.addEventListener("click", () => openFind(false));
   prevBtn.addEventListener("click", () => goToMatch(-1));
   nextBtn.addEventListener("click", () => goToMatch(1));
+  /** Debounce handle so typing does not re-search on every keystroke (120 ms). */
   let findDebounce: number | undefined;
   findInput.addEventListener("input", () => {
     window.clearTimeout(findDebounce);
@@ -683,6 +715,7 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
   // One repaint per frame however fast the tokens arrive: a reply streams in
   // faster than the island can usefully be redrawn.
   let painting = false;
+  /** Schedules a single state notification and height update on the next frame. */
   function paint() {
     if (painting) return;
     painting = true;
@@ -775,6 +808,7 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
     }
   });
 
+  // Registered for takeChatFiles: the island hands dropped paths here.
   intoChat = (paths) => {
     dropZone.classList.remove("dropping");
     // The short swallow (plan-v2.md § 5.2, ≤600ms, skipped under
@@ -785,6 +819,7 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
     void attach(paths);
   };
 
+  // Streamed turn pieces from Rust: text extends the draft, anything else is a step label.
   void onEvent<AgentTurn>("agent-turn", (turn) => {
     if (turn.kind === "text") State.chatDraft += turn.text;
     else State.chatSteps.push(turn.label);
@@ -811,11 +846,17 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
   // over the same click).
   let providerEditorEl: HTMLElement | null = null;
 
+  /** Removes the provider editor sheet, if open. */
   function closeProviderEditor() {
     providerEditorEl?.remove();
     providerEditorEl = null;
   }
 
+  /**
+   * Opens the add/edit sheet for a provider profile (none = new). Saving also
+   * stores the key in the secret store (blank keeps the current one), reloads
+   * the profiles and selects it; Delete drops the profile and the selection.
+   */
   function openProviderEditor(profile?: ProviderProfile) {
     closeProviderEditor();
     const labelInput = h("input", { type: "text", value: profile?.label ?? "" }) as HTMLInputElement;
@@ -842,6 +883,7 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
       field(t("chat.providerKeyField"), keyInput),
     );
 
+    /** Persists the profile and its key, then selects it. */
     async function save() {
       const saved = await Bridge.providerSave({
         id: profile?.id,
@@ -860,6 +902,7 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
       input.focus();
     }
 
+    /** Deletes the profile being edited. */
     async function remove() {
       if (!profile) return;
       await Bridge.providerDelete(profile.id);
@@ -1005,6 +1048,7 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
     return matchingCommands(input.value.trim());
   }
 
+  /** Replaces the input with the highlighted command; false if there is none. */
   function applyHighlighted() {
     const matches = currentMatches();
     const chosen = matches[highlighted];
@@ -1014,6 +1058,7 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
     return true;
   }
 
+  /** Redraws the `/` palette only when its matches or highlight changed. */
   function syncPalette() {
     const matches = currentMatches();
     const key = `${matches.map((m) => m.name).join(",")}|${highlighted}`;
@@ -1203,6 +1248,10 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
     autoGrow();
     State.notify(); // the send button's "nothing to send yet" dimming
   });
+  // Composer keys: Ctrl+F find; Up/Down/Tab/Enter drive the `/` palette; Enter
+  // sends (Shift+Enter = newline); Escape stops a turn or closes the find bar;
+  // Up on an empty input recalls the last sent message. Propagation is stopped
+  // so the island's own shortcuts do not fire while typing.
   input.addEventListener("keydown", (e) => {
     const ke = e as KeyboardEvent;
     const key = ke.key;

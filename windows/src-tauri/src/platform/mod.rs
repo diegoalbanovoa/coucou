@@ -1,7 +1,11 @@
-// Everything that differs between operating systems, behind one set of names.
-//
-// The rest of the app calls `platform::…` and never touches Win32 or a Linux
-// API directly. Each OS file exposes the same functions; the compiler picks one.
+//! Everything that differs between operating systems, behind one set of names.
+//!
+//! The rest of the app calls `platform::...` and never touches Win32 or a Linux
+//! API directly. Each OS file exposes the same functions; the compiler picks one
+//! with `#[cfg]` and re-exports it here. The cross-platform types ([`Drive`],
+//! [`RawProc`], [`LocalTime`]) live in this file so callers and both backends
+//! agree on their shape; they carry no serde derives (the wire format belongs to
+//! the callers, e.g. `system.rs`).
 
 use std::path::PathBuf;
 
@@ -31,9 +35,12 @@ pub struct Drive {
 /// happens to have the same pid now".
 pub struct RawProc {
     pub pid: u32,
+    /// Parent process id; 0 when unknown.
     pub ppid: u32,
     pub name: String,
+    /// Memory in use by the process, in bytes (resident set).
     pub memory: u64,
+    /// Opaque start stamp; 0 means it could not be read.
     pub start_time: u64,
 }
 

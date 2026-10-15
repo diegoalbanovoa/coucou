@@ -1,11 +1,15 @@
-// Chat-only provider profiles: any OpenAI-compatible HTTP endpoint
-// (OpenRouter, Ollama, LM Studio, LiteLLM, ...), streamed, with no tool
-// access at all — see openspec/changes/provider-chat-profiles.
-//
-// Deliberately separate from agents.rs/consoles.rs: those are built around
-// spawning a CLI executable and parsing its stream-json stdout. This is
-// built around one HTTP POST and a hand-rolled SSE reader — no new crate,
-// no new reqwest feature (`Response::chunk()` needs neither).
+//! Chat-only provider profiles: any OpenAI-compatible HTTP endpoint
+//! (OpenRouter, Ollama, LM Studio, LiteLLM, ...), streamed, with no tool
+//! access at all — see openspec/changes/provider-chat-profiles.
+//!
+//! Deliberately separate from agents.rs/consoles.rs: those are built around
+//! spawning a CLI executable and parsing its stream-json stdout. This is
+//! built around one HTTP POST and a hand-rolled SSE reader — no new crate,
+//! no new reqwest feature (`Response::chunk()` needs neither).
+//!
+//! Profiles are small JSON files under `config_dir()/providers/`; the API key
+//! never touches them (it lives in the OS keychain via `secrets`, under
+//! [`key_for`]). Called from the `provider_*` Tauri commands in `lib.rs`.
 
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -35,9 +39,13 @@ const OLLAMA_PROBE_TIMEOUT: Duration = Duration::from_secs(2);
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]
 #[serde(rename_all = "camelCase", default)]
 pub struct ProviderProfile {
+    /// Generated UUID, also the file name and the keychain key suffix.
     pub id: String,
+    /// Display name chosen by the user.
     pub label: String,
+    /// Endpoint root without a trailing slash; `/chat/completions` is appended.
     pub base_url: String,
+    /// Model identifier sent in each request.
     pub model: String,
 }
 
@@ -49,13 +57,17 @@ pub struct ProviderProfileView {
     pub label: String,
     pub base_url: String,
     pub model: String,
+    /// Whether a key exists in the keychain; the key itself is never exposed.
     pub key_set: bool,
 }
 
+/// Directory holding one `<id>.json` file per profile.
 fn dir() -> PathBuf {
     platform::config_dir().join("providers")
 }
 
+/// File path of the profile `id`. `id` must be a generated UUID, never
+/// user-typed, or it could escape the directory.
 fn path_for(id: &str) -> PathBuf {
     dir().join(format!("{id}.json"))
 }
@@ -74,6 +86,7 @@ fn parse(bytes: &[u8]) -> Option<ProviderProfile> {
     serde_json::from_slice(text).ok()
 }
 
+/// Adds the derived `key_set` flag (a keychain lookup) to a profile.
 fn view(profile: ProviderProfile) -> ProviderProfileView {
     let key_set = secrets::present(&key_for(&profile.id));
     ProviderProfileView {
@@ -100,6 +113,7 @@ pub fn list() -> Vec<ProviderProfileView> {
     profiles.into_iter().map(view).collect()
 }
 
+/// Loads one profile by id; `None` if the file is missing or unparsable.
 pub fn load(id: &str) -> Option<ProviderProfile> {
     let bytes = std::fs::read(path_for(id)).ok()?;
     parse(&bytes)
@@ -132,6 +146,8 @@ pub fn update(id: &str, label: &str, base_url: &str, model: &str) -> std::io::Re
     Ok(profile)
 }
 
+/// Persists a profile (pretty JSON, atomic via temp file + rename) in a
+/// private directory. Overwrites any existing file with the same id.
 fn write(profile: &ProviderProfile) -> std::io::Result<()> {
     platform::ensure_private_dir(&dir())?;
     let bytes = serde_json::to_vec_pretty(profile)
@@ -159,6 +175,7 @@ pub fn delete(id: &str) -> Result<(), String> {
 
 // ── Sending a turn ─────────────────────────────────────────────────────────
 
+/// Builds a `reqwest` client with the given overall request timeout.
 fn client(timeout: Duration) -> reqwest::Client {
     reqwest::Client::builder()
         .timeout(timeout)
@@ -170,9 +187,14 @@ fn client(timeout: Duration) -> reqwest::Client {
 /// chat, not a raw HTTP/transport error. See design.md decision 3.3.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ProviderError {
+    /// HTTP 401/403: the endpoint rejected the API key.
     InvalidKey,
+    /// Timeout or connection failure: the endpoint could not be reached.
     NoNetwork,
+    /// HTTP 429: rate limited or out of quota.
     RateLimited,
+    /// Anything else, with a human-readable detail (status or the body's own
+    /// error message).
     Endpoint(String),
 }
 
@@ -199,7 +221,10 @@ impl ProviderError {
 #[derive(Deserialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct HistoryMessage {
+    /// `user`, `assistant` or something else the webview shows (e.g. errors),
+    /// which `fit_history` filters out.
     pub role: String,
+    /// Plain message text.
     pub content: String,
 }
 
@@ -247,11 +272,14 @@ pub fn dropped_by_fit(history: &[HistoryMessage], budget: usize) -> Vec<HistoryM
 /// that no longer fits. Both are data for the model, never instructions.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct MemoryContext {
+    /// Texts of the retrieved pinned notes.
     pub notes: Vec<String>,
+    /// Summary of the conversation that fell out of the history budget.
     pub summary: Option<String>,
 }
 
 impl MemoryContext {
+    /// True when there is nothing to add, so no system message is sent.
     fn is_empty(&self) -> bool {
         self.notes.is_empty() && self.summary.is_none()
     }
@@ -300,6 +328,12 @@ pub fn build_messages(history: &[HistoryMessage], memory: Option<&MemoryContext>
 /// to `on` as they arrive — the same shape `agent::send` already emits, so
 /// the chat's rendering code does not need to branch on which backend is
 /// replying. Returns the full assembled text, or a readable error.
+///
+/// The key is read from the keychain per call and sent only as a bearer
+/// token to the profile's own `base_url`. `cancel` is armed for the whole
+/// turn and always disarmed on exit; once it fires the partial text is
+/// returned as a normal `Ok`. A stream that breaks midway also ends with the
+/// text received so far rather than an error.
 pub async fn send(
     profile: &ProviderProfile,
     history: &[HistoryMessage],
@@ -388,21 +422,26 @@ pub async fn send(
 /// What a provider turn returns: the text, and whatever the endpoint reported
 /// about tokens and cost (nothing, for many endpoints).
 pub struct Reply {
+    /// The full assistant text assembled from the stream.
     pub text: String,
+    /// Token counts and cost; all-`None` when the endpoint reports none.
     pub usage: Usage,
 }
 
 /// Profiles whose endpoint refused `stream_options` this session.
 static NO_USAGE: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
 
+/// Lazily-initialized access to [`NO_USAGE`].
 fn no_usage() -> &'static Mutex<HashSet<String>> {
     NO_USAGE.get_or_init(Default::default)
 }
 
+/// True if this profile's endpoint already refused `stream_options`.
 fn skips_usage(profile_id: &str) -> bool {
     no_usage().lock().unwrap().contains(profile_id)
 }
 
+/// Records (for this session only) that the profile cannot take `stream_options`.
 fn remember_no_usage(profile_id: &str) {
     no_usage().lock().unwrap().insert(profile_id.to_string());
 }
@@ -453,6 +492,8 @@ fn parse_sse_line(line: &str) -> Option<String> {
         .map(|s| s.to_string())
 }
 
+/// Maps a transport failure: timeouts and connect errors mean "no network",
+/// anything else is passed through as an endpoint error.
 fn classify_transport_error(err: &reqwest::Error) -> ProviderError {
     if err.is_timeout() || err.is_connect() {
         ProviderError::NoNetwork
@@ -461,6 +502,7 @@ fn classify_transport_error(err: &reqwest::Error) -> ProviderError {
     }
 }
 
+/// `None` for 2xx; otherwise the [`ProviderError`] the HTTP status stands for.
 fn classify_status(response: &reqwest::Response) -> Option<ProviderError> {
     match response.status().as_u16() {
         200..=299 => None,
@@ -486,18 +528,22 @@ fn refine_with_body(err: ProviderError, body: &str) -> ProviderError {
 
 // ── Ollama auto-detection ────────────────────────────────────────────────────
 
+/// A model reported by a local Ollama server.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct OllamaModel {
+    /// Model tag as Ollama names it (e.g. `llama3:8b`).
     pub name: String,
 }
 
+/// The part of Ollama's `/api/tags` reply we read.
 #[derive(Deserialize)]
 struct OllamaTagsResponse {
     #[serde(default)]
     models: Vec<OllamaTagEntry>,
 }
 
+/// One entry of [`OllamaTagsResponse`].
 #[derive(Deserialize)]
 struct OllamaTagEntry {
     name: String,

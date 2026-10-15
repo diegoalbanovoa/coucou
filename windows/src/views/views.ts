@@ -1,6 +1,8 @@
 // Island views — DOM ports of IslandViewContent.swift. Paddings, font sizes,
 // colours and wording are copied from the Swift views so both platforms read
 // identically.
+// `buildViews` is the registry the island uses to create every view once and
+// switch between them; each view is a `ViewHost`.
 
 import { h, clear, dot } from "./dom";
 import { icon } from "./icons";
@@ -16,24 +18,34 @@ import { renderIntegrationCard, type IntegrationCardHooks } from "./integrations
 import { t, getLocale } from "../i18n/index";
 import { healthTooltip } from "../island/health";
 
+/** What views may ask the island to do; implemented by island.ts. */
 export interface ViewActions {
   setView(v: IslandViewName): void;
+  /** Closes the expanded island. */
   collapse(): void;
+  /** Focuses the pill/task with this id. */
   setFocus(id: string): void;
+  /** Brings the user's terminal to the front. */
   openTerminal(): void;
   /** The ↗ button: opens whatever the focused pill points at. */
   openTarget(): void;
   openUrl(url: string): void;
+  /** Answers the pending permission request. */
   decide(d: "allow" | "deny"): void;
   toggleSound(): void;
   setVolume(v: number): void;
+  /** Sets how long the island stays open after the last interaction. */
   setAutoClose(seconds: number): void;
   openSettingsWindow(): void;
+  /** Plays the UI click sound. */
   blip(): void;
 }
 
+/** The contract every island view implements; only `el` and `sync` are mandatory. */
 export interface ViewHost {
+  /** Root element, created once and reused. */
   el: HTMLElement;
+  /** Brings the DOM in line with `State`; called on every state notification, so keep it cheap. */
   sync(): void;
   /** Called when the view becomes active, for views with a text field. */
   focus?(): void;
@@ -55,12 +67,14 @@ export interface ViewHost {
 
 // ── Shared pieces ─────────────────────────────────────────────────────────────
 
+/** A rounded card, optionally tinted with a colour wash (approval = amber, error = red...). */
 function card(wash: Wash, ...children: (Node | string)[]): HTMLElement {
   const el = h("div", { class: wash ? "card wash" : "card" }, ...children);
   if (wash) el.style.setProperty("--wash", washRGBA(wash));
   return el;
 }
 
+/** Pill button with an optional keyboard-shortcut hint. */
 function btn(
   label: string,
   kind: "primary" | "secondary",
@@ -85,6 +99,7 @@ function agentWho(task: AgentTask | null, label: string): HTMLElement {
   return row;
 }
 
+/** Padded column used inside cards; the left padding clears Mochi's face. */
 function stack(padLeft: number, padRight: number, ...children: Node[]): HTMLElement {
   const el = h("div", { class: "stack" }, ...children);
   el.style.padding = `4px ${padRight}px 4px ${padLeft}px`;
@@ -93,6 +108,10 @@ function stack(padLeft: number, padRight: number, ...children: Node[]): HTMLElem
 
 // ── Header ────────────────────────────────────────────────────────────────────
 
+/**
+ * The island's top bar: Home / Chat / System tabs (with a health badge on
+ * System) and the settings and sound buttons. Hidden while Mochi is dizzy.
+ */
 export function buildHeader(actions: ViewActions): ViewHost {
   const tabHome = h("button", { class: "tab", onclick: () => go("overview") }, icon("house", { size: 13 }));
   const tabChat = h("button", { class: "tab", onclick: () => go("prompt") }, icon("bubble", { size: 13 }));
@@ -107,6 +126,7 @@ export function buildHeader(actions: ViewActions): ViewHost {
   const gearBtn = h("button", { onclick: () => go("settings") }, icon("gear", { size: 14 }));
   const soundBtn = h("button", { onclick: () => actions.toggleSound() }, icon("speakerOn", { size: 14 }));
 
+  /** Switches view with a click sound. */
   function go(v: IslandViewName) {
     actions.blip();
     actions.setView(v);
@@ -159,6 +179,10 @@ export function buildHeader(actions: ViewActions): ViewHost {
 
 // ── Overview ──────────────────────────────────────────────────────────────────
 
+/**
+ * Home view: left card shows the ticker for a live Claude Code session or the
+ * focused integration's card; right card is the consoles/services pane.
+ */
 function buildOverview(actions: ViewActions): ViewHost {
   const ticker = new Ticker();
   const who = h("div", { class: "who" });
@@ -308,6 +332,7 @@ function buildEmpty(actions: ViewActions): ViewHost {
 
 // ── Approval ──────────────────────────────────────────────────────────────────
 
+/** Permission request: shows the command or tool being authorised with Deny/Allow buttons. */
 function buildApproval(actions: ViewActions): ViewHost {
   const who = h("div");
   const code = h("div", { class: "code" });
@@ -340,6 +365,7 @@ function buildApproval(actions: ViewActions): ViewHost {
 
 // ── Question ──────────────────────────────────────────────────────────────────
 
+/** The agent asked a question; answering happens in the terminal. */
 function buildQuestion(): ViewHost {
   const who = h("div");
   const title = h("div", { class: "title" });
@@ -360,6 +386,7 @@ function buildQuestion(): ViewHost {
 
 // ── Error ─────────────────────────────────────────────────────────────────────
 
+/** Session/workflow stopped on error, with the last step as detail. */
 function buildError(actions: ViewActions): ViewHost {
   const who = h("div");
   const title = h("div", { class: "title" });
@@ -389,6 +416,7 @@ function buildError(actions: ViewActions): ViewHost {
 
 // ── Finished ──────────────────────────────────────────────────────────────────
 
+/** Session finished; offers to open the terminal or dismiss. */
 function buildFinished(actions: ViewActions): ViewHost {
   const who = h("div");
   const title = h("div", { class: "title" });
@@ -415,6 +443,7 @@ function buildFinished(actions: ViewActions): ViewHost {
 
 // ── Confused ──────────────────────────────────────────────────────────────────
 
+/** Shown after Mochi is slapped three times (dizzy). */
 function buildConfused(): ViewHost {
   const title = h("div", { class: "title" });
   const sub = h("div", { class: "sub" });
@@ -430,6 +459,7 @@ function buildConfused(): ViewHost {
 
 // ── Note ──────────────────────────────────────────────────────────────────────
 
+/** Shows `State.noteMessage` as a one-line notice. */
 function buildNote(): ViewHost {
   const title = h("div", { class: "title" });
   const el = h("div", { class: "view" }, card(null, h("div", { class: "stack", style: "padding:0 18px 0 98px" }, title)));
@@ -443,6 +473,7 @@ function buildNote(): ViewHost {
 
 // ── In-island settings ────────────────────────────────────────────────────────
 
+/** Quick in-island settings: sound, volume, auto-close and connection badges. */
 function buildSettings(actions: ViewActions): ViewHost {
   const soundSwitch = h("button", { class: "switch", onclick: () => actions.toggleSound() });
   const volume = h("input", {
@@ -510,6 +541,7 @@ function buildSettings(actions: ViewActions): ViewHost {
 
 // ── Placeholders filled in later stages ───────────────────────────────────────
 
+/** Stub view for features not available on Windows yet; takes i18n keys for its text. */
 function buildPlaceholder(titleKey: Parameters<typeof t>[0], subKey?: Parameters<typeof t>[0]): ViewHost {
   const title = h("div", { class: "title" });
   const sub = h("div", { class: "sub" });
@@ -525,6 +557,10 @@ function buildPlaceholder(titleKey: Parameters<typeof t>[0], subKey?: Parameters
 
 // ── Registry ──────────────────────────────────────────────────────────────────
 
+/**
+ * Creates every view once, keyed by name. `onChatHeightChange` lets the chat
+ * ask the island to resize as its content grows.
+ */
 export function buildViews(
   actions: ViewActions,
   onChatHeightChange: () => void,

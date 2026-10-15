@@ -14,6 +14,7 @@ export interface ConsoleLike {
   verified: boolean;
 }
 
+/** Visual state of one console tile, as computed by `tileStateFor`. */
 export type TileState = "normal" | "selected" | "unverified";
 
 /** A console's own visual state — never "not-found": that is a fact about

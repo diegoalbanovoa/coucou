@@ -8,6 +8,7 @@
 // this module for those colours. They are here so a later decision to add
 // shells does not also need a new palette.
 
+/** Face colour per console id (the ids `consoles.rs` reports); read via `consoleColor`. */
 export const CONSOLE_PALETTE: Record<string, string> = {
   claude: "#d97757",
   gemini: "#4e8cf7",
@@ -27,6 +28,7 @@ export const CONSOLE_PALETTE: Record<string, string> = {
  *  anything not in the table above, rather than a crash or a blank. */
 export const UNKNOWN_CONSOLE_COLOR = "#8e939c";
 
+/** Colour for a console id, `UNKNOWN_CONSOLE_COLOR` when it is not in the palette. */
 export function consoleColor(id: string): string {
   return CONSOLE_PALETTE[id] ?? UNKNOWN_CONSOLE_COLOR;
 }

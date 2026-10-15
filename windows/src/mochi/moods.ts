@@ -7,36 +7,51 @@
 // describes it — "se dibujan el tinte, los párpados, las mejillas... el
 // vaivén... la tos". `engine.ts` is the file that actually draws any of this.
 
+/** Machine health as shown on Mochi; produced by the island health logic. */
 export type HealthLevel = "ok" | "strained" | "sick";
 
+/** A periodic tremor: starts every `everyMs`, lasts `durationMs`. */
 export interface Shiver {
   everyMs: number;
   durationMs: number;
+  /** Horizontal amplitude in CSS pixels. */
   ampPx: number;
+  /** Oscillation frequency. */
   hz: number;
 }
 
+/** Every visual knob a mood controls; `engine.ts` reads it each frame. */
 export interface MoodParams {
   /** Always a real colour, even at `ok` — `tintAmount` is what makes it
    *  invisible there, so there is never a null to special-case. */
   tint: string;
+  /** 0..1 mix of `tint` over the body colour. */
   tintAmount: number;
+  /** 0..1 how far the eyelids droop over the eyes. */
   eyeLid: number;
   eyeStyle: "normal" | "tired" | "closedArc";
+  /** Downward gaze offset, px. */
   eyeLookY: number;
+  /** Min/max ms between blinks (random in range). */
   blinkEveryMs: readonly [number, number];
+  /** Multiplier on the breathing period (>1 = slower breathing). */
   breathPeriodScale: number;
+  /** Sideways sway amplitude, px, and its frequency. */
   swayAmpPx: number;
   swayHz: number;
   tiltDeg: number;
+  /** Ms between sweat drops, or null for none. */
   sweatEveryMs: number | null;
   sweatDrops: 1 | 2;
+  /** 0..1 cheek blush opacity. */
   blush: number;
   thermometer: boolean;
   shiver: Shiver | null;
+  /** Min/max ms between coughs, or null for none. */
   coughEveryMs: readonly [number, number] | null;
 }
 
+/** The three mood presets, indexed by [HealthLevel]. */
 export const MOODS: Record<HealthLevel, MoodParams> = {
   ok: {
     tint: "#cfebd2",
@@ -97,11 +112,13 @@ export const MOODS: Record<HealthLevel, MoodParams> = {
 /** How long a mood blends into the next one. */
 export const MOOD_BLEND_MS = 600;
 
+/** Parses `#rrggbb` into 0..255 channels (no shorthand or alpha support). */
 function hexToRgb(hex: string): [number, number, number] {
   const v = parseInt(hex.replace("#", ""), 16);
   return [(v >> 16) & 255, (v >> 8) & 255, v & 255];
 }
 
+/** Channel-wise linear blend of two `#rrggbb` colours, returned as `#rrggbb`. */
 function lerpColor(a: string, b: string, t: number): string {
   const [ar, ag, ab] = hexToRgb(a);
   const [br, bg, bb] = hexToRgb(b);
@@ -109,6 +126,7 @@ function lerpColor(a: string, b: string, t: number): string {
   return `#${ch(ar, br)}${ch(ag, bg)}${ch(ab, bb)}`;
 }
 
+/** Linear interpolation of two numbers. */
 const num = (a: number, b: number, t: number) => a + (b - a) * t;
 
 /**
@@ -158,6 +176,7 @@ export function mulberry32(seed: number): () => number {
   };
 }
 
+/** Which ambient events fired on one [MoodScheduler.tick]. */
 export interface MoodTick {
   blink: boolean;
   sweat: boolean;
@@ -175,7 +194,9 @@ export interface MoodTick {
  * risk than this file being the one new thing an active mood adds.
  */
 export class MoodScheduler {
+  /** Seeded generator; the same seed yields the same event calendar. */
   private rng: () => number;
+  /** Absolute due times (ms, caller's clock); null = that event is off. */
   private nextBlinkAt = 0;
   private nextSweatAt: number | null = null;
   private nextCoughAt: number | null = null;
@@ -185,6 +206,7 @@ export class MoodScheduler {
     this.rng = mulberry32(seed);
   }
 
+  /** Uniform random value in `[lo, hi)` from the seeded generator. */
   private inRange([lo, hi]: readonly [number, number]): number {
     return lo + this.rng() * (hi - lo);
   }

@@ -1,11 +1,15 @@
-// What each backend has been asked and how it went: turns, latency, tokens
-// and — only when the source reports one — cost. Kept in memory for the
-// session (nothing is written to disk, nothing leaves the machine) and shown
-// in System → Usage. See docs/plan-v4-notas.md, Fase 4.
-//
-// Energy is deliberately not measured: it cannot be done reliably without
-// hardware counters. Cost is never computed from a price table, only passed
-// through when the endpoint or the CLI says what the turn cost.
+//! What each backend has been asked and how it went: turns, latency, tokens
+//! and -- only when the source reports one -- cost. Kept in memory for the
+//! session (nothing is written to disk, nothing leaves the machine) and shown
+//! in System -> Usage. See docs/plan-v4-notas.md, Fase 4.
+//!
+//! Energy is deliberately not measured: it cannot be done reliably without
+//! hardware counters. Cost is never computed from a price table, only passed
+//! through when the endpoint or the CLI says what the turn cost.
+//!
+//! Recorders: the agent chat, provider chat, the quick assistant and routines
+//! each build a [`Clock`], then push a [`TurnRecord`] into the shared [`Ledger`]
+//! (Tauri managed state). The Ledger holds at most [`LEDGER_CAP`] turns.
 
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -18,6 +22,8 @@ use serde_json::Value;
 /// The ledger keeps the most recent turns and forgets the oldest.
 pub const LEDGER_CAP: usize = 500;
 
+/// Token counts and cost reported for a turn. Each field is `None` until a source
+/// reports it, so "unknown" is never confused with zero.
 #[derive(Serialize, Clone, Debug, Default, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Usage {
@@ -38,11 +44,13 @@ impl Usage {
         };
     }
 
+    /// True when nothing at all was reported.
     pub fn is_empty(&self) -> bool {
         *self == Usage::default()
     }
 }
 
+/// Sums two optional counts; stays `None` only if both are `None`.
 fn sum_opt(a: Option<u64>, b: Option<u64>) -> Option<u64> {
     match (a, b) {
         (None, None) => None,
@@ -70,19 +78,25 @@ pub fn from_openai_usage(value: &Value) -> Option<Usage> {
     }
 }
 
+/// One finished turn as stored in the [`Ledger`].
 #[derive(Clone, Debug, PartialEq)]
 pub struct TurnRecord {
     /// `cli:<id>`, `provider:<profile id>`, `quick:<profile id>` or, later,
     /// `routine:<id>`.
     pub backend: String,
     pub label: String,
+    /// When the turn finished, in ms since the Unix epoch.
     pub at_ms: u64,
+    /// Latency to the first streamed text, if the backend streamed any.
     pub first_text_ms: Option<u64>,
+    /// Total duration of the turn in ms.
     pub total_ms: u64,
     pub usage: Usage,
+    /// False for turns that ended in an error.
     pub ok: bool,
 }
 
+/// Per-backend aggregate sent to the System -> Usage view.
 #[derive(Serialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct BackendSummary {
@@ -90,17 +104,21 @@ pub struct BackendSummary {
     pub label: String,
     pub turns: usize,
     pub errors: usize,
+    /// Median time to first text, over the turns that had one.
     pub p50_first_text_ms: Option<u64>,
+    /// Median total duration.
     pub p50_total_ms: u64,
     pub input_tokens: Option<u64>,
     pub output_tokens: Option<u64>,
     pub cost_usd: Option<f64>,
 }
 
+/// In-memory, bounded log of turns shared across threads. Never persisted.
 #[derive(Default)]
 pub struct Ledger(Mutex<VecDeque<TurnRecord>>);
 
 impl Ledger {
+    /// Appends a turn, dropping the oldest beyond [`LEDGER_CAP`].
     pub fn record(&self, r: TurnRecord) {
         let mut turns = self.0.lock().unwrap();
         turns.push_back(r);
@@ -109,6 +127,7 @@ impl Ledger {
         }
     }
 
+    /// Forgets every recorded turn (the "clear" button in the Usage view).
     pub fn reset(&self) {
         self.0.lock().unwrap().clear();
     }
@@ -168,9 +187,11 @@ pub struct Clock {
     first: Arc<AtomicU64>,
 }
 
+/// Sentinel meaning no text has been marked yet.
 const UNSET: u64 = u64::MAX;
 
 impl Clock {
+    /// Starts timing now.
     pub fn start() -> Self {
         Clock { began: Instant::now(), first: Arc::new(AtomicU64::new(UNSET)) }
     }
@@ -181,6 +202,7 @@ impl Clock {
         let _ = self.first.compare_exchange(UNSET, now, Ordering::SeqCst, Ordering::SeqCst);
     }
 
+    /// Ms from start to the first marked text, or `None` if none yet.
     pub fn first_text_ms(&self) -> Option<u64> {
         match self.first.load(Ordering::SeqCst) {
             UNSET => None,
@@ -188,6 +210,7 @@ impl Clock {
         }
     }
 
+    /// Ms elapsed since start.
     pub fn total_ms(&self) -> u64 {
         self.began.elapsed().as_millis() as u64
     }
