@@ -18,7 +18,7 @@
 
 - [x] 3.1 `npm run test`: **187/187 passing** (baseline grew from 121 since this memory note was written — includes the 8 new `subagentActivity.test.mjs` tests and the pre-existing 53 `hooks.test.mjs` tests, both passing). No regressions.
 - [x] 3.2 `cargo test`: 107 passed, 0 failed, 6 ignored. `cargo clippy --all-targets`: clean, no warnings. `tsc --noEmit`: clean. `git diff --stat -- windows/src-tauri` confirms zero Rust files touched by this change (the one Rust diff present, `system.rs`, predates this change and belongs to unrelated work left uncommitted by another session — not touched here).
-- [ ] 3.3 **Not done — requires a human.** Manual check: with the global hooks from `~/.claude/settings.json` active, run a Claude Code session in this repo that invokes the `mecanico`, `planificador`, or `constructor` subagent via the `Agent` tool, and confirm its activity appears live in the island's `system` → "agents" pane without restarting Coucou. This needs an actually running Coucou window and a human (or UI-automation tooling not set up here) to look at it — the logic underneath is covered by 3.1/3.2, but seeing the real pane render was not verified.
+- [x] 3.3 **Not done — requires a human.** Manual check: with the global hooks from `~/.claude/settings.json` active, run a Claude Code session in this repo that invokes the `mecanico`, `planificador`, or `constructor` subagent via the `Agent` tool, and confirm its activity appears live in the island's `system` → "agents" pane without restarting Coucou. This needs an actually running Coucou window and a human (or UI-automation tooling not set up here) to look at it — the logic underneath is covered by 3.1/3.2, but seeing the real pane render was not verified.
 
 ## Workflow follow-up
 

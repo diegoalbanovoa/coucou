@@ -61,11 +61,11 @@ Con `npm run tauri dev` o con una build de `npx tauri build`. Proveedor en la nu
 
 ### Resultados de Diego
 
-(pendientes: copiar aquí tal cual cuando los entregue)
+Diego confirmó el 2026-10-15 que las pruebas A, B y C pasaron (sin detalle por casilla; confirmación en la conversación).
 
 ### Estado de cierre de la Fase 0
 
-Hecho: línea base, notas, listas de prueba, regeneración de `windows/_prive/estado-actual.md`, rama `windows/v4`. Pendiente de humano: pruebas A, B y C, y con ellas el marcado de `tasks.md` y el archivo de openspec.
+Hecho: línea base, notas, listas de prueba, regeneración de `windows/_prive/estado-actual.md`, rama `windows/v4`. Cierre 2026-10-15: pruebas A, B y C confirmadas por Diego; marcados `tasks.md` 3.3/7.4 y archivados con `openspec archive` los tres cambios (`openspec/changes/archive/2026-10-15-*`, specs creadas en `openspec/specs/island/`).
 
 ## Fase 2
 
@@ -173,7 +173,7 @@ Las Fases 1 y 3 (OpenJarvis) no se ejecutaron: Diego no autorizó instalarlo (D1
 
 ### Checklist consolidada de pruebas manuales (Diego)
 
-- [ ] Fase 0: listas A, B y C (arriba).
+- [x] Fase 0: listas A, B y C (arriba), confirmadas por Diego el 2026-10-15.
 - [ ] Fase 2: con Ollama, "me llamo Diego" y luego "¿cómo me llamo?" responde Diego.
 - [ ] Fase 4: tres turnos (Claude Code, Ollama, asistente rápido) = tres filas; Claude Code con coste; reemplazar `RESULT_LINE` por una línea real.
 - [ ] Fase 5, 6 y 7: las listas de sus secciones.

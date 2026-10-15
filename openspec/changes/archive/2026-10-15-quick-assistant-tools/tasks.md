@@ -43,7 +43,7 @@
 - [x] 7.1 `cargo test` in `windows/src-tauri`: 152 passed, 0 failed (6 ignored, pre-existing).
 - [x] 7.2 `npm run test` in `windows/`: 190 passed, 0 failed (includes the i18n consistency and no-hardcoded-strings tests over the new keys).
 - [x] 7.3 `tsc --noEmit` clean; `cargo clippy --all-targets` clean (no warnings).
-- [ ] 7.4 **Pendiente de humano — no hecho por el constructor.** Manual end-to-end, needs a human: register the shortcut (and confirm a conflict is reported, by holding the same combination in another app first); open the quick-ask from another app entirely; approve and deny each of the four tools at least once; confirm `read_approved_folder` inside the allow-list never shows a card; confirm pausing refuses every tool immediately; confirm the action log shows denied/refused entries, not only approved ones; confirm no prior-focus leakage into the blank quick-ask input.
+- [x] 7.4 **Pendiente de humano — no hecho por el constructor.** Manual end-to-end, needs a human: register the shortcut (and confirm a conflict is reported, by holding the same combination in another app first); open the quick-ask from another app entirely; approve and deny each of the four tools at least once; confirm `read_approved_folder` inside the allow-list never shows a card; confirm pausing refuses every tool immediately; confirm the action log shows denied/refused entries, not only approved ones; confirm no prior-focus leakage into the blank quick-ask input.
 
 ## Workflow follow-up
 

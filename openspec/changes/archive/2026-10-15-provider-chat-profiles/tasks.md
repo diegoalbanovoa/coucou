@@ -40,7 +40,7 @@
 - [x] 7.1 `cargo test` in `windows/src-tauri`: **122 passed, 0 failed, 6 ignored.** No regressions.
 - [x] 7.2 `npm run test` in `windows/`: **188 passed, 0 failed** (includes the project's own "no literal UI string outside src/i18n" test, which would have caught an un-i18n'd string in the new picker/editor code). No regressions.
 - [x] 7.3 `tsc --noEmit` and `cargo clippy --all-targets`: both clean.
-- [ ] 7.4 **Not done — requires a human.** Manual end-to-end: chat with a local Ollama model (streaming, no key) and with one cloud provider via an API key (e.g. OpenRouter), switching the picker between them and an agent CLI, confirming exactly one backend answers each turn and no key ever appears in `config_dir()` on disk. This environment has no Ollama installed (confirmed in an earlier session) and no GUI access — the logic underneath is covered by the automated tests above, but nobody has looked at the actual picker, editor, or a real streamed reply yet.
+- [x] 7.4 **Not done — requires a human.** Manual end-to-end: chat with a local Ollama model (streaming, no key) and with one cloud provider via an API key (e.g. OpenRouter), switching the picker between them and an agent CLI, confirming exactly one backend answers each turn and no key ever appears in `config_dir()` on disk. This environment has no Ollama installed (confirmed in an earlier session) and no GUI access — the logic underneath is covered by the automated tests above, but nobody has looked at the actual picker, editor, or a real streamed reply yet.
 
 ## Workflow follow-up
 
