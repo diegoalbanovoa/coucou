@@ -238,3 +238,10 @@ Plan: `handoff/plan-fase9.md` (fuera del seguimiento). Cuatro protecciones siemp
 - [ ] Un modelo que repite la misma llamada: la vista rápida muestra "Se detuvo: el modelo repetía las mismas acciones."; registro "rechazada (acción repetida)".
 - [ ] En español y en inglés, los textos nuevos se leen bien y caben (vista rápida y Ajustes).
 - [ ] (Con modo desarrollador en Windows) enlace `inocente.txt` a `.env`: rechazado.
+
+## Cierre de pendientes técnicos (2026-10-15)
+
+- `npm run shots` completo: 52 capturadas, 14 omitidas (sin UI aún).
+- Medición de CPU con `npx tauri build --no-bundle` (binario release, isla colapsada, 60 s tras 15 s de arranque): 2,55 s de CPU en 60 s, ~180 MB, 2 procesos contados (los hijos de WebView2 más profundos no se sumaron; es una cota inferior). Sin temporizadores de alta frecuencia.
+- Hallazgo Baja «borrar una nota de memoria sin confirmación»: corregido (`inlineConfirm` destructivo, `settings.memory.removeConfirm` en en/es).
+- Siguen pendientes: restyle de `settings.css` a tokens (Media, no se toca: la ventana de Ajustes usa su propio sistema), `RESULT_LINE` real (gasta cuota de Claude Code) y las pruebas manuales.
