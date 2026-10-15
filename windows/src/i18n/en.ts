@@ -376,6 +376,7 @@ export const en = {
       none: "No notes yet. Pick “Remember this” under a reply.",
       remove: "Remove",
       clearAll: "Clear all",
+      removeConfirm: "Delete this note?",
       clearConfirm: "Delete every note?",
       neverMind: "Never mind",
       folder: "Folder",

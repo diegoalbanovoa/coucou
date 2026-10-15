@@ -355,6 +355,7 @@ export const es: Messages = {
       none: "Aún no hay notas. Elige «Recordar» bajo una respuesta.",
       remove: "Quitar",
       clearAll: "Borrar todo",
+      removeConfirm: "¿Borrar esta nota?",
       clearConfirm: "¿Borrar todas las notas?",
       neverMind: "Mejor no",
       folder: "Carpeta",

@@ -688,6 +688,7 @@ function notePreview(text: string): string {
 function memorySection(): HTMLElement {
   const body = h("div", { style: "display:flex;flex-direction:column;gap:12px" });
   let confirming = false;
+  let removingNote: string | null = null;
 
   async function draw() {
     const [notes, path] = await Promise.all([Bridge.memoryNotes(), Bridge.memoryPath()]);
@@ -708,12 +709,24 @@ function memorySection(): HTMLElement {
       ...((notes ?? []).length === 0
         ? [h("div", { class: "hint", text: t("settings.memory.none") })]
         : (notes ?? []).map((n) =>
-            h("div", { class: "row" },
-              h("code", { class: "path", text: notePreview(n.text), title: n.text }),
-              h("button", {
-                text: t("settings.memory.remove"),
-                onclick: async () => { await Bridge.memoryDelete(n.id); await draw(); },
-              }),
+            h("div", { style: "display:flex;flex-direction:column;gap:2px" },
+              h("div", { class: "row" },
+                h("code", { class: "path", text: notePreview(n.text), title: n.text }),
+                h("button", {
+                  text: t("settings.memory.remove"),
+                  onclick: () => { removingNote = n.id; void draw(); },
+                }),
+              ),
+              ...(removingNote === n.id
+                ? [inlineConfirm({
+                    message: t("settings.memory.removeConfirm"),
+                    confirmLabel: t("settings.memory.remove"),
+                    cancelLabel: t("settings.memory.neverMind"),
+                    destructive: true,
+                    onConfirm: async () => { removingNote = null; await Bridge.memoryDelete(n.id); await draw(); },
+                    onCancel: () => { removingNote = null; void draw(); },
+                  })]
+                : []),
             ))),
     );
 
