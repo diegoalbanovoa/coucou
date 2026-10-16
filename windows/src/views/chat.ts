@@ -31,6 +31,7 @@ import {
   keepConversation,
   matchingCommands,
   ollamaModels,
+  openjarvis,
   pickProject,
   providerLabel,
   reloadProviders,
@@ -48,6 +49,8 @@ import { t, tn, getLocale } from "../i18n/index";
 /** Ollama's own OpenAI-compatible endpoint — matches `OLLAMA_PROBE`'s host
  *  in providers.rs, but the `/v1` chat path rather than `/api/tags`. */
 const OLLAMA_BASE_URL = "http://127.0.0.1:11434/v1";
+/** OpenJarvis (`jarvis serve`) default endpoint — verified in docs/plan-v4-notas.md, Fase 1. */
+const OPENJARVIS_BASE_URL = "http://127.0.0.1:8000/v1";
 
 /** Maps providers.rs's stable `"<kind>:<detail>"` error string (see
  *  `ProviderError::message`) to the locale's own text. An agent-CLI error
@@ -871,6 +874,16 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
       placeholder: profile?.keySet ? t("chat.providerKeyPlaceholder") : "",
     }) as HTMLInputElement;
 
+    const keyHint = h("span", { class: "provider-editor-hint", text: t("chat.openjarvisKeyHint") });
+    const usageHint = h("span", { class: "provider-editor-hint", text: t("chat.openjarvisUsageHint") });
+    const syncHints = () => {
+      const isJarvis = urlInput.value.trim() === OPENJARVIS_BASE_URL;
+      keyHint.hidden = !isJarvis;
+      usageHint.hidden = !isJarvis;
+    };
+    urlInput.addEventListener("input", syncHints);
+    syncHints();
+
     const field = (labelText: string, el: HTMLElement) =>
       h("label", { class: "provider-editor-field" }, h("span", { text: labelText }), el);
 
@@ -881,6 +894,18 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
       field(t("chat.providerUrlField"), urlInput),
       field(t("chat.providerModelField"), modelInput),
       field(t("chat.providerKeyField"), keyInput),
+      keyHint,
+      usageHint,
+      profile
+        ? null
+        : button({
+            label: t("chat.openjarvisTemplate"),
+            size: "sm",
+            onClick: () => {
+              urlInput.value = OPENJARVIS_BASE_URL;
+              syncHints();
+            },
+          }),
     );
 
     /** Persists the profile and its key, then selects it. */
@@ -945,12 +970,24 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
     input.focus();
   }
 
+  /** A detected OpenJarvis model becomes a profile the first time it is picked. */
+  async function selectOpenJarvisModel(model: string) {
+    const existing = availableProviders.find((p) => p.baseUrl === OPENJARVIS_BASE_URL && p.model === model);
+    const profile =
+      existing ??
+      (await Bridge.providerSave({ label: `OpenJarvis · ${model}`, baseUrl: OPENJARVIS_BASE_URL, model }));
+    if (!profile) return;
+    if (!existing) await reloadProviders();
+    chooseProviderProfile(profile.id);
+    input.focus();
+  }
+
   provider.addEventListener("click", () => {
     void (async () => {
       await reloadProviders();
       // Nothing to switch to — opening an empty popover would be worse than
       // the click doing nothing, same as nextProvider() used to no-op here.
-      if (availableClis.length === 0 && availableProviders.length === 0 && ollamaModels.length === 0) return;
+      if (availableClis.length === 0 && availableProviders.length === 0 && ollamaModels.length === 0 && !openjarvis) return;
       toggleMenu(providerItem, providerMenu, () => {
         // Same order as the Fase 3 console grid, so picking an agent here and
         // picking one there never disagree about which comes first.
@@ -976,6 +1013,12 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
           // above instead, as an ordinary profile — not listed twice here.
           if (availableProviders.some((p) => p.baseUrl === OLLAMA_BASE_URL && p.model === m.name)) continue;
           providerMenu.append(menuRow(m.name, () => void selectOllamaModel(m.name), globeFace()));
+        }
+        for (const model of openjarvis?.models ?? []) {
+          if (availableProviders.some((p) => p.baseUrl === OPENJARVIS_BASE_URL && p.model === model)) continue;
+          providerMenu.append(
+            menuRow(t("chat.openjarvisModel", { model }), () => void selectOpenJarvisModel(model), globeFace()),
+          );
         }
         providerMenu.append(
           menuRow(t("chat.addProvider"), () => openProviderEditor(), h("span", { class: "chat-menu-face" }, icon("plus", { size: 14 }))),

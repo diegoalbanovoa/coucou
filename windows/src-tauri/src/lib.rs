@@ -1007,6 +1007,13 @@ async fn ollama_detect() -> Vec<providers::OllamaModel> {
     providers::detect_ollama().await
 }
 
+/// A local OpenJarvis server and its models, or `None` when it is not
+/// running — checked only when the picker opens, never polled.
+#[tauri::command]
+async fn openjarvis_detect() -> Option<providers::OpenJarvisInfo> {
+    providers::detect_openjarvis().await
+}
+
 // ── Quick assistant (openspec/changes/quick-assistant-tools) ─────────────────
 
 /// The quick-ask turn: the configured provider profile, the five tools, the
@@ -1502,6 +1509,7 @@ pub fn run() {
             provider_delete,
             provider_send,
             ollama_detect,
+            openjarvis_detect,
             usage_summary,
             usage_reset,
             memory_notes,

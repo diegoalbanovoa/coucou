@@ -267,6 +267,12 @@ async function ollamaDetect() {
   return [] as { name: string }[];
 }
 
+/** `?scenario=openjarvis` pretends `jarvis serve` is running; otherwise null. */
+async function openjarvisDetect() {
+  if (params.get("scenario") !== "openjarvis") return null;
+  return { baseUrl: "http://127.0.0.1:8000/v1", models: ["qwen2.5-coder:3b", "llama3.2"] };
+}
+
 let usageRows = [...MOCK_USAGE];
 
 async function usageSummary() {
@@ -506,6 +512,7 @@ export const Bridge = {
   providerSave,
   providerDelete: noop("provider_delete"),
   ollamaDetect,
+  openjarvisDetect,
   agentCancel,
   vaultState,
   pickVault,

@@ -31,6 +31,15 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
 /// Ollama is only ever probed on demand (the model picker opening), never
 /// polled — a short timeout is enough to tell "not running" from "running".
 const OLLAMA_PROBE_TIMEOUT: Duration = Duration::from_secs(2);
+/// OpenJarvis (`jarvis serve`) listens here by default. Values verified by
+/// hand in docs/plan-v4-notas.md, section "Fase 1".
+const OPENJARVIS_BASE_URL: &str = "http://127.0.0.1:8000/v1";
+/// Identifying route under the base URL: its JSON carries `agent` and
+/// `engine`, which neither Ollama nor OpenAI answer (docs/plan-v4-notas.md,
+/// "Fase 1"). `/health` is generic and does not identify anything.
+const OPENJARVIS_INFO_PATH: &str = "/info";
+/// Model list route under the base URL: `data[].id` (OpenAI shape).
+const OPENJARVIS_MODELS_PATH: &str = "/models";
 
 // ── Profile storage ───────────────────────────────────────────────────────
 
@@ -562,6 +571,63 @@ pub async fn detect_ollama() -> Vec<OllamaModel> {
     body.models.into_iter().map(|m| OllamaModel { name: m.name }).collect()
 }
 
+// ── OpenJarvis auto-detection ────────────────────────────────────────────────
+
+/// A local OpenJarvis server found running, and the models it serves.
+#[derive(Serialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct OpenJarvisInfo {
+    pub base_url: String,
+    pub models: Vec<String>,
+}
+
+/// The part of `/v1/info` that identifies OpenJarvis.
+#[derive(Deserialize)]
+struct OpenJarvisInfoResponse {
+    agent: Option<Value>,
+    engine: Option<Value>,
+}
+
+/// The `/v1/models` reply: OpenAI shape.
+#[derive(Deserialize)]
+struct ModelsResponse {
+    #[serde(default)]
+    data: Vec<ModelEntry>,
+}
+
+#[derive(Deserialize)]
+struct ModelEntry {
+    id: String,
+}
+
+/// True when an `/info` body names both an agent and an engine.
+fn is_openjarvis_info(body: &str) -> bool {
+    serde_json::from_str::<OpenJarvisInfoResponse>(body)
+        .map(|i| i.agent.is_some() && i.engine.is_some())
+        .unwrap_or(false)
+}
+
+/// The model ids out of a `/models` body; empty when it does not parse.
+fn parse_model_ids(body: &str) -> Vec<String> {
+    serde_json::from_str::<ModelsResponse>(body)
+        .map(|m| m.data.into_iter().map(|e| e.id).collect())
+        .unwrap_or_default()
+}
+
+/// A local OpenJarvis server, if one is running: `/info` must carry `agent`
+/// and `engine` (an open port 8000 alone proves nothing). Any failure is
+/// `None` — absence, not an error, same as [`detect_ollama`].
+pub async fn detect_openjarvis() -> Option<OpenJarvisInfo> {
+    let client = client(OLLAMA_PROBE_TIMEOUT);
+    let info = client.get(format!("{OPENJARVIS_BASE_URL}{OPENJARVIS_INFO_PATH}")).send().await.ok()?;
+    if !info.status().is_success() || !is_openjarvis_info(&info.text().await.ok()?) {
+        return None;
+    }
+    let models = client.get(format!("{OPENJARVIS_BASE_URL}{OPENJARVIS_MODELS_PATH}")).send().await.ok()?;
+    let models = parse_model_ids(&models.text().await.ok()?);
+    Some(OpenJarvisInfo { base_url: OPENJARVIS_BASE_URL.to_string(), models })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -756,5 +822,49 @@ mod tests {
     fn empty_ollama_response_shape_has_no_models() {
         let parsed: OllamaTagsResponse = serde_json::from_str("{}").unwrap();
         assert!(parsed.models.is_empty());
+    }
+    #[test]
+    fn openjarvis_is_identified_only_by_agent_and_engine() {
+        assert!(is_openjarvis_info(r#"{"model":"m","agent":"simple","engine":"ollama"}"#));
+        assert!(!is_openjarvis_info(r#"{"model":"m","agent":"simple"}"#));
+        assert!(!is_openjarvis_info(r#"{"status":"ok"}"#));
+        assert!(!is_openjarvis_info("not json"));
+    }
+
+    #[test]
+    fn openjarvis_model_ids_come_from_data() {
+        assert_eq!(parse_model_ids(r#"{"data":[{"id":"a"},{"id":"b"}]}"#), vec!["a", "b"]);
+        assert!(parse_model_ids("{}").is_empty());
+        assert!(parse_model_ids("nope").is_empty());
+    }
+
+    /// Scope guard: Coucou only talks to OpenJarvis through the OpenAI-style
+    /// `/chat/completions` and `/models`; no agents, memory or skills routes.
+    #[test]
+    fn nothing_composes_openjarvis_agent_memory_or_skills_routes() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let forbidden = ["\"/agents", "\"/memory", "\"/skills"];
+        for entry in std::fs::read_dir(&dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.extension().and_then(|e| e.to_str()) != Some("rs") {
+                continue;
+            }
+            let text = std::fs::read_to_string(&path).unwrap();
+            // Drop this test module so the needles above do not match themselves.
+            let code = text.split("#[cfg(test)]").next().unwrap_or("");
+            if !code.to_lowercase().contains("openjarvis") {
+                continue;
+            }
+            for needle in forbidden {
+                assert!(!code.contains(needle), "{} composes {needle}", path.display());
+            }
+        }
+    }
+
+    #[test]
+    fn send_composes_only_chat_completions() {
+        let text = include_str!("providers.rs");
+        let code = text.split("#[cfg(test)]").next().unwrap();
+        assert!(code.contains("{}/chat/completions"));
     }
 }

@@ -11,7 +11,7 @@
  */
 
 import { Bridge, onEvent } from "../core/bridge";
-import type { Console, KeptMessage, OllamaModel, ProviderProfile, SlashCommand } from "../core/bridge";
+import type { Console, KeptMessage, OllamaModel, OpenJarvisInfo, ProviderProfile, SlashCommand } from "../core/bridge";
 import { State } from "../core/state";
 import type { Island } from "./island";
 import { t } from "../i18n/index";
@@ -27,6 +27,8 @@ export let availableProviders: ProviderProfile[] = [];
 /** Models a local Ollama server reports right now, or empty if none
  *  answers — absence, not a failure. Refreshed alongside `availableProviders`. */
 export let ollamaModels: OllamaModel[] = [];
+/** The local OpenJarvis server, or null when it is not running. */
+export let openjarvis: OpenJarvisInfo | null = null;
 
 /** `/` targets for the current project. Refreshed whenever one is attached. */
 export let slashCommands: SlashCommand[] = [];
@@ -206,6 +208,7 @@ export function chooseProviderProfile(id: string | null) {
 export async function reloadProviders() {
   availableProviders = (await Bridge.providerList()) ?? [];
   ollamaModels = (await Bridge.ollamaDetect()) ?? [];
+  openjarvis = (await Bridge.openjarvisDetect()) ?? null;
 }
 
 /** The label shown in the chat header for the current agent or provider. */

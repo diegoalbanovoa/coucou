@@ -177,6 +177,9 @@ export const Bridge = {
   /** The models a local Ollama server has, or an empty list if none
    *  answers — checked only when the picker opens. */
   ollamaDetect: () => call<OllamaModel[]>("ollama_detect"),
+  /** A local OpenJarvis server and its models, or null when it is not
+   *  running — checked only when the picker opens. */
+  openjarvisDetect: () => call<OpenJarvisInfo | null>("openjarvis_detect"),
   /** The Obsidian vault the agent may read and write, and where it came from. */
   vaultState: () => call<VaultInfo>("vault_state"),
   /** Chooses the vault by hand. Null when the user cancelled the picker. */
@@ -523,6 +526,12 @@ export interface QuickLogEntry {
 /** A model Ollama has installed locally, from auto-detection. */
 export interface OllamaModel {
   name: string;
+}
+
+/** A running local OpenJarvis server, from auto-detection. */
+export interface OpenJarvisInfo {
+  baseUrl: string;
+  models: string[];
 }
 
 /** The knowledge base the agent can reach. */

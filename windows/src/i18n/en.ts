@@ -61,6 +61,10 @@ export const en = {
     // openspec/changes/provider-chat-profiles — chat-only provider profiles,
     // no tools. Kept in the same picker as the agent consoles above, but
     // never confused with one: these never get a tool badge.
+    openjarvisModel: "OpenJarvis · {model}",
+    openjarvisTemplate: "Template: local OpenJarvis",
+    openjarvisKeyHint: "Only if you started OpenJarvis with OPENJARVIS_API_KEY",
+    openjarvisUsageHint: "OpenJarvis reports 0 tokens in simple mode, so Usage will show 0 for this profile",
     addProvider: "Add a provider…",
     editProvider: "Edit provider",
     deleteProvider: "Delete",

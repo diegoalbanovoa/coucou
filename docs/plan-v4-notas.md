@@ -67,10 +67,35 @@ Diego confirmó el 2026-10-15 que las pruebas A, B y C pasaron (sin detalle por 
 
 Hecho: línea base, notas, listas de prueba, regeneración de `windows/_prive/estado-actual.md`, rama `windows/v4`. Cierre 2026-10-15: pruebas A, B y C confirmadas por Diego; marcados `tasks.md` 3.3/7.4 y archivados con `openspec archive` los tres cambios (`openspec/changes/archive/2026-10-15-*`, specs creadas en `openspec/specs/island/`).
 
+## Fase 1 (spike hecho a mano, completado 2026-10-15)
+
+Instalación en `IdeaProjects\openjarvis-test` (clon + venv, sin `irm | iex`, sin tarea programada). Config en `~/.openjarvis/config.toml` con `[analytics] enabled = false`. Arranque: `jarvis serve --host 127.0.0.1 --port 8000 -e ollama -m qwen2.5-coder:3b -a simple`.
+
+**Dictamen: SÍ, condicionado** (perfil opcional; solo `/v1/chat/completions` y `/v1/models`).
+
+Valores verificados para la Fase 3:
+- URL base: `http://127.0.0.1:8000/v1`. Chat: `{base}/chat/completions` (SSE, formato OpenAI). Modelos: `{base}/models` → `data[].id`.
+- Ruta identificadora: `GET http://127.0.0.1:8000/v1/info` → `{"model":"…","agent":"…","engine":"…"}`. Se identifica por la presencia de las claves `agent` y `engine` (ninguna de Ollama/OpenAI las devuelve). `GET /health` → `{"status":"ok"}` es genérico y no sirve para identificar.
+- Con el agente por defecto (`orchestrator`) inyecta herramientas y los modelos pequeños devuelven JSON de `calculator`: usar `-a simple`.
+- Con `-a simple`, `usage` sale en 0 (la pestaña Uso mostrará 0 tokens para este perfil).
+- Telemetría PostHog activada por defecto: apagarla en la config antes del primer arranque. Sin ella, solo se vio el chequeo de salud del motor NIM (`75.2.113.119:443`).
+- Un `server.pid` obsoleto (PID reutilizado) impide arrancar: borrar `~/.openjarvis/server.pid` y `server.json`.
+
 ## Fase 2
 
 - El historial que recibe un perfil de proveedor incluye también los turnos que respondió una CLI, porque la conversación visible es una sola (D10 por defecto: 24 000 caracteres e incluirlos).
 - El tipo de mensaje del chat es `ChatMessage` en `src/core/state.ts` (roles `user | assistant | error`).
+
+## Fase 3
+
+- **Detección implementada** (la Fase 1 dejó una ruta identificadora inequívoca; la tarea 2 del plan no aplica). `providers::detect_openjarvis` hace `GET http://127.0.0.1:8000/v1/info` con `OLLAMA_PROBE_TIMEOUT`; exige las claves `agent` y `engine` y luego lee `/v1/models` → `data[].id`. Cualquier fallo es `None`. Comando `openjarvis_detect`, `Bridge.openjarvisDetect()` y mock (`?scenario=openjarvis` devuelve dos modelos; sin él, `null`).
+- **Discrepancia menor:** el mock ya tipaba `scenario` como `ok|strained|sick`, así que `openjarvis` no se añadió a `MockScenario`; `openjarvisDetect` lee el parámetro de la URL directamente. Con ese parámetro el resto del mock se comporta como `ok`.
+- **Chat:** filas con icono `globe` y `t('chat.openjarvisModel', {model})` para los modelos aún sin perfil (se crea `OpenJarvis · <model>`); el editor de perfil nuevo tiene el botón "Plantilla: OpenJarvis local" (solo rellena la URL). Las ayudas de clave (`chat.openjarvisKeyHint`) y de uso en 0 (`chat.openjarvisUsageHint`, extra respecto al plan) solo se ven cuando la URL es la de OpenJarvis. La clave sigue el campo de clave existente (`secret_set`).
+- **Guardia de alcance:** tres tests nuevos en `providers.rs` (identificación por `agent`+`engine`, ids de modelos y que ningún `.rs` con "openjarvis" componga `"/agents"`, `"/memory"` o `"/skills"`; `send` solo compone `{}/chat/completions`).
+- **Verificación:** `cargo test --workspace` 263+3 ok; `cargo clippy --workspace --all-targets` limpio; `npx tsc --noEmit` limpio; `npm run test` 216 ok.
+- **Revisor de diseño (`coucou-design-reviewer`): NO pasado** (el constructor no puede lanzar subagentes). Solo tokens/`button()`/`icon()` existentes y una clase CSS nueva `.provider-editor-hint` con las mismas fuentes que `.provider-editor-field`. No se hizo comprobación visual en `dev:mock`. **Pendiente.**
+- **`include_usage`:** no se observó un 400 en la Fase 1; no hay nada que anotar para la Fase 4 salvo que `usage` sale en 0 con `-a simple`.
+- **Prueba manual pendiente de Diego:** con `jarvis serve ... -a simple` corriendo, el selector muestra las filas de OpenJarvis, el chat transmite por streaming y recuerda el contexto (Fase 2). Con OpenJarvis apagado no aparece nada y no hay errores.
 
 ## Fase 4
 

@@ -1004,6 +1004,15 @@ input[type="range"]::-webkit-slider-thumb {
   box-shadow: var(--focus-ring);
 }
 
+.provider-editor-hint {
+  font: 400 11px var(--font);
+  color: var(--ink-2);
+}
+
+.provider-editor-hint[hidden] {
+  display: none;
+}
+
 .provider-editor-footer {
   display: flex;
   align-items: center;
