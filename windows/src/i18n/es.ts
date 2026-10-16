@@ -53,7 +53,7 @@ export const es: Messages = {
     placeholderAsk: "Pregunta, o / para un comando…",
     send: "Enviar",
     switchConsole: "Cambiar entre las consolas de agente instaladas",
-    openjarvisModel: "OpenJarvis · {model}",
+    openjarvisSection: "OpenJarvis",
     openjarvisTemplate: "Plantilla: OpenJarvis local",
     openjarvisKeyHint: "Solo si arrancaste OpenJarvis con OPENJARVIS_API_KEY",
     openjarvisUsageHint: "OpenJarvis informa 0 tokens en modo simple, así que Uso mostrará 0 para este perfil",

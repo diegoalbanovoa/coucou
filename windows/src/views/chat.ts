@@ -874,38 +874,49 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
       placeholder: profile?.keySet ? t("chat.providerKeyPlaceholder") : "",
     }) as HTMLInputElement;
 
-    const keyHint = h("span", { class: "provider-editor-hint", text: t("chat.openjarvisKeyHint") });
-    const usageHint = h("span", { class: "provider-editor-hint", text: t("chat.openjarvisUsageHint") });
+    const keyHint = h("span", {
+      class: "provider-editor-hint",
+      id: "provider-key-hint",
+      text: t("chat.openjarvisKeyHint"),
+    });
+    const usageHint = h("span", { class: "provider-editor-hint provider-editor-note", text: t("chat.openjarvisUsageHint") });
+    /** Same endpoint however it was typed: trailing slash or `localhost`. */
+    const normalizeUrl = (u: string) =>
+      u.trim().replace(/\/+$/, "").replace("//localhost", "//127.0.0.1").toLowerCase();
     const syncHints = () => {
-      const isJarvis = urlInput.value.trim() === OPENJARVIS_BASE_URL;
+      const isJarvis = normalizeUrl(urlInput.value) === normalizeUrl(OPENJARVIS_BASE_URL);
+      if (isJarvis) keyInput.setAttribute("aria-describedby", "provider-key-hint");
+      else keyInput.removeAttribute("aria-describedby");
       keyHint.hidden = !isJarvis;
       usageHint.hidden = !isJarvis;
     };
     urlInput.addEventListener("input", syncHints);
     syncHints();
 
-    const field = (labelText: string, el: HTMLElement) =>
-      h("label", { class: "provider-editor-field" }, h("span", { text: labelText }), el);
+    const field = (labelText: string, el: HTMLElement, hint?: HTMLElement) =>
+      h("label", { class: "provider-editor-field" }, h("span", { text: labelText }), ...(hint ? [hint] : []), el);
+
+    const templateBtn = profile
+      ? null
+      : button({
+          label: t("chat.openjarvisTemplate"),
+          size: "md",
+          onClick: () => {
+            urlInput.value = OPENJARVIS_BASE_URL;
+            syncHints();
+          },
+        });
+    if (templateBtn) templateBtn.classList.add("provider-editor-template");
 
     const body = h(
       "div",
       { class: "provider-editor-fields" },
       field(t("chat.providerLabelField"), labelInput),
+      templateBtn,
       field(t("chat.providerUrlField"), urlInput),
       field(t("chat.providerModelField"), modelInput),
-      field(t("chat.providerKeyField"), keyInput),
-      keyHint,
+      field(t("chat.providerKeyField"), keyInput, keyHint),
       usageHint,
-      profile
-        ? null
-        : button({
-            label: t("chat.openjarvisTemplate"),
-            size: "sm",
-            onClick: () => {
-              urlInput.value = OPENJARVIS_BASE_URL;
-              syncHints();
-            },
-          }),
     );
 
     /** Persists the profile and its key, then selects it. */
@@ -1014,11 +1025,16 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
           if (availableProviders.some((p) => p.baseUrl === OLLAMA_BASE_URL && p.model === m.name)) continue;
           providerMenu.append(menuRow(m.name, () => void selectOllamaModel(m.name), globeFace()));
         }
-        for (const model of openjarvis?.models ?? []) {
-          if (availableProviders.some((p) => p.baseUrl === OPENJARVIS_BASE_URL && p.model === model)) continue;
-          providerMenu.append(
-            menuRow(t("chat.openjarvisModel", { model }), () => void selectOpenJarvisModel(model), globeFace()),
-          );
+        // Detected OpenJarvis models sit under one section heading, so each
+        // row can be just the model name (shorter than "OpenJarvis · model").
+        const jarvisModels = (openjarvis?.models ?? []).filter(
+          (model) => !availableProviders.some((p) => p.baseUrl === OPENJARVIS_BASE_URL && p.model === model),
+        );
+        if (jarvisModels.length > 0) {
+          providerMenu.append(h("div", { class: "chat-menu-heading", text: t("chat.openjarvisSection") }));
+          for (const model of jarvisModels) {
+            providerMenu.append(menuRow(model, () => void selectOpenJarvisModel(model), globeFace()));
+          }
         }
         providerMenu.append(
           menuRow(t("chat.addProvider"), () => openProviderEditor(), h("span", { class: "chat-menu-face" }, icon("plus", { size: 14 }))),
