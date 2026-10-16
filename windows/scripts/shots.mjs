@@ -11,6 +11,7 @@
 // "sin errores" stays true and the gaps stay visible rather than silent.
 //
 //   npm run shots
+//   npm run shots -- providers      (only shots whose label contains "providers")
 
 import { chromium } from "playwright";
 import { spawn, spawnSync } from "node:child_process";
@@ -20,7 +21,10 @@ import { fileURLToPath } from "node:url";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const OUT = join(ROOT, "shots");
-const BASE = "http://127.0.0.1:1420";
+// SHOTS_PORT keeps the capture off the dev server's port (1420) when that one
+// is in use; vite is told the same port, so strictPort in the config is moot.
+const PORT = process.env.SHOTS_PORT ?? "1420";
+const BASE = `http://127.0.0.1:${PORT}`;
 /** How long the boot greeting takes to settle into the compact pill. Generous
  *  on purpose: a flaky wait here would make every shot after it flaky too. */
 const GREETING_MS = 7000;
@@ -35,9 +39,28 @@ const TABS = {
 
 /** One shot: where to go, what to click to get there, and the label used in
  *  the saved filename. `ready` is a known gap, not a bug — see the file note. */
-function shot({ view, label, url = "", ready = true, settings = false }) {
-  return { view, label, url, ready, settings };
+function shot({ view, label, url = "", ready = true, settings = false, steps = null }) {
+  return { view, label, url, ready, settings, steps };
 }
+
+// Real clicks, same as a person: the provider menu and the profile editor
+// are reached through the UI, so no mock-only `?state=` is needed for them.
+async function openProviderMenu(page) {
+  await page.locator(".chat-meta-item .chat-meta-btn").first().click();
+  await page.waitForSelector(".chat-dropdown .chat-menu-row", { timeout: 5000 });
+}
+async function openNewProfileEditor(page, lang) {
+  await openProviderMenu(page);
+  // The menu caps its height and scrolls; bring its last row into view first.
+  await page.locator(".chat-dropdown", { has: page.locator(".chat-menu-row") }).first().evaluate((m) => { m.scrollTop = m.scrollHeight; });
+  await page.locator(".chat-menu-row", { hasText: ADD_PROVIDER[lang] }).dispatchEvent("click");
+  // dispatchEvent, not click(): in the current build `.chat-body` (z-index 1)
+  // sits above the editor sheet, so a real pointer click never reaches it
+  // (see docs/plan-v4-notas.md, "Integración tras v4"). The shot shows it.
+  await page.locator(".provider-editor-template").dispatchEvent("click");
+  await page.waitForTimeout(300);
+}
+const ADD_PROVIDER = { en: "Add a provider", es: "Agregar un proveedor" };
 
 const SHOTS = [
   // ── home ──────────────────────────────────────────────────────────────────
@@ -54,6 +77,10 @@ const SHOTS = [
   shot({ view: "chat", label: "drop", url: "?state=drop" }),
   shot({ view: "chat", label: "attachments", url: "?state=attachments" }),
   shot({ view: "chat", label: "streaming", url: "?state=streaming", ready: false }),
+  // Integración 3: the provider picker (with the detected OpenJarvis section)
+  // and the new-profile editor after the OpenJarvis template.
+  shot({ view: "chat", label: "providers-menu", url: "?scenario=openjarvis", steps: openProviderMenu }),
+  shot({ view: "chat", label: "providers-editor", url: "?scenario=openjarvis", steps: openNewProfileEditor }),
   // ── system ────────────────────────────────────────────────────────────────
   shot({ view: "system", label: "ok", url: "?scenario=ok" }),
   shot({ view: "system", label: "strained", url: "?scenario=strained" }),
@@ -112,7 +139,7 @@ async function expandIsland(page) {
   await page.waitForSelector("#header", { timeout: 5000 });
 }
 
-async function captureIslandShot(browser, { view, label, url, ready }, lang, scale) {
+async function captureIslandShot(browser, { view, label, url, ready, steps }, lang, scale) {
   const name = `${view}-${label}-${lang}-${scale}x`;
   if (!ready) {
     console.log(`skip  ${name} (no UI for this state yet)`);
@@ -125,6 +152,7 @@ async function captureIslandShot(browser, { view, label, url, ready }, lang, sca
     await expandIsland(page);
     if (view !== "home") await page.click(`button[title="${TABS[lang][view]}"]`);
     await page.waitForTimeout(500);
+    if (steps) await steps(page, lang);
     await page.screenshot({ path: join(OUT, `${name}.png`) });
     console.log(`shot  ${name}`);
     return { name, skipped: false };
@@ -152,11 +180,15 @@ async function captureSettingsShot(browser, { label, ready }, lang, scale) {
 }
 
 async function main() {
-  rmSync(OUT, { recursive: true, force: true });
+  // `npm run shots -- <text>` keeps only shots whose label contains <text>
+  // and leaves the rest of shots/ (and its manifest) alone.
+  const only = process.argv[2];
+  const list = only ? SHOTS.filter((s) => s.label.includes(only)) : SHOTS;
+  if (!only) rmSync(OUT, { recursive: true, force: true });
   mkdirSync(OUT, { recursive: true });
 
   console.log("starting vite --mode mock…");
-  const vite = spawn("npx", ["vite", "--mode", "mock"], { cwd: ROOT, shell: true, stdio: "pipe" });
+  const vite = spawn("npx", ["vite", "--mode", "mock", "--port", PORT, "--strictPort"], { cwd: ROOT, shell: true, stdio: "pipe" });
   vite.stderr.on("data", (d) => process.stderr.write(d));
 
   let browser;
@@ -165,7 +197,7 @@ async function main() {
     await waitForServer();
     browser = await chromium.launch();
 
-    for (const s of SHOTS) {
+    for (const s of list) {
       for (const lang of LANGS) {
         for (const scale of SCALES[s.view]) {
           const r = s.settings
@@ -182,7 +214,7 @@ async function main() {
 
   const taken = results.filter((r) => !r.skipped).length;
   const skipped = results.filter((r) => r.skipped).length;
-  writeFileSync(
+  if (!only) writeFileSync(
     join(OUT, "manifest.json"),
     JSON.stringify({ takenAt: new Date().toISOString(), taken, skipped, results }, null, 2),
   );

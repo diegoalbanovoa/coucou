@@ -275,3 +275,21 @@ Plan: `handoff/plan-fase9.md` (fuera del seguimiento). Cuatro protecciones siemp
 - Medición de CPU con `npx tauri build --no-bundle` (binario release, isla colapsada, 60 s tras 15 s de arranque): 2,55 s de CPU en 60 s, ~180 MB, 2 procesos contados (los hijos de WebView2 más profundos no se sumaron; es una cota inferior). Sin temporizadores de alta frecuencia.
 - Hallazgo Baja «borrar una nota de memoria sin confirmación»: corregido (`inlineConfirm` destructivo, `settings.memory.removeConfirm` en en/es).
 - Siguen pendientes: restyle de `settings.css` a tokens (Media, no se toca: la ventana de Ajustes usa su propio sistema), `RESULT_LINE` real (gasta cuota de Claude Code) y las pruebas manuales.
+
+## Integración tras v4
+
+Plan: `handoff/plan-integracion.md`. Un commit por tarea.
+
+1. **Memoria redacta secretos.** `add_note_in` pasa el texto por `redact::redact` antes de `cap_text` y deja en el log una línea sin el secreto ("memory: N secretos ocultados al guardar una nota"). `store_summary` guarda el resumen redactado (se extrajo `store_summary_in(dir, …)` para poder probarlo con un directorio temporal). Dos pruebas nuevas en `memory.rs`. Las notas antiguas no se reescriben (anotado en "Fase 9 → Riesgos residuales").
+2. **Uso 0/0 = sin datos.** `usage::from_openai_usage` devuelve `None` si `prompt_tokens` y `completion_tokens` son 0 y no hay `cost`; un 0 aislado (10/0) se mantiene. Prueba ampliada. `chat.openjarvisUsageHint` decía "mostrará 0"; ahora dice que Uso no tendrá datos de ese perfil (en y es). La línea de la Fase 1 sobre "0 tokens" describe el comportamiento del servidor, no el de la app, y se deja como estaba.
+3. **Capturas del selector y del editor.** `scripts/shots.mjs` ahora pulsa de verdad (sin `?state=` nuevo): `chat-providers-menu` (menú abierto, `?scenario=openjarvis`) y `chat-providers-editor` (Agregar proveedor, luego "Plantilla: OpenJarvis local"). Además: `npm run shots -- providers` toma solo las que contienen ese texto (sin borrar `shots/` ni reescribir el manifiesto) y `SHOTS_PORT` cambia el puerto (por defecto 1420; usé 14200). Recuento: 8 capturas nuevas (2 vistas x 2 idiomas x 1x/1.5x); `shots/` pasa de 52 a 60 PNG.
+
+### Discrepancias halladas (no corregidas, fuera del plan)
+
+- **El editor de proveedores no es pulsable con el ratón.** `.chat-body` tiene `z-index: 1` y la hoja (`.ui-sheet`, sin z-index) se monta dentro de `chatCard` después; el cuerpo del chat queda por encima en el hit-testing (Playwright: "`<p class="md-p">` intercepts pointer events"). La hoja además deja ver el historial a través de ella y los campos se pisan con el texto. La captura usa `dispatchEvent("click")` para el botón de plantilla y por eso muestra el fallo. Arreglo probable: `z-index` en la hoja dentro de `.chat-card` (o fondo opaco); es un cambio visual a una vista existente, por eso queda pendiente de decisión de Diego.
+- El menú de proveedores tiene `max-height: 184px` con scroll: con la sección OpenJarvis, "Agregar un proveedor…" queda fuera de vista hasta desplazar el menú.
+- Atribución de coautor: el plan pedía `Claude Opus 5.5`; los commits llevan `Claude Sonnet 5.5`, que es el modelo que los escribió.
+
+### Verificación
+
+`cargo test --workspace` 265 + 3 en verde (6 ignoradas), `cargo clippy --workspace --all-targets` sin avisos, `npx tsc --noEmit` limpio, `npm run test` 216/216.
