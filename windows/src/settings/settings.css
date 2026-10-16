@@ -355,3 +355,73 @@ input[type="time"] {
   font: var(--t-footnote);
   color: var(--c-label-2);
 }
+
+/* ── Agents: one card per CLI, label | value ─────────────────────────────── */
+
+.agent-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+}
+
+.agent-head {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+}
+
+.agent-grid {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  column-gap: var(--s-3);
+  row-gap: var(--s-1);
+  padding-left: var(--s-4);
+}
+
+.agent-key {
+  color: var(--dim);
+  font-size: 12px;
+}
+
+.agent-path {
+  font: 400 11.5px var(--mono);
+  color: var(--c-label-2);
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+/* ── Section index ───────────────────────────────────────────────────────── */
+
+.section-index {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-1) var(--s-3);
+  padding: var(--s-2) 0;
+  background: var(--bg);
+  border-bottom: 1px solid var(--c-separator);
+}
+
+.section-index a {
+  padding: var(--s-1) var(--s-2);
+  border-radius: var(--r-sm);
+  color: var(--c-label-2);
+  font: 500 12px var(--font);
+  text-decoration: none;
+}
+
+.section-index a:hover {
+  background: var(--c-fill-2);
+  color: var(--c-label);
+}
+
+.section-index a:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+section:focus {
+  outline: none;
+}

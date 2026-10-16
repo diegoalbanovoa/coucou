@@ -230,20 +230,26 @@ function agentsSection(): HTMLElement {
       body.append(
         h(
           "div",
-          { class: "row" },
-          statusDot(true),
-          h("label", { text: cli.label }),
-          h("span", { class: "hint", style: "flex:0 0 auto", text: cli.version || t("settings.agents.versionUnknown") }),
-          h("code", { class: "path", text: cli.path }),
-        ),
-        // The file is the place to add a flag, lengthen a turn, or let the
-        // agent reach one more folder. Written on launch; read on every turn.
-        h(
-          "div",
-          { class: "row" },
-          h("label", { text: "" }),
-          h("span", { class: "hint", style: "flex:0 0 auto", text: t("settings.agents.config") }),
-          h("code", { class: "path", text: cli.configPath }),
+          { class: "agent-card" },
+          h(
+            "div",
+            { class: "agent-head" },
+            statusDot(true),
+            h("b", { text: cli.label }),
+            h("span", { class: "hint", text: cli.version || t("settings.agents.versionUnknown") }),
+          ),
+          // Two columns, label | value, so a long path wraps inside its own
+          // column instead of dropping under the label.
+          h(
+            "div",
+            { class: "agent-grid" },
+            h("span", { class: "agent-key", text: t("settings.agents.binary") }),
+            h("code", { class: "agent-path", text: cli.path }),
+            // The file is the place to add a flag, lengthen a turn, or let the
+            // agent reach one more folder. Written on launch; read on every turn.
+            h("span", { class: "agent-key", text: t("settings.agents.config") }),
+            h("code", { class: "agent-path", text: cli.configPath }),
+          ),
         ),
       );
     }
@@ -563,8 +569,11 @@ function quickSection(): HTMLElement {
     select.append(h("option", { value: "", text: t("quick.settings.profileNone") }));
     for (const p of profiles ?? []) select.append(h("option", { value: p.id, text: p.label }));
     select.value = settings.quickAssistantProfile ?? "";
+    const noModel = h("div", { class: "notice warn", role: "status", text: t("quick.settings.noModelWarning") });
+    noModel.hidden = !!settings.quickAssistantProfile;
     select.addEventListener("change", () => {
       settings.quickAssistantProfile = select.value || null;
+      noModel.hidden = !!settings.quickAssistantProfile;
       void save();
     });
 
@@ -584,6 +593,7 @@ function quickSection(): HTMLElement {
       );
 
     body.append(
+      noModel,
       h("div", { class: "hint", text: t("quick.settings.intro") }),
       h("div", { class: "row" },
         h("label", { text: t("quick.settings.shortcut") }),
@@ -802,6 +812,9 @@ function memorySection(): HTMLElement {
       ),
       summaryRow,
       h("div", { class: "row" }, h("label", { text: t("settings.memory.notes") })),
+      ...(!settings.memoryEnabled && (notes ?? []).length > 0
+        ? [h("div", { class: "notice warn", role: "status", text: t("settings.memory.notesUnused") })]
+        : []),
       list,
       ...((notes ?? []).length > 0 ? [h("div", { class: "row" }, clearAll)] : []),
       h("div", { class: "row" },
@@ -1153,8 +1166,7 @@ let secretsPresent: Record<string, boolean> = {};
 /** Rebuilds the whole page from the current `settings` and cached status. */
 function render() {
   clear(root);
-  root.append(
-    h("h1", {}, h("span", { text: "Coucou" }), h("span", { class: "version", text: version })),
+  const sections = [
     claudeSection(hookStatus),
     agentsSection(),
     chatFolderSection(),
@@ -1165,8 +1177,39 @@ function render() {
     generalSection(),
     healthSection(),
     integrationsSection(secretsPresent),
+  ];
+  root.append(
+    h("h1", {}, h("span", { text: "Coucou" }), h("span", { class: "version", text: version })),
+    sectionIndex(sections),
+    ...sections,
     h("div", { class: "hint", text: t("settings.footer") }),
   );
+}
+
+/**
+ * A sticky strip of anchors, one per section, named after each section's own
+ * heading. Real links, so Tab reaches them and Enter follows them; the click
+ * scrolls the page itself because a `#hash` would reload nothing useful here.
+ */
+function sectionIndex(sections: HTMLElement[]): HTMLElement {
+  const nav = h("nav", { class: "section-index", "aria-label": t("settings.agents.jumpTo") });
+  sections.forEach((section, i) => {
+    section.id = `sec-${i}`;
+    const name = section.querySelector("h2 span")?.textContent ?? "";
+    nav.append(
+      h("a", {
+        href: `#sec-${i}`,
+        text: name,
+        onclick: (e: Event) => {
+          e.preventDefault();
+          section.scrollIntoView({ behavior: "smooth", block: "start" });
+          section.setAttribute("tabindex", "-1");
+          section.focus({ preventScroll: true });
+        },
+      }),
+    );
+  });
+  return nav;
 }
 
 /** The language picker's own `onChange` — the click already updated
