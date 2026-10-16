@@ -454,6 +454,23 @@
   gap: 4px;
 }
 
+.ui-gauge-warn {
+  position: absolute;
+  top: 0;
+  right: 0;
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--c-orange);
+  color: var(--c-island);
+}
+
+.ui-gauge-red .ui-gauge-warn {
+  background: var(--c-red);
+}
+
 .ui-gauge-value {
   font: var(--t-title2);
   font-variant-numeric: tabular-nums;

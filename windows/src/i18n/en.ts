@@ -135,6 +135,8 @@ export const en = {
   },
 
   system: {
+    gaugeBadgeHigh: "High usage",
+    gaugeBadgeCritical: "Critical usage",
     memory: "Memory",
     free: "{size} free",
     usedOf: "{used} of {total}",

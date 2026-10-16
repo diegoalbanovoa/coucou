@@ -182,9 +182,11 @@ body {
   position: relative;
   display: inline-block;
   flex: 0 0 auto;
+  vertical-align: middle;
 }
 
-.mini canvas {
+.mini canvas,
+.mini img {
   position: absolute;
   left: 50%;
   top: 50%;
@@ -1175,6 +1177,20 @@ input[type="range"]::-webkit-slider-thumb {
   scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
 }
 
+/* Top edge of the scrolling log: the first line used to be sliced flat by the
+   header. A short fade turns the cut into an obvious "scrolls under here". */
+.log-wrap::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: var(--s-4);
+  z-index: 1;
+  pointer-events: none;
+  background: linear-gradient(var(--card), transparent);
+}
+
 .chat-row {
   display: flex;
 }
@@ -1884,7 +1900,24 @@ button:focus-visible {
   background: color-mix(in srgb, var(--tile-accent, #22c55e) 10%, transparent);
 }
 
+/* Label contrast: --c-label-2 on the ficha's near-black is about 6.5:1 (AA is
+   4.5:1). "Unverified" used to be told apart by fading the whole ficha to 55 %,
+   which dragged the label under AA; now only the face fades and the border
+   goes dashed, so the label stays readable and the ficha still reads as
+   different from the active one. */
+[class*="console-tile-"] .lbl {
+  color: var(--c-label-2);
+}
+
+.console-tile-selected .lbl {
+  color: var(--c-label);
+}
+
 .console-tile-unverified {
+  border-style: dashed;
+}
+
+.console-tile-unverified .mini {
   opacity: 0.55;
 }
 
@@ -2046,7 +2079,7 @@ button:focus-visible {
   border: 0;
   border-radius: 5px;
   background: none;
-  color: var(--dim-3);
+  color: var(--c-label-2);
   cursor: pointer;
   flex: 0 0 auto;
 }

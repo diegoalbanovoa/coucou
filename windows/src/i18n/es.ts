@@ -122,6 +122,8 @@ export const es: Messages = {
   },
 
   system: {
+    gaugeBadgeHigh: "Uso alto",
+    gaugeBadgeCritical: "Uso crítico",
     memory: "Memoria",
     free: "{size} libres",
     usedOf: "{used} de {total}",

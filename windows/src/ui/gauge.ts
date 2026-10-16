@@ -1,13 +1,14 @@
 // A ring gauge — CPU, memory, one drive. See docs/plan-v2.md § 1.2 and § 6.3.
 //
 // Colour is never the only signal a value is high: from the warning
-// threshold up, a small "!" sits next to the number too, and the caller's
+// threshold up, a "!" badge sits on the ring's edge too, and the caller's
 // `ariaLabel` is expected to say the same thing in words ("Memory 76
 // percent, high, 11.4 of 15 GB") — this component does not compose that
 // sentence itself, since it does not know the units or the locale.
 
 import { h } from "../views/dom";
 import { icon } from "../views/icons";
+import { t } from "../i18n/index";
 
 /** Ring colour, chosen by `toneFor`. */
 export type GaugeTone = "green" | "orange" | "red";
@@ -97,12 +98,18 @@ export function gauge(opts: GaugeOptions): HTMLElement {
   const tone = toneFor(pct, opts.thresholds);
 
   const value = h("span", { class: "ui-gauge-value", text: String(Math.round(pct)) });
-  const center = h(
-    "div",
-    { class: "ui-gauge-center" },
-    value,
-    tone !== "green" ? icon("bang", { size: 9 }) : null,
-  );
+  const center = h("div", { class: "ui-gauge-center" }, value);
+  // A badge on the ring's edge, not a stray "!" beside the number. It repeats
+  // what the ring colour says, so colour is not the only signal; the reading
+  // as a whole is announced by the gauge's own aria-label.
+  const warning =
+    tone === "green"
+      ? null
+      : h(
+          "span",
+          { class: "ui-gauge-warn", title: tone === "red" ? t("system.gaugeBadgeCritical") : t("system.gaugeBadgeHigh"), "aria-hidden": "true" },
+          icon("bang", { size: 10 }),
+        );
 
   return h(
     "div",
@@ -112,6 +119,7 @@ export function gauge(opts: GaugeOptions): HTMLElement {
       { class: "ui-gauge-ring-wrap", style: `width:${size}px;height:${size}px` },
       ring(size, tone, pct),
       center,
+      warning,
     ),
     h("div", { class: "ui-gauge-label", text: opts.label }),
     h("div", { class: "ui-gauge-detail", text: opts.detail }),
