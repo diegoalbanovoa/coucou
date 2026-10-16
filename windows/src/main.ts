@@ -14,7 +14,7 @@ import { registerHookHandlers } from "./island/hooks";
 import { startRoutineScheduler } from "./island/routines";
 import { registerHealthHandlers } from "./island/health";
 import { registerIntegrationHandlers, refreshConfigured } from "./island/integrations";
-import { setLocale, resolveLocale } from "./i18n/index";
+import { setLocale, getLocale, resolveLocale } from "./i18n/index";
 
 // Nothing else here can see a crash — there is no visible console in a
 // release build, and a silent exception mid-boot can take the rest of
@@ -41,8 +41,8 @@ async function main() {
 
   void Sound.preload();
 
-  const island = new Island(root);
-
+  // Boot data first, locale next, island last: the views read `t()` while they
+  // are built, so building them before `setLocale()` froze them in English.
   const boot = await Bridge.boot();
   if (boot) {
     State.settings = { ...State.settings, ...boot.settings };
@@ -50,6 +50,8 @@ async function main() {
   }
   setLocale(resolveLocale(State.settings.language));
   document.documentElement.lang = resolveLocale(State.settings.language);
+
+  const island = new Island(root);
   island.applySettings();
   State.loadIntegrationTasks();
   if (boot && !boot.cursorPoll) island.followPageCursor();
@@ -102,8 +104,10 @@ async function main() {
   // The settings window writes preferences; apply them here without a restart.
   await onEvent<Settings>("settings-changed", (s) => {
     State.settings = { ...State.settings, ...s };
+    const before = getLocale();
     setLocale(resolveLocale(State.settings.language));
     document.documentElement.lang = resolveLocale(State.settings.language);
+    if (getLocale() !== before) island.rebuildViews();
     island.applySettings();
     State.loadIntegrationTasks();
     void refreshConfigured();

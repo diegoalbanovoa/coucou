@@ -95,7 +95,8 @@ function agentWho(task: AgentTask | null, label: string): HTMLElement {
   if (task) {
     row.append(dot(task.color, 8), h("span", { class: "n", text: task.name }));
   }
-  row.append(h("span", { text: label }));
+  // "Claude Code Claude Code" when the pill is named after the agent itself.
+  if (task?.name !== label) row.append(h("span", { text: label }));
   return row;
 }
 
@@ -259,12 +260,14 @@ function buildOverview(actions: ViewActions): ViewHost {
         }
         clear(who);
         const agent = task.source === "claudeCode" ? "Claude Code" : "n8n";
+        const tool = task.host ? `${agent} · ${task.host}` : agent;
         who.append(
           dot(task.color, 7),
           h("span", { class: "name", text: task.name }),
           // The agent, and where it runs when that is known: "Claude Code ·
-          // Windows Terminal" rather than a flat "VS Code".
-          h("span", { class: "tool", text: task.host ? `${agent} · ${task.host}` : agent }),
+          // Windows Terminal" rather than a flat "VS Code". Left out when it
+          // would only repeat the pill's own name.
+          ...(tool !== task.name ? [h("span", { class: "tool", text: tool })] : []),
         );
         if (task.steps.length > 1) {
           who.append(h("span", {

@@ -66,6 +66,7 @@ export const en = {
     openjarvisKeyHint: "Only if you started OpenJarvis with OPENJARVIS_API_KEY",
     openjarvisUsageHint: "OpenJarvis reports no token counts in simple mode, so Usage will have no data for this profile",
     addProvider: "Add a provider…",
+    addProviderTitle: "Add a provider",
     editProvider: "Edit provider",
     deleteProvider: "Delete",
     deleteProviderConfirm: "Delete this provider? Its saved key is removed too.",

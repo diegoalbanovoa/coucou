@@ -957,7 +957,7 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
     );
 
     providerEditorEl = sheet({
-      title: profile ? t("chat.editProvider") : t("chat.addProvider"),
+      title: profile ? t("chat.editProvider") : t("chat.addProviderTitle"),
       body,
       footer,
       onClose: () => {

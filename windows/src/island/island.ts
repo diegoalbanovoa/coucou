@@ -56,6 +56,8 @@ export class Island {
 
   private header!: ViewHost;
   private views!: Map<IslandViewName, ViewHost>;
+  /** Kept so `rebuildViews()` can build the same views again. */
+  private actions!: ViewActions;
 
   // Island box: springs when growing, timed curve when shrinking (see animateGeometry).
   private width = new Tracked(NOTCH_W);
@@ -191,6 +193,7 @@ export class Island {
     this.miniGrid = h("div", { id: "mini-grid" });
     this.countdown = h("div", { id: "countdown" });
 
+    this.actions = actions;
     this.header = buildHeader(actions);
     this.views = buildViews(actions, () => this.animateGeometry(false));
     this.viewsEl = h("div", { id: "views" });
@@ -884,6 +887,21 @@ export class Island {
 
     syncMiniBotStates(State.tasks);
     this.engine.setState(State.effectiveState);
+  }
+
+  /**
+   * Builds the header and every view again. The views read `t()` once, when
+   * they are built, so a language change only shows up on a fresh set; this is
+   * what the settings-changed handler calls when the locale moved.
+   */
+  rebuildViews() {
+    this.header = buildHeader(this.actions);
+    this.views = buildViews(this.actions, () => this.animateGeometry(false));
+    this.viewsEl.replaceChildren(...[...this.views.values()].map((v) => v.el));
+    this.contentEl.replaceChild(this.header.el, this.contentEl.firstElementChild as Element);
+    this.dirty = true;
+    this.ensureRunning();
+    State.notify();
   }
 
   /** Applies settings coming from Rust at boot. */

@@ -29,7 +29,9 @@ export function timeAgo(value: unknown): string {
 
 /** Card title row: colour dot, name, kind label and an optional trailing node. */
 function header(color: string, name: string, kind: string, extra?: Node): HTMLElement {
-  const row = h("div", { class: "int-head" }, dot(color, 7), h("b", { text: name }), h("span", { text: kind }));
+  const row = h("div", { class: "int-head" }, dot(color, 7), h("b", { text: name }));
+  // A subtitle that only repeats the title ("Claude Code Claude Code") says nothing.
+  if (kind && kind !== name) row.append(h("span", { text: kind }));
   if (extra) row.append(extra);
   return row;
 }

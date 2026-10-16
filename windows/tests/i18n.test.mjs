@@ -89,3 +89,21 @@ test("tn() picks the plural category Intl.PluralRules selects", () => {
   assert.equal(tn("consoles.count", 1), "1 console");
   assert.equal(tn("consoles.count", 3), "3 consoles");
 });
+
+// Root cause of the "Consoles · Services" / "Ask away." bug under lang=es: the
+// views call t() while they are built, and the island used to be built before
+// setLocale() ran. Views read the locale once, so both orders matter.
+import { readFileSync } from "node:fs";
+
+test("main.ts sets the locale before it builds the island", () => {
+  const src = readFileSync(new URL("../src/main.ts", import.meta.url), "utf8");
+  const setAt = src.indexOf("setLocale(resolveLocale(State.settings.language))");
+  const buildAt = src.indexOf("new Island(root)");
+  assert.ok(setAt > 0 && buildAt > 0, "both calls exist");
+  assert.ok(setAt < buildAt, "setLocale() runs before new Island()");
+});
+
+test("a locale change from Settings rebuilds the island views", () => {
+  const src = readFileSync(new URL("../src/main.ts", import.meta.url), "utf8");
+  assert.match(src, /getLocale\(\) !== before\) island\.rebuildViews\(\)/);
+});
