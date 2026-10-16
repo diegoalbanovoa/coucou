@@ -936,6 +936,38 @@ input[type="range"]::-webkit-slider-thumb {
 
 /* The "more" menu hangs off the right-most header button, so it opens
    leftward — anchored left:0 like the others would run off the island. */
+.chat-dropdown.has-pinned {
+  gap: 0;
+  padding: 0;
+  overflow: hidden;
+  background: rgba(20, 21, 24, 0.96);
+}
+
+/* Scroll hint on the rows alone: the edge shadows are strong enough to read
+   as "more below" and only show on the side that still has hidden rows. */
+.chat-menu-scroll {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 3px;
+  background:
+    linear-gradient(rgba(20, 21, 24, 0.96) 30%, transparent) top / 100% 18px no-repeat local,
+    linear-gradient(transparent, rgba(20, 21, 24, 0.96) 70%) bottom / 100% 18px no-repeat local,
+    linear-gradient(rgba(255, 255, 255, 0.3), transparent) top / 100% 12px no-repeat scroll,
+    linear-gradient(transparent, rgba(255, 255, 255, 0.3)) bottom / 100% 12px no-repeat scroll;
+  scrollbar-width: thin;
+}
+
+.chat-menu-pinned {
+  flex: 0 0 auto;
+  padding: 3px;
+  border-top: 1px solid var(--c-separator);
+}
+
 .chat-dropdown-right {
   left: auto;
   right: 0;
@@ -963,6 +995,24 @@ input[type="range"]::-webkit-slider-thumb {
   overflow: hidden;
   text-overflow: ellipsis;
   cursor: pointer;
+}
+
+.chat-menu-row .chat-menu-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chat-menu-row.active {
+  background: var(--c-fill-2);
+  color: var(--c-label);
+}
+
+.chat-menu-check {
+  display: flex;
+  flex: 0 0 auto;
+  color: var(--c-accent);
 }
 
 .chat-menu-row:hover {

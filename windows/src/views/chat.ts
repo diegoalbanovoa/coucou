@@ -495,7 +495,7 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
   /** Closes and empties the open dropdown, if any. */
   function closeActiveMenu() {
     if (!activeMenu) return;
-    activeMenu.popover.classList.remove("open");
+    activeMenu.popover.classList.remove("open", "has-pinned");
     clear(activeMenu.popover);
     activeMenu = null;
   }
@@ -830,8 +830,14 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
   });
 
   /** One row of any of the three dropdowns. */
-  function menuRow(label: string, onClick: () => void, face?: HTMLElement): HTMLElement {
-    const row = h("button", { class: "chat-menu-row" }, ...(face ? [face] : []), h("span", { text: label }));
+  function menuRow(label: string, onClick: () => void, face?: HTMLElement, active = false): HTMLElement {
+    const row = h(
+      "button",
+      { class: active ? "chat-menu-row active" : "chat-menu-row", ...(active ? { "aria-current": "true" } : {}) },
+      ...(face ? [face] : []),
+      h("span", { class: "chat-menu-label", text: label }),
+      ...(active ? [h("span", { class: "chat-menu-check" }, icon("check", { size: 12 }))] : []),
+    );
     row.addEventListener("click", () => {
       closeActiveMenu();
       onClick();
@@ -1010,8 +1016,13 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
         // Same order as the Fase 3 console grid, so picking an agent here and
         // picking one there never disagree about which comes first.
         const ordered = orderConsoles(availableClis, State.agentCli, new Set());
+        // The rows scroll; "Add a provider…" is pinned under them, outside the
+        // scrolling area, so it never has to be hunted for.
+        const list = h("div", { class: "chat-menu-scroll" });
+        providerMenu.classList.add("has-pinned");
+        providerMenu.append(list);
         for (const c of ordered) {
-          providerMenu.append(
+          list.append(
             menuRow(
               c.label,
               () => {
@@ -1019,18 +1030,19 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
                 input.focus();
               },
               stillMiniBot(consoleColor(c.id), 14),
+              !State.selectedProvider && c.id === State.agentCli,
             ),
           );
         }
         const globeFace = () => h("span", { class: "chat-menu-face" }, icon("globe", { size: 14 }));
         for (const p of availableProviders) {
-          providerMenu.append(menuRow(p.label, () => openProviderEditor(p), globeFace()));
+          list.append(menuRow(p.label, () => openProviderEditor(p), globeFace(), p.id === State.selectedProvider));
         }
         for (const m of ollamaModels) {
           // Already-saved Ollama models (picked before) show up in the loop
           // above instead, as an ordinary profile — not listed twice here.
           if (availableProviders.some((p) => p.baseUrl === OLLAMA_BASE_URL && p.model === m.name)) continue;
-          providerMenu.append(menuRow(m.name, () => void selectOllamaModel(m.name), globeFace()));
+          list.append(menuRow(m.name, () => void selectOllamaModel(m.name), globeFace()));
         }
         // Detected OpenJarvis models sit under one section heading, so each
         // row can be just the model name (shorter than "OpenJarvis · model").
@@ -1038,13 +1050,17 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
           (model) => !availableProviders.some((p) => p.baseUrl === OPENJARVIS_BASE_URL && p.model === model),
         );
         if (jarvisModels.length > 0) {
-          providerMenu.append(h("div", { class: "chat-menu-heading", text: t("chat.openjarvisSection") }));
+          list.append(h("div", { class: "chat-menu-heading", text: t("chat.openjarvisSection") }));
           for (const model of jarvisModels) {
-            providerMenu.append(menuRow(model, () => void selectOpenJarvisModel(model), globeFace()));
+            list.append(menuRow(model, () => void selectOpenJarvisModel(model), globeFace()));
           }
         }
         providerMenu.append(
-          menuRow(t("chat.addProvider"), () => openProviderEditor(), h("span", { class: "chat-menu-face" }, icon("plus", { size: 14 }))),
+          h(
+            "div",
+            { class: "chat-menu-pinned" },
+            menuRow(t("chat.addProvider"), () => openProviderEditor(), h("span", { class: "chat-menu-face" }, icon("plus", { size: 14 }))),
+          ),
         );
       });
     })();
