@@ -42,6 +42,7 @@
   --c-glass: rgba(28, 29, 33, 0.72);
   --c-glass-border: rgba(255, 255, 255, 0.1);
   --c-glass-highlight: rgba(255, 255, 255, 0.06);
+  --c-scrim: color-mix(in srgb, var(--c-island) 55%, transparent); /* behind modal sheets */
   --glass-blur: blur(20px) saturate(160%);
 
   /* Type: Segoe UI Variable on Windows — never SF Pro, which SF Symbols'

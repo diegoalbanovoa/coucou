@@ -59,6 +59,7 @@ export const es: Messages = {
     openjarvisUsageHint: "OpenJarvis no informa tokens en modo simple, así que Uso no tendrá datos de este perfil",
     addProvider: "Agregar un proveedor…",
     addProviderTitle: "Agregar un proveedor",
+    openjarvisDefaultName: "OpenJarvis local",
     editProvider: "Editar proveedor",
     deleteProvider: "Eliminar",
     deleteProviderConfirm: "¿Eliminar este proveedor? También se borra su clave guardada.",

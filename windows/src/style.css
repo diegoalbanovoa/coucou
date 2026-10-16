@@ -1021,8 +1021,8 @@ input[type="range"]::-webkit-slider-thumb {
 }
 
 .provider-editor-hint {
-  font: var(--t-caption);
-  color: var(--ink-2);
+  font: 400 11px/14px var(--font-ui);
+  color: var(--c-label-2);
 }
 
 .provider-editor-note {

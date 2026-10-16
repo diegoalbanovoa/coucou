@@ -67,6 +67,7 @@ export const en = {
     openjarvisUsageHint: "OpenJarvis reports no token counts in simple mode, so Usage will have no data for this profile",
     addProvider: "Add a provider…",
     addProviderTitle: "Add a provider",
+    openjarvisDefaultName: "OpenJarvis local",
     editProvider: "Edit provider",
     deleteProvider: "Delete",
     deleteProviderConfirm: "Delete this provider? Its saved key is removed too.",

@@ -323,11 +323,13 @@
   inset: var(--s-3) var(--s-3) 0 var(--s-3);
   display: flex;
   flex-direction: column;
-  background: var(--c-glass);
+  /* Modal: opaque enough that the view under it cannot be read through it, and
+     a scrim (the card clips it) so what is behind reads as inactive. */
+  background: var(--c-surface-2);
   backdrop-filter: var(--glass-blur);
   border: 1px solid var(--c-glass-border);
   border-radius: var(--r-lg) var(--r-lg) 0 0;
-  box-shadow: var(--shadow-pop);
+  box-shadow: var(--shadow-pop), 0 0 0 100vmax var(--c-scrim);
   animation: ui-sheet-in var(--d-base) var(--ease-out);
   min-height: 0;
 }

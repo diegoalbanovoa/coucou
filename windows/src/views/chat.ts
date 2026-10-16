@@ -868,7 +868,11 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
       placeholder: "https://…",
       value: profile?.baseUrl ?? "",
     }) as HTMLInputElement;
-    const modelInput = h("input", { type: "text", value: profile?.model ?? "" }) as HTMLInputElement;
+    const modelInput = h("input", { type: "text", value: profile?.model ?? "", list: "provider-model-options" }) as HTMLInputElement;
+    // Models OpenJarvis reported when it was detected; offered by the template
+    // button, never required (any name can still be typed).
+    const modelOptions = h("datalist", { id: "provider-model-options" });
+    for (const m of openjarvis?.models ?? []) modelOptions.append(h("option", { value: m }));
     const keyInput = h("input", {
       type: "password",
       placeholder: profile?.keySet ? t("chat.providerKeyPlaceholder") : "",
@@ -893,8 +897,8 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
     urlInput.addEventListener("input", syncHints);
     syncHints();
 
-    const field = (labelText: string, el: HTMLElement, hint?: HTMLElement) =>
-      h("label", { class: "provider-editor-field" }, h("span", { text: labelText }), ...(hint ? [hint] : []), el);
+    const field = (labelText: string, el: HTMLElement, hint?: HTMLElement, extra?: HTMLElement) =>
+      h("label", { class: "provider-editor-field" }, h("span", { text: labelText }), ...(hint ? [hint] : []), el, ...(extra ? [extra] : []));
 
     const templateBtn = profile
       ? null
@@ -903,6 +907,9 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
           size: "md",
           onClick: () => {
             urlInput.value = OPENJARVIS_BASE_URL;
+            if (!labelInput.value.trim()) labelInput.value = t("chat.openjarvisDefaultName");
+            const detected = openjarvis?.models ?? [];
+            if (detected.length > 0 && !detected.includes(modelInput.value.trim())) modelInput.value = detected[0];
             syncHints();
           },
         });
@@ -914,7 +921,7 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
       field(t("chat.providerLabelField"), labelInput),
       templateBtn,
       field(t("chat.providerUrlField"), urlInput),
-      field(t("chat.providerModelField"), modelInput),
+      field(t("chat.providerModelField"), modelInput, undefined, modelOptions),
       field(t("chat.providerKeyField"), keyInput, keyHint),
       usageHint,
     );
