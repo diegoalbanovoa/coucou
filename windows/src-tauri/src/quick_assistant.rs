@@ -486,7 +486,7 @@ pub(crate) fn record_refusal(name: &str, args: &Value, outcome: &str) {
 ///
 /// Redacts secrets first, then scans for prompt-injection phrasing and, if
 /// found, annotates the text; both events are logged.
-fn harden_output(tool: &str, target: &str, raw: String) -> String {
+pub(crate) fn harden_output(tool: &str, target: &str, raw: String) -> String {
     let red = redact::redact(&raw);
     if red.count > 0 {
         record(tool, target, "redacted");
