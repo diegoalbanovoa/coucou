@@ -53,11 +53,8 @@ async function openNewProfileEditor(page, lang) {
   await openProviderMenu(page);
   // The menu caps its height and scrolls; bring its last row into view first.
   await page.locator(".chat-dropdown", { has: page.locator(".chat-menu-row") }).first().evaluate((m) => { m.scrollTop = m.scrollHeight; });
-  await page.locator(".chat-menu-row", { hasText: ADD_PROVIDER[lang] }).dispatchEvent("click");
-  // dispatchEvent, not click(): in the current build `.chat-body` (z-index 1)
-  // sits above the editor sheet, so a real pointer click never reaches it
-  // (see docs/plan-v4-notas.md, "Integración tras v4"). The shot shows it.
-  await page.locator(".provider-editor-template").dispatchEvent("click");
+  await page.locator(".chat-menu-row", { hasText: ADD_PROVIDER[lang] }).click();
+  await page.locator(".provider-editor-template").click();
   await page.waitForTimeout(300);
 }
 const ADD_PROVIDER = { en: "Add a provider", es: "Agregar un proveedor" };
