@@ -71,7 +71,10 @@ pub fn from_openai_usage(value: &Value) -> Option<Usage> {
         output_tokens: usage.get("completion_tokens").and_then(Value::as_u64),
         cost_usd: usage.get("cost").and_then(Value::as_f64),
     };
-    if found.is_empty() {
+    // OpenJarvis in `-a simple` mode answers 0/0 with no cost: that is "no
+    // data", not a real zero. A lone 0 next to a real number stays.
+    let all_zero = found.input_tokens == Some(0) && found.output_tokens == Some(0);
+    if found.is_empty() || (all_zero && found.cost_usd.is_none()) {
         None
     } else {
         Some(found)
@@ -344,5 +347,10 @@ mod tests {
         assert_eq!(from_openai_usage(&none), None);
         let null: Value = serde_json::from_str(r#"{"usage":null}"#).unwrap();
         assert_eq!(from_openai_usage(&null), None);
+        // OpenJarvis `-a simple`: 0/0 and no cost means "no data".
+        let zeros: Value = serde_json::from_str(r#"{"usage":{"prompt_tokens":0,"completion_tokens":0}}"#).unwrap();
+        assert_eq!(from_openai_usage(&zeros), None);
+        let half: Value = serde_json::from_str(r#"{"usage":{"prompt_tokens":10,"completion_tokens":0}}"#).unwrap();
+        assert_eq!(from_openai_usage(&half), Some(Usage { input_tokens: Some(10), output_tokens: Some(0), cost_usd: None }));
     }
 }

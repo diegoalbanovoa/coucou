@@ -64,7 +64,7 @@ export const en = {
     openjarvisSection: "OpenJarvis",
     openjarvisTemplate: "Template: local OpenJarvis",
     openjarvisKeyHint: "Only if you started OpenJarvis with OPENJARVIS_API_KEY",
-    openjarvisUsageHint: "OpenJarvis reports 0 tokens in simple mode, so Usage will show 0 for this profile",
+    openjarvisUsageHint: "OpenJarvis reports no token counts in simple mode, so Usage will have no data for this profile",
     addProvider: "Add a provider…",
     editProvider: "Edit provider",
     deleteProvider: "Delete",

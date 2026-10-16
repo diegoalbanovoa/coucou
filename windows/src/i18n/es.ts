@@ -56,7 +56,7 @@ export const es: Messages = {
     openjarvisSection: "OpenJarvis",
     openjarvisTemplate: "Plantilla: OpenJarvis local",
     openjarvisKeyHint: "Solo si arrancaste OpenJarvis con OPENJARVIS_API_KEY",
-    openjarvisUsageHint: "OpenJarvis informa 0 tokens en modo simple, así que Uso mostrará 0 para este perfil",
+    openjarvisUsageHint: "OpenJarvis no informa tokens en modo simple, así que Uso no tendrá datos de este perfil",
     addProvider: "Agregar un proveedor…",
     editProvider: "Editar proveedor",
     deleteProvider: "Eliminar",
