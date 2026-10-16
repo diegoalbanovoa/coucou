@@ -215,6 +215,7 @@ export const en = {
   },
 
   integrations: {
+    installHooks: "Install hooks",
     hooksNotInstalled: "Hooks not installed",
     keyNotConfigured: "Key not configured",
     connectedLoading: "Connected · loading…",

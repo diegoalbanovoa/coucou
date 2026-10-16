@@ -194,6 +194,7 @@ export const es: Messages = {
   },
 
   integrations: {
+    installHooks: "Instalar hooks",
     hooksNotInstalled: "Hooks no instalados",
     keyNotConfigured: "Clave sin configurar",
     connectedLoading: "Conectado · cargando…",

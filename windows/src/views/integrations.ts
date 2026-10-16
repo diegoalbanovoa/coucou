@@ -9,6 +9,7 @@ import { h, clear, dot } from "./dom";
 import { icon, type IconName } from "./icons";
 import { State, type AgentTask } from "../core/state";
 import { Bridge } from "../core/bridge";
+import { leaveSettingsIntent } from "../core/settings-intent";
 import { t } from "../i18n/index";
 
 /**
@@ -106,6 +107,21 @@ function idleCard(task: AgentTask, openSettings: () => void): HTMLElement {
         style: `color:${task.color}d9`,
         text: t("integrations.openService", { name: task.name }),
         onclick: () => void Bridge.openUrl(OPEN_URLS[task.id]),
+      }),
+    );
+  }
+  // Hooks missing: the one fix is on offer right here. It opens Settings on the
+  // usual diff-and-confirm step; nothing is written from the island.
+  if (task.id === "integration_claude" && !configured) {
+    actions.append(
+      h("button", {
+        class: "link-btn",
+        style: "color:var(--c-accent)",
+        text: t("integrations.installHooks"),
+        onclick: () => {
+          leaveSettingsIntent("installHooks");
+          openSettings();
+        },
       }),
     );
   }

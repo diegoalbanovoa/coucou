@@ -14,6 +14,7 @@ import { h, clear } from "../views/dom";
 import { t, tn, fmtPercent, fmtRelative, setLocale, resolveLocale, type LocaleSetting } from "../i18n/index";
 import { segmented } from "../ui/segmented";
 import { inlineConfirm } from "../ui/inline-confirm";
+import { takeSettingsIntent, watchSettingsIntent } from "../core/settings-intent";
 
 /** This window's working copy of the settings; every control mutates it and calls save(). */
 let settings: Settings = { ...DEFAULT_SETTINGS };
@@ -55,6 +56,9 @@ function renderDiff(text: string): HTMLElement {
   }
   return box;
 }
+
+/** Set by `claudeSection()`: opens the install diff, as if "Install hooks" were clicked. */
+let startHooksInstall: (() => void) | null = null;
 
 // ── Claude Code section ───────────────────────────────────────────────────────
 
@@ -183,6 +187,13 @@ function claudeSection(status: HookStatus): HTMLElement {
       onclick: () => { clear(body); draw(); },
     })));
   }
+
+  // What the island's "Install hooks" button asks for: the same preview the
+  // Install button opens, nothing more. The write still waits for the confirm.
+  startHooksInstall = () => {
+    section.scrollIntoView({ block: "start" });
+    if (status.hookReady) void showPreview(true);
+  };
 
   draw();
   return section;
@@ -1186,6 +1197,10 @@ async function main() {
   for (const k of keys) secretsPresent[k] = (await Bridge.secretPresent(k)) ?? false;
 
   render();
+
+  // "Install hooks" on the island opens this window asking for the diff.
+  if (takeSettingsIntent()) startHooksInstall?.();
+  watchSettingsIntent(() => startHooksInstall?.());
 
   void onEvent<Settings>("settings-changed", (s) => {
     const languageChanged = s.language !== settings.language;
