@@ -313,3 +313,26 @@ Plan: `handoff/plan-aprobados.md`. Un commit por tarea.
 - El plan pedía coautor `Claude Opus 5.5`; los commits llevan `Claude Sonnet 5.5` (atribución vigente de la sesión).
 - `CLAUDE.md` tenía cambios sin commitear previos a esta tarea; no se tocó ni se incluyó en ningún commit.
 - Ruta de cambios de estilo de la tarea 3: ver arriba (no hubo que importar `tokens.css`).
+
+## Correcciones UX/UI
+
+Plan: `handoff/plan-uxui.md`. Un commit por bloque (`v4 uxui 1` a `v4 uxui 7`).
+
+1. **i18n de las vistas (punto 1).** Causa: `main.ts` construía `new Island(root)` antes de `Bridge.boot()` y de `setLocale()`. Las vistas llaman a `t()` una sola vez al construirse (segmented de Consolas/Servicios, título vacío del chat...), así que quedaban congeladas en inglés aunque `es.ts` tuviera la clave. Arreglo: boot, `setLocale`, y solo entonces la isla. Además `settings-changed` con cambio de idioma llama a `Island.rebuildViews()` (antes solo se refrescaban las vistas que ya incluían `getLocale()` en su clave de caché). Test en `tests/i18n.test.mjs` (orden en `main.ts` y llamada a `rebuildViews`; las vistas necesitan DOM y no se pueden montar en node). El cambio en caliente no se probó contra la app Tauri real, solo por lectura de código.
+6. **Título duplicado.** `header()` de `integrations.ts`, `agentWho` y el ticker omiten el subtítulo si es igual al nombre.
+7c. Clave `chat.addProviderTitle` (sin "…") para el título de la hoja; el elemento del menú conserva los puntos.
+2. **Hoja.** `.ui-sheet` usa `--c-surface-2` opaco más un velo (`--c-scrim`, nuevo en `tokens.css`) como sombra de 100vmax recortada por la tarjeta. La hoja de Sistema va dentro de `.sys-body`, que recorta el velo: allí solo se aplica la opacidad.
+7a/7b. Ayudas del editor en `--c-label-2`, peso 400. La plantilla OpenJarvis rellena nombre (`chat.openjarvisDefaultName`), y si hay modelos detectados ofrece un `<datalist>` y preselecciona el primero.
+8. Menú de proveedores: fila activa con check y `aria-current`; filas en un contenedor con scroll (sombras de borde más fuertes) y "Agregar un proveedor…" fijo al pie.
+3. Iconos de Mochi: `.mini img` (la ficha quieta) no estaba posicionada como `.mini canvas`; ahora se centra igual. Es el componente común de fichas, menú y procesos.
+11/14/13/12. `.chat-icon-btn` a `--c-label-2` (ya medía `--hit-min`; el "···" de procesos ya usaba `.ui-icon-btn`, con `--c-label-2` y `--hit-min`, sin cambios). Fichas de consola: etiqueta en `--c-label-2` (~6,5:1 sobre `--card-flat`); "no verificada" ya no baja la opacidad de toda la ficha, solo la cara y borde discontinuo. El "!" del anillo pasó a una insignia en el borde con `title` traducido (`system.gaugeBadgeHigh/Critical`). Degradado superior en `.log-wrap::before` con `--card`.
+5. **Instalar hooks.** El diff vive solo en Ajustes, así que el botón deja una nota en `localStorage` (`core/settings-intent.ts`; las dos ventanas comparten origen) y abre Ajustes, que abre el mismo `hooksPreview` ya existente (ventana ya abierta: evento `storage`; nueva: lectura al arrancar). Escribir sigue requiriendo el botón de confirmar de siempre. Si el relay no está listo solo se desplaza a la sección. Con la nota fuera de Tauri (mock) no hay ventana separada; se probó con dos páginas de Playwright en el mismo contexto (ventana abierta: funciona).
+4/9/10. Ajustes: agentes en rejilla etiqueta | valor (rutas en monoespaciado, `overflow-wrap: anywhere`; clave nueva `settings.agents.binary`), índice fijo de anclas (`<nav>` con enlaces reales, `section-index`), aviso del asistente rápido sin modelo y de notas sin usar con "Recordar notas" apagado (ambos con el estilo `.notice.warn`).
+15. Capturas nuevas: `system-usage`, `digest-ok`, `digest-error`, `quick-entry`, `chat-memory` (con `?state=memory`), `settings-hooks-diff`. Los ajustes en inglés ya salían (`settings-*-en`). Conjunto completo: 76 PNG generados, 14 combinaciones omitidas (`console-detail`, `search`, `streaming`: sin estado mock, como antes). Antes: 60.
+
+### Discrepancias
+
+- El plan decía que los "···" de procesos tenían poco contraste; ya usaban `--c-label-2` y `--hit-min`. El glifo es fino, así que se ve tenue pese a cumplir el token.
+- El velo no se ve en la hoja de Sistema (la recorta `.sys-body`).
+- Antes: capturas de referencia en el scratchpad de la sesión (`before/`); `shots/` está en .gitignore.
+- Atribución de coautor: `Claude Sonnet 5.5` (la vigente).

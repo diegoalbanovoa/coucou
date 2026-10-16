@@ -39,8 +39,8 @@ const TABS = {
 
 /** One shot: where to go, what to click to get there, and the label used in
  *  the saved filename. `ready` is a known gap, not a bug — see the file note. */
-function shot({ view, label, url = "", ready = true, settings = false, steps = null }) {
-  return { view, label, url, ready, settings, steps };
+function shot({ view, label, url = "", ready = true, settings = false, steps = null, intent = null }) {
+  return { view, label, url, ready, settings, steps, intent };
 }
 
 // Real clicks, same as a person: the provider menu and the profile editor
@@ -58,6 +58,15 @@ async function openNewProfileEditor(page, lang) {
   await page.waitForTimeout(300);
 }
 const ADD_PROVIDER = { en: "Add a provider", es: "Agregar un proveedor" };
+
+/** Hovers the last assistant reply so its hover-only actions (copy, remember) show. */
+async function hoverLastReply(page) {
+  await page.locator(".reply-wrap").last().hover().catch(() => {});
+  await page.waitForTimeout(200);
+}
+
+/** The mock opens these views by itself at 7.5 s; give the cross-fade time to land. */
+const settleView = (page) => page.waitForTimeout(2500);
 
 const SHOTS = [
   // ── home ──────────────────────────────────────────────────────────────────
@@ -78,6 +87,8 @@ const SHOTS = [
   // and the new-profile editor after the OpenJarvis template.
   shot({ view: "chat", label: "providers-menu", url: "?scenario=openjarvis", steps: openProviderMenu }),
   shot({ view: "chat", label: "providers-editor", url: "?scenario=openjarvis", steps: openNewProfileEditor }),
+  // Memory on with a provider profile chatting: replies offer "Remember".
+  shot({ view: "chat", label: "memory", url: "?state=memory", steps: hoverLastReply }),
   // ── system ────────────────────────────────────────────────────────────────
   shot({ view: "system", label: "ok", url: "?scenario=ok" }),
   shot({ view: "system", label: "strained", url: "?scenario=strained" }),
@@ -87,6 +98,11 @@ const SHOTS = [
   // mock-bridge.ts's `state=cleanup`), since reaching it for real needs a
   // click and a wait for a scan this script does not drive.
   shot({ view: "system", label: "cleanup", url: "?scenario=ok&state=cleanup" }),
+  // Usage pane; the digest and quick-assistant views open from `?view=` (mock only).
+  shot({ view: "system", label: "usage", url: "?scenario=ok&state=usage" }),
+  shot({ view: "digest", label: "ok", url: "?view=digest", steps: settleView }),
+  shot({ view: "digest", label: "error", url: "?view=digest-error", steps: settleView }),
+  shot({ view: "quick", label: "entry", url: "?view=quick", steps: settleView }),
   // ── settings (own window, own navigation) ────────────────────────────────
   shot({ view: "settings", label: "general", url: "", settings: true }),
   // Same URL as "general": the settings window is one scrolling page, not
@@ -95,11 +111,14 @@ const SHOTS = [
   // anyway, since a future section-specific capture (scrolled to anchor)
   // would want the label already in place.
   shot({ view: "settings", label: "health", url: "", settings: true }),
+  // What the island's "Install hooks" button asks for: Settings opening on the
+  // preview diff (a note in localStorage, as the island leaves it).
+  shot({ view: "settings", label: "hooks-diff", url: "", settings: true, intent: "installHooks" }),
 ];
 
 const LANGS = ["en", "es"];
 /** `[view]: scales`, from the plan's table — settings only ships at 1×. */
-const SCALES = { home: [1, 1.5, 2], chat: [1, 1.5], system: [1, 1.5], settings: [1] };
+const SCALES = { home: [1, 1.5, 2], chat: [1, 1.5], system: [1, 1.5], digest: [1], quick: [1], settings: [1] };
 
 /**
  * `vite.kill()` alone only signals the immediate child. On Windows that child
@@ -147,7 +166,7 @@ async function captureIslandShot(browser, { view, label, url, ready, steps }, la
     const sep = url.includes("?") ? "&" : "?";
     await page.goto(`${BASE}/${url}${sep}lang=${lang}`);
     await expandIsland(page);
-    if (view !== "home") await page.click(`button[title="${TABS[lang][view]}"]`);
+    if (view !== "home" && TABS[lang][view]) await page.click(`button[title="${TABS[lang][view]}"]`);
     await page.waitForTimeout(500);
     if (steps) await steps(page, lang);
     await page.screenshot({ path: join(OUT, `${name}.png`) });
@@ -158,7 +177,7 @@ async function captureIslandShot(browser, { view, label, url, ready, steps }, la
   }
 }
 
-async function captureSettingsShot(browser, { label, ready }, lang, scale) {
+async function captureSettingsShot(browser, { label, ready, intent }, lang, scale) {
   const name = `settings-${label}-${lang}-${scale}x`;
   if (!ready) {
     console.log(`skip  ${name} (no UI for this state yet)`);
@@ -166,6 +185,7 @@ async function captureSettingsShot(browser, { label, ready }, lang, scale) {
   }
   const page = await browser.newPage({ viewport: { width: 640, height: 900 }, deviceScaleFactor: scale });
   try {
+    if (intent) await page.addInitScript((v) => localStorage.setItem("coucou.settings.intent", v), intent);
     await page.goto(`${BASE}/settings.html?lang=${lang}`);
     await page.waitForTimeout(800);
     await page.screenshot({ path: join(OUT, `${name}.png`), fullPage: true });

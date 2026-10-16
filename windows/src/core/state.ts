@@ -273,7 +273,7 @@ class AppState {
   /** Mock mode only (`?state=storage`) — starts the System tab on its
    *  Almacenamiento pane instead of the Procesos default, so shots.mjs can
    *  capture the drive list without scripting a segmented-control click. */
-  systemInitialPane: "processes" | "storage" | null = null;
+  systemInitialPane: "processes" | "storage" | "agents" | "usage" | null = null;
 
   /** The health monitor's last reading — null until the first one arrives
    *  (or the user has it switched off). A mood, not a machine state: see

@@ -90,6 +90,12 @@ if (chatState === "drop") State.fileDragOver = true;
 // for a scan this script does not drive.
 if (chatState === "cleanup") State.systemOpenCleanupSheet = true;
 if (chatState === "storage") State.systemInitialPane = "storage";
+if (chatState === "usage") State.systemInitialPane = "usage";
+// Memory on and a provider profile chatting: the chat then offers "Remember" on replies.
+if (chatState === "memory") {
+  State.settings.memoryEnabled = true;
+  State.selectedProvider = "mock-profile";
+}
 
 // ── boot / settings ────────────────────────────────────────────────────────────
 

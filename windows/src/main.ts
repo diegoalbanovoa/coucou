@@ -140,9 +140,12 @@ async function main() {
   // Routines (plan v4, Fase 7): the webview schedules, Rust runs. No timer at
   // all while no routine is switched on.
   startRoutineScheduler(island);
-  // Mock mode only: `?view=digest` (or `digest-error`) opens the digest view.
-  if (!IS_TAURI && /^digest/.test(new URLSearchParams(location.search).get("view") ?? "")) {
-    window.setTimeout(() => island.alert("digest"), 7500);
+  // Mock mode only: `?view=digest` (or `digest-error`) opens the digest view,
+  // `?view=quick` the quick assistant's entry.
+  if (!IS_TAURI) {
+    const wanted = new URLSearchParams(location.search).get("view") ?? "";
+    if (/^digest/.test(wanted)) window.setTimeout(() => island.alert("digest"), 7500);
+    else if (wanted === "quick") window.setTimeout(() => island.alert("quick"), 7500);
   }
 
   // In a plain browser there is no wake strip behind the cursor: make the whole
