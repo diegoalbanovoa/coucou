@@ -358,8 +358,8 @@ pub fn set_input_region(_win: &WebviewWindow, _rect: Option<(f64, f64, f64, f64)
 /// see, and a click that lands on another window. An owned dialog joins the
 /// island's z-order band and is shown above it, and the island is disabled
 /// while it is up, which is what modal is supposed to mean.
-pub fn pick_folder(win: &WebviewWindow) -> Option<String> {
-    pick_folder_owned(hwnd_of(win).map(|h| h.0 as isize))
+pub fn pick_folder(win: &WebviewWindow, title: &str) -> Option<String> {
+    pick_folder_owned(hwnd_of(win).map(|h| h.0 as isize), title.to_string())
 }
 
 /// The picker as the OS sees it, addressed by raw owner handle.
@@ -367,7 +367,7 @@ pub fn pick_folder(win: &WebviewWindow) -> Option<String> {
 /// Split out from `pick_folder` for two reasons: `HWND` is not `Send`, so the
 /// handle has to cross into the dialog thread as an integer, and the tests
 /// need to open the picker without a `WebviewWindow` to get a handle from.
-fn pick_folder_owned(owner: Option<isize>) -> Option<String> {
+fn pick_folder_owned(owner: Option<isize>, title: String) -> Option<String> {
     // Its own thread, with its own COM apartment. The dialog runs a modal
     // message loop on whichever thread shows it; on a shared one that is
     // Mochi's thread or a runtime worker, and the apartment mode of a pooled
@@ -376,7 +376,7 @@ fn pick_folder_owned(owner: Option<isize>) -> Option<String> {
         // Ignore an already-initialised apartment; only an outright failure
         // means there is nowhere to show a dialog.
         let init = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
-        let picked = show_folder_dialog(owner.map(|h| HWND(h as *mut _)));
+        let picked = show_folder_dialog(owner.map(|h| HWND(h as *mut _)), &title);
         if init.is_ok() {
             CoUninitialize();
         }
@@ -394,8 +394,8 @@ const CANCELLED: ::windows::core::HRESULT = ::windows::core::HRESULT(0x8007_04C7
 
 /// Runs the folder dialog. Returns `None` on cancel and, after logging, on a real
 /// failure. Must be called on a thread with an initialised COM apartment.
-unsafe fn show_folder_dialog(owner: Option<HWND>) -> Option<String> {
-    match open_folder_dialog(owner) {
+unsafe fn show_folder_dialog(owner: Option<HWND>, title: &str) -> Option<String> {
+    match open_folder_dialog(owner, title) {
         Ok(path) => path,
         // Changing your mind is not a failure and says nothing worth logging.
         Err(err) if err.code() == CANCELLED => None,
@@ -412,10 +412,11 @@ unsafe fn show_folder_dialog(owner: Option<HWND>) -> Option<String> {
 
 /// Shows the shell's folder picker owned by `owner` and returns the chosen file
 /// system path. A cancel surfaces as the `CANCELLED` error.
-unsafe fn open_folder_dialog(owner: Option<HWND>) -> ::windows::core::Result<Option<String>> {
+unsafe fn open_folder_dialog(owner: Option<HWND>, title: &str) -> ::windows::core::Result<Option<String>> {
     let dialog: IFileOpenDialog = CoCreateInstance(&FileOpenDialog, None, CLSCTX_INPROC_SERVER)?;
     let options = dialog.GetOptions()?;
     dialog.SetOptions(options | FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM)?;
+    dialog.SetTitle(&::windows::core::HSTRING::from(title))?;
     dialog.Show(owner)?;
     let item = dialog.GetResult()?;
     let wide = item.GetDisplayName(SIGDN_FILESYSPATH)?;
@@ -851,7 +852,7 @@ mod picker_e2e {
     #[ignore = "shows a modal dialog; driven by windows/tests/e2e"]
     fn pick_folder_returns_a_path() {
         let island = FakeIsland::new();
-        let picked = pick_folder_owned(island.owner());
+        let picked = pick_folder_owned(island.owner(), "Test folder".to_string());
         let path = picked.expect("the driver confirmed a folder, so there must be a path");
         assert!(
             std::path::Path::new(&path).is_dir(),
@@ -868,7 +869,7 @@ mod picker_e2e {
     #[ignore = "shows a modal dialog; driven by windows/tests/e2e"]
     fn pick_folder_cancels_cleanly() {
         let island = FakeIsland::new();
-        assert!(pick_folder_owned(island.owner()).is_none());
+        assert!(pick_folder_owned(island.owner(), "Test folder".to_string()).is_none());
         println!("cancelled");
     }
 
@@ -880,7 +881,7 @@ mod picker_e2e {
     fn pick_folder_twice() {
         let island = FakeIsland::new();
         for _ in 0..2 {
-            let path = pick_folder_owned(island.owner()).expect("the driver confirmed a folder");
+            let path = pick_folder_owned(island.owner(), "Test folder".to_string()).expect("the driver confirmed a folder");
             println!("picked: {path}");
         }
     }

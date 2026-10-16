@@ -357,10 +357,11 @@ pub fn work_area_bottom(_win: &WebviewWindow) -> Option<i32> {
 /// The island is passed for parity with Windows, where the dialog has to be
 /// owned by it to be visible at all. zenity and kdialog are separate processes
 /// and take no owner, so here it is unused.
-pub fn pick_folder(_win: &WebviewWindow) -> Option<String> {
-    let attempts: [(&str, &[&str]); 2] = [
-        ("zenity", &["--file-selection", "--directory", "--title=Attach a project folder"]),
-        ("kdialog", &["--getexistingdirectory", "."]),
+pub fn pick_folder(_win: &WebviewWindow, title: &str) -> Option<String> {
+    let zenity_title = format!("--title={title}");
+    let attempts: [(&str, Vec<&str>); 2] = [
+        ("zenity", vec!["--file-selection", "--directory", &zenity_title]),
+        ("kdialog", vec!["--title", title, "--getexistingdirectory", "."]),
     ];
     for (program, args) in attempts {
         let Some(exe) = find_on_path(program) else { continue };

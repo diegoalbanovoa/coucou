@@ -293,3 +293,10 @@ Plan: `handoff/plan-integracion.md`. Un commit por tarea.
 ### Verificación
 
 `cargo test --workspace` 265 + 3 en verde (6 ignoradas), `cargo clippy --workspace --all-targets` sin avisos, `npx tsc --noEmit` limpio, `npm run test` 216/216.
+
+## Pendientes aprobados
+
+Plan: `handoff/plan-aprobados.md`. Un commit por tarea.
+
+1. **`RESULT_LINE` real.** La constante de `agent.rs` es ahora una línea capturada de `claude -p "di hola" --output-format stream-json --verbose` (sin `modelUsage`, `subagent_stats` ni `usage.iterations`; `usage` intacto). El parser la lee sin cambios: entrada 39228 (2 + 21873 + 17353), salida 23, coste 0,1789226.
+2. **Título del selector de carpeta.** `platform::pick_folder(win, title)`. Windows llama a `IFileOpenDialog::SetTitle`; Linux lo pasa a zenity (`--title=`) y a kdialog (`--title`). `lib.rs` tiene `dialog_title` y cinco claves nuevas en `i18n.rs` (`AttachProject`, `ChooseVault`, `ChooseChatFolder`, `AllowFolder`, `ChooseSkill`), en y es. **Linux no se compiló aquí**: el cambio de `linux.rs` (vector de argumentos en vez de slice, `--title` de kdialog) está revisado solo a ojo. Los tests e2e de Windows siguen sin comprobar el título.

@@ -552,15 +552,20 @@ impl Drop for PickingGuard {
 /// Awaiting it on a runtime worker would park that worker for minutes, and the
 /// hook pipe server and the agent turn share the same runtime — so it goes to
 /// the blocking pool instead.
-async fn choose_folder(win: tauri::WebviewWindow) -> Option<String> {
+async fn choose_folder(win: tauri::WebviewWindow, title: String) -> Option<String> {
     if PICKING.swap(true, Ordering::SeqCst) {
         return None;
     }
     let _guard = PickingGuard;
-    tauri::async_runtime::spawn_blocking(move || platform::pick_folder(&win))
+    tauri::async_runtime::spawn_blocking(move || platform::pick_folder(&win, &title))
         .await
         .ok()
         .flatten()
+}
+
+/// A native dialog title in the language the user picked.
+fn dialog_title(app: &AppHandle, key: i18n::Key) -> String {
+    i18n::tr(i18n::Locale::resolve(&shared_settings(app).language), key).to_string()
 }
 
 /// The window a dialog opened from the settings window should belong to.
@@ -572,7 +577,7 @@ fn settings_or_island(app: &AppHandle) -> Option<tauri::WebviewWindow> {
 /// or `None` if cancelled or another picker is already open.
 #[tauri::command]
 async fn pick_project(app: AppHandle) -> Option<String> {
-    choose_folder(island::window(&app)?).await
+    choose_folder(island::window(&app)?, dialog_title(&app, i18n::Key::AttachProject)).await
 }
 
 /// The paperclip's native multi-select picker (plan-v2.md § 5.3) — any kind
@@ -776,7 +781,7 @@ fn vault_state(app: AppHandle) -> vault::VaultInfo {
 /// not installed, or the notes live somewhere it has never been pointed at.
 #[tauri::command]
 async fn pick_vault(app: AppHandle) -> Option<String> {
-    let picked = choose_folder(settings_or_island(&app)?).await?;
+    let picked = choose_folder(settings_or_island(&app)?, dialog_title(&app, i18n::Key::ChooseVault)).await?;
     let stored = picked.clone();
     remember(&app, |s| s.vault_path = Some(stored));
     log::line(format!("vault chosen: {picked}"));
@@ -815,7 +820,7 @@ fn chat_folder_state(app: AppHandle) -> FolderState {
 /// Returns the chosen path, or `None` if cancelled.
 #[tauri::command]
 async fn pick_chat_folder(app: AppHandle) -> Option<String> {
-    let picked = choose_folder(settings_or_island(&app)?).await?;
+    let picked = choose_folder(settings_or_island(&app)?, dialog_title(&app, i18n::Key::ChooseChatFolder)).await?;
     let stored = picked.clone();
     remember(&app, |s| s.default_chat_folder = Some(stored));
     log::line(format!("default chat folder: {picked}"));
@@ -1135,7 +1140,7 @@ fn quick_folders(app: AppHandle) -> Vec<String> {
 /// Returns the chosen path, or `None` if cancelled or not a directory.
 #[tauri::command]
 async fn quick_folder_add(app: AppHandle) -> Option<String> {
-    let picked = choose_folder(settings_or_island(&app)?).await?;
+    let picked = choose_folder(settings_or_island(&app)?, dialog_title(&app, i18n::Key::AllowFolder)).await?;
     let mut folders = shared_settings(&app).quick_assistant_folders;
     quick_assistant::add_folder(&mut folders, &picked).ok()?;
     remember(&app, |s| s.quick_assistant_folders = folders);
@@ -1264,7 +1269,7 @@ async fn skill_import(app: AppHandle, replace: bool) -> Result<Option<skills::Sk
         (true, Some(path)) => path,
         _ => {
             let Some(win) = settings_or_island(&app) else { return Ok(None) };
-            match choose_folder(win).await {
+            match choose_folder(win, dialog_title(&app, i18n::Key::ChooseSkill)).await {
                 Some(picked) => std::path::PathBuf::from(picked),
                 None => return Ok(None),
             }

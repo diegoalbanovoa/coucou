@@ -1,8 +1,7 @@
 //! What little of the UI is Rust's to say: the tray menu, and (since plan-v2.md
 //! § 5.3 asks for it specifically) the paperclip's native file picker's title.
-//! The folder picker (`pick_folder`) still uses whatever title Windows itself
-//! gives an `IFileOpenDialog` — the plan never asked for that one, and
-//! changing a dialog nobody filed an issue against was not this phase's job.
+//! The folder picker (`pick_folder`) takes its title from the caller, one
+//! `Key` per place it is opened from.
 //!
 //! `TypeScript` owns the real dictionary (src/i18n/); this is deliberately a
 //! much smaller mirror of just a few platform-native strings; a new key here
@@ -51,6 +50,16 @@ pub enum Key {
     AttachFiles,
     /// Title bar of the picker that adds an app to the quick assistant.
     ChooseApp,
+    /// Title bar of the folder picker that attaches a project to the chat.
+    AttachProject,
+    /// Title bar of the picker that chooses the notes vault by hand.
+    ChooseVault,
+    /// Title bar of the picker for the chat's default folder.
+    ChooseChatFolder,
+    /// Title bar of the picker that allows a folder to the quick assistant.
+    AllowFolder,
+    /// Title bar of the picker that imports a skill.
+    ChooseSkill,
 }
 
 /// Translates `key` into `locale`. Exhaustive match: adding a `Key` or
@@ -69,6 +78,16 @@ pub fn tr(locale: Locale, key: Key) -> &'static str {
         (Locale::Es, Key::AttachFiles) => "Adjuntar archivos",
         (Locale::En, Key::ChooseApp) => "Choose an app",
         (Locale::Es, Key::ChooseApp) => "Elegir una aplicación",
+        (Locale::En, Key::AttachProject) => "Attach a project folder",
+        (Locale::Es, Key::AttachProject) => "Adjuntar la carpeta de un proyecto",
+        (Locale::En, Key::ChooseVault) => "Choose your notes vault",
+        (Locale::Es, Key::ChooseVault) => "Elige tu bóveda de notas",
+        (Locale::En, Key::ChooseChatFolder) => "Choose the default chat folder",
+        (Locale::Es, Key::ChooseChatFolder) => "Elige la carpeta predeterminada del chat",
+        (Locale::En, Key::AllowFolder) => "Allow a folder",
+        (Locale::Es, Key::AllowFolder) => "Permitir una carpeta",
+        (Locale::En, Key::ChooseSkill) => "Choose a skill folder",
+        (Locale::Es, Key::ChooseSkill) => "Elige la carpeta de una skill",
     }
 }
 
@@ -78,7 +97,7 @@ mod tests {
 
     #[test]
     fn every_key_answers_in_both_locales() {
-        for key in [Key::Open, Key::Settings, Key::Pause, Key::Quit, Key::AttachFiles, Key::ChooseApp] {
+        for key in [Key::Open, Key::Settings, Key::Pause, Key::Quit, Key::AttachFiles, Key::ChooseApp, Key::AttachProject, Key::ChooseVault, Key::ChooseChatFolder, Key::AllowFolder, Key::ChooseSkill] {
             assert!(!tr(Locale::En, key_copy(&key)).is_empty());
             assert!(!tr(Locale::Es, key).is_empty());
         }
@@ -94,6 +113,11 @@ mod tests {
             Key::Quit => Key::Quit,
             Key::AttachFiles => Key::AttachFiles,
             Key::ChooseApp => Key::ChooseApp,
+            Key::AttachProject => Key::AttachProject,
+            Key::ChooseVault => Key::ChooseVault,
+            Key::ChooseChatFolder => Key::ChooseChatFolder,
+            Key::AllowFolder => Key::AllowFolder,
+            Key::ChooseSkill => Key::ChooseSkill,
         }
     }
 
