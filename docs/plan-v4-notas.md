@@ -103,7 +103,7 @@ Valores verificados para la Fase 3:
 
 ## Fase 4
 
-- **Fixture de la línea `result` de Claude Code: NO verificado contra una línea real.** El plan pide pegar una línea capturada con `claude -p "di hola" --output-format stream-json --verbose`. No se ejecutó (gasta cuota y no hubo permiso explícito de Diego). El test `the_result_line_reports_tokens_and_cost` de `agent.rs` usa la forma documentada (`usage.input_tokens`, `cache_creation_input_tokens`, `cache_read_input_tokens`, `output_tokens`, `total_cost_usd`). **Pendiente:** que Diego (o el constructor con su permiso) capture una línea real y reemplace la constante `RESULT_LINE`.
+- **Fixture de la línea `result` de Claude Code:** verificado contra una línea real capturada el 2026-10-15 con `claude -p "di hola" --output-format stream-json --verbose`; el parser la lee bien (entrada = input + cache creation + cache read).
 - **Salida de `usage` desde `agent::send`:** se eligió una función nueva `agent::send_measured(..., usage_out: &mut Usage)`; `send` la envuelve con un `Usage` descartable. Así no cambia ningún llamador existente (el comando `agent_send` usa `send_measured`; los tests de `agent.rs` siguen con `send`, que queda con `#[cfg_attr(not(test), allow(dead_code))]`). El `Result<String, String>` del comando no cambia.
 - **Asistente rápido:** `quick_loop::run` ahora devuelve `Result<(String, Usage), String>`; los dos tests existentes se ajustaron. No hay streaming en esa ruta, así que su fila solo tiene latencia total (`first_text_ms` queda en `None`).
 - **Reintento de `stream_options`:** `send` repite la petición una sola vez sin `stream_options` si llega 400/422 y recuerda el perfil en `NO_USAGE` (solo memoria, `OnceLock<Mutex<HashSet>>`).

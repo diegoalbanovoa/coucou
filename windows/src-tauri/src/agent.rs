@@ -1133,11 +1133,10 @@ mod tests {
         (turns, stream.finish())
     }
 
-    // The shape of a Claude Code `result` line (documented stream-json
-    // format, trimmed to what Coucou reads). NOT yet checked against a line
-    // captured from a live `claude -p ... --output-format stream-json
-    // --verbose`: see docs/plan-v4-notas.md, Fase 4.
-    const RESULT_LINE: &str = r#"{"type":"result","subtype":"success","is_error":false,"duration_ms":2412,"result":"Hola.","session_id":"s","total_cost_usd":0.0432,"usage":{"input_tokens":6,"cache_creation_input_tokens":1200,"cache_read_input_tokens":300,"output_tokens":42}}"#;
+    // A `result` line captured from a live `claude -p "di hola" --output-format
+    // stream-json --verbose` (2026-10-15). Trimmed only of `modelUsage`,
+    // `subagent_stats` and `usage.iterations`; `usage` is verbatim.
+    const RESULT_LINE: &str = r#"{"duration_api_ms":1543,"stop_reason":"end_turn","session_id":"d7ed8f3b-4de4-4f13-83a2-a532a15c3216","total_cost_usd":0.1789226,"usage":{"input_tokens":2,"cache_creation_input_tokens":21873,"cache_read_input_tokens":17353,"output_tokens":23,"output_tokens_details":{"thinking_tokens":0},"server_tool_use":{"web_search_requests":0,"web_fetch_requests":0},"service_tier":"standard","cache_creation":{"ephemeral_1h_input_tokens":21873,"ephemeral_5m_input_tokens":0},"inference_geo":"global","speed":"standard","fallback_credit":null},"permission_denials":[],"terminal_reason":"completed","is_error":false,"num_turns":1,"subtype":"success","api_error_status":null,"result":"¡Hola! ¿En qué te ayudo hoy?","type":"result","duration_ms":1912}"#;
 
     #[test]
     fn the_result_line_reports_tokens_and_cost() {
@@ -1145,9 +1144,9 @@ mod tests {
         stream.line(RESULT_LINE);
         assert_eq!(
             stream.usage(),
-            &Usage { input_tokens: Some(1506), output_tokens: Some(42), cost_usd: Some(0.0432) }
+            &Usage { input_tokens: Some(39228), output_tokens: Some(23), cost_usd: Some(0.1789226) }
         );
-        assert_eq!(stream.finish(), "Hola.");
+        assert_eq!(stream.finish(), "¡Hola! ¿En qué te ayudo hoy?");
     }
 
     #[test]
