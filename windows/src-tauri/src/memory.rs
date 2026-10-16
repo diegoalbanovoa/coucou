@@ -106,7 +106,13 @@ fn write_notes(dir: &Path, notes: &[Note]) -> std::io::Result<()> {
 /// empty after trimming. At the cap it rewrites the file without the oldest
 /// notes; below it, a single append avoids rewriting the whole file.
 fn add_note_in(dir: &Path, text: &str, at: u64, id: String) -> std::io::Result<Note> {
-    let note = Note { id, at, text: cap_text(text) };
+    // Redact before capping and before touching disk: notes are also sent to
+    // the provider later (`memory_context`), so a pinned key must not survive.
+    let redacted = crate::redact::redact(text);
+    if redacted.count > 0 {
+        crate::log::line(format!("memory: {} secretos ocultados al guardar una nota", redacted.count));
+    }
+    let note = Note { id, at, text: cap_text(&redacted.text) };
     if note.text.is_empty() {
         return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "empty note"));
     }
@@ -286,8 +292,14 @@ pub fn cached_summary(messages: &[(String, String)]) -> Option<String> {
 /// Caches `text` as the summary of exactly `messages` (`(role, content)`
 /// pairs). Best effort: a write failure only means it is regenerated later.
 pub fn store_summary(messages: &[(String, String)], text: &str) {
-    let s = Summary { covered: messages.len(), covered_hash: hash_covered(messages), text: text.to_string() };
-    let _ = write_summary_in(&dir(), &s);
+    let _ = store_summary_in(&dir(), messages, text);
+}
+
+/// [`store_summary`] against `dir`. The text is redacted first: the summary
+/// is re-sent to the provider on later turns and must not carry a key.
+fn store_summary_in(dir: &Path, messages: &[(String, String)], text: &str) -> std::io::Result<()> {
+    let s = Summary { covered: messages.len(), covered_hash: hash_covered(messages), text: crate::redact::redact(text).text };
+    write_summary_in(dir, &s)
 }
 
 /// "Nuevo chat" forgets the summary; the notes stay (they go from Settings).
@@ -308,6 +320,29 @@ mod tests {
 
     fn note(id: &str, text: &str) -> Note {
         Note { id: id.into(), at: 0, text: text.into() }
+    }
+
+    #[test]
+    fn a_note_with_a_key_is_redacted_before_it_reaches_disk() {
+        let d = scratch("redact-note");
+        let key = format!("sk-{}", "a1B2c3D4e5F6g7H8i9J0k1L2");
+        let n = add_note_in(&d, &format!("OPENAI_API_KEY={key} para el proyecto"), 1, "a".into()).unwrap();
+        assert!(n.text.contains("[REDACTED:"));
+        let on_disk = std::fs::read_to_string(notes_file(&d)).unwrap();
+        assert!(on_disk.contains("[REDACTED:"));
+        assert!(!on_disk.contains(&key));
+    }
+
+    #[test]
+    fn a_summary_with_a_key_is_redacted_before_it_reaches_disk() {
+        let d = scratch("redact-summary");
+        let key = format!("sk-{}", "a1B2c3D4e5F6g7H8i9J0k1L2");
+        let msgs = vec![("user".to_string(), "hola".to_string())];
+        store_summary_in(&d, &msgs, &format!("El usuario usa OPENAI_API_KEY={key}")).unwrap();
+        let on_disk = std::fs::read_to_string(summary_file(&d)).unwrap();
+        assert!(on_disk.contains("[REDACTED:"));
+        assert!(!on_disk.contains(&key));
+        assert!(cached_summary_in(&d, &msgs).unwrap().contains("[REDACTED:"));
     }
 
     #[test]

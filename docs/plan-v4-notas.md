@@ -257,6 +257,7 @@ Plan: `handoff/plan-fase9.md` (fuera del seguimiento). Cuatro protecciones siemp
 - El escáner de inyección es un detector, no una defensa; se esquiva parafraseando, con otros idiomas u homoglifos. La defensa real son la lista cerrada de herramientas y la tarjeta.
 - Rutas equivalentes (`C:\x\a.txt` / `C:/x/a.txt`) dan hashes distintos en la guardia; como mucho retrasa el corte hasta `max-rounds`.
 - Fuera de alcance: el cuerpo de la skill que una rutina inyecta directo en el prompt de sistema (`routines.rs`) y el chat de proveedor (`providers.rs`) no se ocultan ni se escanean.
+- La memoria (`memory.rs`) ya redacta notas y resumen automático al guardar (integración 1). Las notas escritas antes de ese cambio no se reescriben.
 
 ### Pruebas manuales pendientes (Diego)
 
